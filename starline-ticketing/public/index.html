@@ -1,0 +1,1016 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>StarLine Field Ops</title>
+<style>
+  :root{
+    --primary:#0b5ed7; --primary-dark:#0a4fb5;
+    --bg:#f1f5f9; --card:#ffffff; --text:#0f172a; --muted:#64748b;
+    --ok:#16a34a; --danger:#dc2626; --border:#e2e8f0; --radius:14px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  body{background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:60px}
+  header{background:linear-gradient(135deg,var(--primary),var(--primary-dark));color:#fff;padding:12px 16px;position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:10px;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+  header .logo{width:34px;height:34px;background:#fff;border-radius:9px;display:flex;align-items:center;justify-content:center;font-weight:800;color:var(--primary);font-size:14px;flex-shrink:0}
+  header h1{font-size:15px;font-weight:700;line-height:1.2}
+  header .sub{font-size:11px;opacity:.85;font-weight:400}
+  header .spacer{flex:1}
+  header .hbtn{background:rgba(255,255,255,.18);border:none;color:#fff;padding:7px 12px;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;flex-shrink:0}
+  .tabs{display:flex;gap:6px;background:#fff;border-bottom:1px solid var(--border);padding:8px 14px;position:sticky;top:58px;z-index:45;overflow-x:auto}
+  .tab{border:none;background:#f1f5f9;color:var(--muted);padding:8px 14px;border-radius:99px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap}
+  .tab.active{background:var(--primary);color:#fff}
+  .wrap{max-width:760px;margin:0 auto;padding:14px}
+  .hidden{display:none!important}
+  .offline-banner{background:#fef3c7;color:#92400e;font-size:12px;font-weight:700;text-align:center;padding:7px;position:sticky;top:58px;z-index:46}
+
+  .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:12px;box-shadow:0 1px 3px rgba(15,23,42,.05)}
+  .ticket-card{cursor:pointer;transition:transform .08s}
+  .ticket-card:active{transform:scale(.985)}
+  .ticket-top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap}
+  .tnum{font-weight:800;font-size:15px;color:var(--primary)}
+  .badge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:99px;white-space:nowrap}
+  .b-install{background:#dbeafe;color:#1d4ed8}
+  .b-repair{background:#fef3c7;color:#b45309}
+  .b-open{background:#e0e7ff;color:#4338ca}
+  .b-progress{background:#fef9c3;color:#a16207}
+  .b-done{background:#dcfce7;color:#15803d}
+  .tsub{font-weight:600;font-size:14px;margin-bottom:2px}
+  .tmeta{font-size:12px;color:var(--muted)}
+  .progressbar{height:6px;background:var(--border);border-radius:99px;margin-top:10px;overflow:hidden}
+  .progressbar>div{height:100%;background:var(--ok);border-radius:99px;transition:width .3s}
+
+  label{display:block;font-size:12px;font-weight:700;color:var(--muted);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.03em}
+  input,select,textarea{width:100%;padding:11px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:15px;background:#fff;color:var(--text)}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)}
+  textarea{min-height:80px;resize:vertical}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:13px;border:none;border-radius:11px;font-size:15px;font-weight:700;cursor:pointer;margin-top:12px}
+  .btn-primary{background:var(--primary);color:#fff}
+  .btn-ok{background:var(--ok);color:#fff}
+  .btn-ghost{background:#fff;color:var(--primary);border:1.5px solid var(--primary)}
+  .btn-warn{background:var(--danger);color:#fff}
+  .btn-sm{width:auto;padding:8px 14px;font-size:13px;margin-top:8px}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+
+  /* login */
+  .login-wrap{max-width:380px;margin:8vh auto 0;padding:20px}
+  .login-logo{width:64px;height:64px;background:var(--primary);color:#fff;border-radius:18px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:24px;margin:0 auto 14px}
+  .login-title{text-align:center;font-size:20px;font-weight:800;margin-bottom:2px}
+  .login-sub{text-align:center;font-size:13px;color:var(--muted);margin-bottom:14px}
+  .err{background:#fee2e2;color:#991b1b;font-size:13px;font-weight:600;padding:10px;border-radius:10px;margin-top:12px}
+
+  /* dashboard */
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
+  .stat{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:12px;text-align:center}
+  .stat .n{font-size:26px;font-weight:800}
+  .stat .l{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+  .stat.s-open .n{color:#4338ca}.stat.s-prog .n{color:#a16207}.stat.s-done .n{color:#15803d}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+  .split .stat{text-align:left;display:flex;justify-content:space-between;align-items:center}
+
+  /* wizard */
+  .steps-nav{display:flex;gap:6px;overflow-x:auto;padding:4px 0 10px;-webkit-overflow-scrolling:touch}
+  .step-dot{flex-shrink:0;width:32px;height:32px;border-radius:50%;border:2px solid var(--border);background:#fff;color:var(--muted);font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .step-dot.active{border-color:var(--primary);background:var(--primary);color:#fff}
+  .step-dot.done{border-color:var(--ok);background:var(--ok);color:#fff}
+  .step-title{font-size:17px;font-weight:800;margin-bottom:2px}
+  .step-desc{font-size:13px;color:var(--muted);margin-bottom:10px;line-height:1.45}
+  .req{color:var(--danger);font-weight:700}
+  .photo-box{border:2px dashed var(--border);border-radius:12px;padding:18px;text-align:center;color:var(--muted);font-size:13px;cursor:pointer;background:#fafcff}
+  .photo-box.has{padding:0;border-style:solid;overflow:hidden}
+  .photo-box img{width:100%;display:block;border-radius:10px}
+  .photo-stamp{font-size:11px;color:var(--muted);padding:6px 8px;text-align:left}
+  .wizard-btns{display:flex;gap:10px}
+  .gps-out{font-size:13px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:10px;margin-top:8px;color:#166534;word-break:break-all}
+  .filter-row{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+  .filter-row select{flex:1;min-width:120px}
+  .empty{text-align:center;color:var(--muted);padding:40px 20px;font-size:14px}
+  .empty .big{font-size:40px;margin-bottom:10px}
+  .summary-table{width:100%;border-collapse:collapse;font-size:13px}
+  .summary-table td{padding:7px 8px;border-bottom:1px solid var(--border);vertical-align:top}
+  .summary-table td:first-child{font-weight:700;color:var(--muted);width:42%}
+  .sig-canvas{border:1.5px solid var(--border);border-radius:10px;width:100%;height:140px;background:#fff;touch-action:none}
+  .photos-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+  .photos-grid figure img{width:100%;border-radius:8px;display:block}
+  .photos-grid figcaption{font-size:11px;color:var(--muted);margin-top:3px}
+  .user-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);gap:8px}
+  .user-row .un{font-weight:700;font-size:14px}
+  .user-row .um{font-size:12px;color:var(--muted)}
+
+  /* camera overlay */
+  #camOverlay{position:fixed;inset:0;background:#000;z-index:200;display:flex;flex-direction:column}
+  #camVideo{flex:1;width:100%;object-fit:cover;background:#000}
+  #camBar{display:flex;gap:10px;padding:16px;background:#000}
+  #camBar .btn{margin-top:0}
+  .cam-shutter{width:70px;height:70px;border-radius:50%;background:#fff;border:5px solid #94a3b8;cursor:pointer;margin:0 auto;flex-shrink:0}
+  .cam-cancel{background:rgba(255,255,255,.15);color:#fff;border:none;border-radius:11px;padding:0 18px;font-weight:700;cursor:pointer}
+
+  @media print{
+    header,.tabs,.no-print,.steps-nav,.wizard-btns,.filter-row,.stats,.split{display:none!important}
+    body{background:#fff;padding:0}
+    .card{box-shadow:none;border:1px solid #ccc}
+  }
+</style>
+</head>
+<body>
+
+<header id="hdr" class="hidden">
+  <button class="hbtn" id="backBtn" onclick="goBack()" style="display:none">‹ Back</button>
+  <div class="logo">SL</div>
+  <div>
+    <h1 id="hdrTitle">StarLine Field Ops</h1>
+    <div class="sub" id="hdrSub"></div>
+  </div>
+  <div class="spacer"></div>
+  <button class="hbtn" onclick="doLogout()">Logout</button>
+</header>
+
+<div class="tabs hidden no-print" id="adminTabs">
+  <button class="tab active" id="tabDash" onclick="adminGo('dash')">📊 Dashboard</button>
+  <button class="tab" id="tabNew" onclick="adminGo('new')">＋ New Ticket</button>
+  <button class="tab" id="tabTechs" onclick="adminGo('techs')">👷 Technicians</button>
+</div>
+
+<div class="offline-banner hidden" id="offlineBanner">⚠ Offline — changes are saved on this phone and will sync when back online</div>
+
+<!-- ============ LOGIN ============ -->
+<div class="login-wrap" id="viewLogin">
+  <div class="login-logo">SL</div>
+  <div class="login-title">StarLine Field Ops</div>
+  <div class="login-sub">FTTH Installation &amp; Repair Ticketing</div>
+  <div class="card">
+    <label>Username</label>
+    <input id="lUser" autocomplete="username" autocapitalize="none">
+    <label>Password</label>
+    <input id="lPass" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
+    <button class="btn btn-primary" id="loginBtn" onclick="doLogin()">Log In</button>
+    <div class="err hidden" id="loginErr"></div>
+  </div>
+</div>
+
+<!-- ============ TECH: TICKET LIST ============ -->
+<div class="wrap hidden" id="viewTechList">
+  <div class="filter-row no-print">
+    <select id="fStatus" onchange="renderTechList()">
+      <option value="active">Active jobs</option>
+      <option value="">All</option>
+      <option value="open">Open</option>
+      <option value="in_progress">In Progress</option>
+      <option value="completed">Completed</option>
+    </select>
+    <button class="btn btn-ghost btn-sm" style="margin-top:0" onclick="refreshTickets(true)">↻ Refresh</button>
+  </div>
+  <div id="techList"></div>
+</div>
+
+<!-- ============ TECH: TICKET WIZARD ============ -->
+<div class="wrap hidden" id="viewTicket">
+  <div class="card" id="ticketHead"></div>
+  <div class="no-print" id="wizardArea"></div>
+  <div id="summaryArea"></div>
+</div>
+
+<!-- ============ ADMIN: DASHBOARD ============ -->
+<div class="wrap hidden" id="viewDash">
+  <div class="stats" id="statCards"></div>
+  <div class="split" id="statSplit"></div>
+  <div class="filter-row no-print">
+    <select id="dType" onchange="renderDash()">
+      <option value="">All types</option><option value="installation">Installation</option><option value="repair">Repair</option>
+    </select>
+    <select id="dStatus" onchange="renderDash()">
+      <option value="">All statuses</option><option value="open">Open</option><option value="in_progress">In Progress</option><option value="completed">Completed</option>
+    </select>
+    <select id="dTech" onchange="renderDash()"><option value="">All technicians</option></select>
+    <button class="btn btn-ghost btn-sm" style="margin-top:0" onclick="refreshTickets(true)">↻ Refresh</button>
+  </div>
+  <div id="dashList"></div>
+</div>
+
+<!-- ============ ADMIN: NEW TICKET ============ -->
+<div class="wrap hidden" id="viewNew">
+  <div class="card">
+    <div class="step-title">Create Ticket</div>
+    <div class="step-desc">The assigned technician will see this job on their phone the next time their list refreshes.</div>
+    <label>Ticket Number</label>
+    <input id="nTicket" placeholder="Leave blank to auto-generate">
+    <label>Job Type <span class="req">*</span></label>
+    <select id="nType">
+      <option value="installation">Installation (new FTTH subscriber)</option>
+      <option value="repair">Repair / Maintenance</option>
+    </select>
+    <label>Subject <span class="req">*</span></label>
+    <input id="nSubject" placeholder="e.g. New fiber installation — 100 Mbps plan">
+    <label>Assign to Technician <span class="req">*</span></label>
+    <select id="nAssign"></select>
+    <label>Customer Name <span class="req">*</span></label>
+    <input id="nCustomer">
+    <label>Contact Number</label>
+    <input id="nPhone">
+    <label>Address</label>
+    <input id="nAddress" placeholder="Installation / service address">
+    <label>Message / Job Notes</label>
+    <textarea id="nMessage" placeholder="Instructions for the technician"></textarea>
+    <button class="btn btn-primary" onclick="createTicket()">Create &amp; Assign Ticket</button>
+  </div>
+</div>
+
+<!-- ============ ADMIN: TICKET REPORT ============ -->
+<div class="wrap hidden" id="viewReport">
+  <div class="card" id="repHead"></div>
+  <div class="card no-print" id="repActions"></div>
+  <div id="repSummary"></div>
+</div>
+
+<!-- ============ ADMIN: TECHNICIANS ============ -->
+<div class="wrap hidden" id="viewTechs">
+  <div class="card">
+    <div class="step-title">Add Technician</div>
+    <label>Full Name <span class="req">*</span></label>
+    <input id="uName">
+    <label>Username <span class="req">*</span></label>
+    <input id="uUser" autocapitalize="none">
+    <label>Password <span class="req">*</span> (min 6 characters)</label>
+    <input id="uPass" type="text">
+    <button class="btn btn-primary" onclick="addUser()">Add Technician</button>
+  </div>
+  <div class="card">
+    <div class="step-title">Accounts</div>
+    <div id="userList"></div>
+  </div>
+  <div class="card">
+    <div class="step-title">Change My Password</div>
+    <label>Current Password</label>
+    <input id="pOld" type="password">
+    <label>New Password (min 6 characters)</label>
+    <input id="pNew" type="password">
+    <button class="btn btn-ghost" onclick="changePassword()">Change Password</button>
+  </div>
+</div>
+
+<!-- ============ CAMERA OVERLAY ============ -->
+<div id="camOverlay" class="hidden">
+  <video id="camVideo" autoplay playsinline muted></video>
+  <div id="camBar">
+    <button class="cam-cancel" onclick="closeCamera()">Cancel</button>
+    <button class="cam-shutter" onclick="capturePhoto()" aria-label="Take photo"></button>
+    <div style="width:76px"></div>
+  </div>
+</div>
+
+<script>
+/* =================== STATE / API =================== */
+let TOKEN = localStorage.getItem('sl_token') || null;
+let USER = null;
+let tickets = [];
+let users = [];
+let currentId = null;
+let currentView = 'viewLogin';
+let adminBack = 'dash';
+
+async function api(path, method='GET', body){
+  const r = await fetch(path, {
+    method,
+    headers: Object.assign({'Content-Type':'application/json'}, TOKEN?{Authorization:'Bearer '+TOKEN}:{}),
+    body: body!==undefined ? JSON.stringify(body) : undefined
+  });
+  let j = {};
+  try { j = await r.json(); } catch(e){}
+  if(r.status===401 && path!=='/api/login'){ doLogout(true); throw new Error('Session expired — please log in again'); }
+  if(!r.ok) throw new Error(j.error || 'Request failed');
+  return j;
+}
+function esc(s){ return String(s??'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmt(ts){ return ts ? new Date(ts).toLocaleString() : ''; }
+function byId(id){ return tickets.find(t=>t.id===id); }
+function cacheTickets(){ try{ localStorage.setItem('sl_cache', JSON.stringify(tickets)); }catch(e){} }
+
+/* =================== OFFLINE SYNC =================== */
+function setOffline(off){ document.getElementById('offlineBanner').classList.toggle('hidden', !off); }
+async function flushDirty(){
+  const dirty = tickets.filter(t=>t._dirty);
+  for(const t of dirty){
+    try{
+      await api('/api/tickets/'+t.id, 'PUT', {data:t.data, step:t.step, status:t.status, completed:t.completed});
+      delete t._dirty;
+    }catch(e){ return; } // still offline
+  }
+  if(!tickets.some(t=>t._dirty)) setOffline(false);
+  cacheTickets();
+}
+async function persist(t){
+  try{
+    await api('/api/tickets/'+t.id, 'PUT', {data:t.data, step:t.step, status:t.status, completed:t.completed});
+    delete t._dirty; setOffline(false);
+  }catch(e){
+    if(e.message.includes('Session expired')) return;
+    t._dirty = true; setOffline(true);
+  }
+  cacheTickets();
+}
+window.addEventListener('online', flushDirty);
+setInterval(()=>{ if(tickets.some(t=>t._dirty)) flushDirty(); }, 20000);
+
+/* =================== WORKFLOWS =================== */
+const WORKFLOWS = {
+  installation: [
+    { key:'arrival', title:'1. Arrival at Subscriber\'s Home',
+      desc:'Take a photo upon arrival at the subscriber\'s home. Time and GPS location are captured automatically as proof of arrival.',
+      fields:[
+        {k:'arrival_photo', type:'photo', label:'Arrival Photo', req:true, autogps:true},
+        {k:'arrival_notes', type:'textarea', label:'Arrival Notes (optional)'}
+      ]},
+    { key:'house', title:'2. Photo of the House',
+      desc:'Take a clear photo of the front of the house / premises showing the structure where the fiber drop will terminate.',
+      fields:[
+        {k:'house_photo', type:'photo', label:'House Photo', req:true}
+      ]},
+    { key:'reading', title:'3. Check Optical Reading',
+      desc:'Measure the optical power level with your power meter at the customer end and record the reading. Acceptable range is typically -8 to -27 dBm.',
+      fields:[
+        {k:'reading_value', type:'number', label:'Optical Reading (dBm)', req:true, placeholder:'e.g. -21.5', step:'0.1'},
+        {k:'reading_photo', type:'photo', label:'Photo of Power Meter Reading', req:true}
+      ]},
+    { key:'modem', title:'4. Modem / ONU Setup',
+      desc:'Install the modem/ONU, then take a photo of the installed unit and record its details.',
+      fields:[
+        {k:'modem_photo', type:'photo', label:'Photo of Installed Modem/ONU', req:true},
+        {k:'modem_serial', type:'text', label:'Modem Serial Number (SN)', req:true, placeholder:'e.g. HWTC12345678'},
+        {k:'modem_model', type:'text', label:'Modem Model', placeholder:'e.g. Huawei EG8145V5'},
+        {k:'modem_mac', type:'text', label:'MAC Address (optional)', placeholder:'e.g. AC:12:34:56:78:9A'}
+      ]},
+    { key:'nap', title:'5. NAP &amp; Port Details',
+      desc:'Record the NAP box the subscriber is connected to and the exact port used. Take a photo of the NAP box connection.',
+      fields:[
+        {k:'nap_id', type:'text', label:'NAP Box ID / Name', req:true, placeholder:'e.g. NAP-BRGY1-014'},
+        {k:'nap_port', type:'text', label:'Port Number', req:true, placeholder:'e.g. Port 5 of 8'},
+        {k:'nap_photo', type:'photo', label:'Photo of NAP Connection', req:true},
+        {k:'nap_reading', type:'number', label:'Reading at NAP (dBm, optional)', step:'0.1'}
+      ]},
+    { key:'gps', title:'6. Location (Longitude &amp; Latitude)',
+      desc:'Capture the GPS coordinates of the subscriber\'s home. Use the button to auto-fill from your phone\'s GPS, or type manually.',
+      fields:[
+        {k:'location', type:'gps', label:'GPS Coordinates', req:true}
+      ]},
+    { key:'materials', title:'7. Materials Used',
+      desc:'Record the drop cable length and number of connectors consumed for inventory reconciliation.',
+      fields:[
+        {k:'cable_length', type:'number', label:'Drop Cable Used (meters)', req:true, placeholder:'e.g. 150', step:'1'},
+        {k:'connectors', type:'number', label:'Connectors Used (pcs)', req:true, placeholder:'e.g. 2', step:'1'},
+        {k:'other_materials', type:'textarea', label:'Other Materials (clamps, hooks, patch cord…)'}
+      ]},
+    { key:'customer', title:'8. Customer Details',
+      desc:'Confirm and record the subscriber\'s account information.',
+      fields:[
+        {k:'cust_name', type:'text', label:'Customer Full Name', req:true},
+        {k:'cust_account', type:'text', label:'Account Number'},
+        {k:'cust_phone', type:'text', label:'Contact Number', req:true},
+        {k:'cust_email', type:'text', label:'Email Address'},
+        {k:'cust_plan', type:'text', label:'Subscribed Plan', req:true, placeholder:'e.g. 100 Mbps — ₱1,299/mo'},
+        {k:'cust_address', type:'textarea', label:'Complete Address', req:true}
+      ]},
+    { key:'complete', title:'9. Testing &amp; Completion',
+      desc:'Run a speed test with the customer, take a photo of the result, get the customer\'s signature, and close the job.',
+      fields:[
+        {k:'speedtest_photo', type:'photo', label:'Photo of Speed Test Result', req:true},
+        {k:'final_notes', type:'textarea', label:'Completion Notes'},
+        {k:'signature', type:'signature', label:'Customer Signature', req:true}
+      ]}
+  ],
+  repair: [
+    { key:'arrival', title:'1. Arrival at Site',
+      desc:'Take a photo upon arrival at the subscriber\'s home as proof of visit. Time and GPS are captured automatically.',
+      fields:[
+        {k:'arrival_photo', type:'photo', label:'Arrival Photo', req:true, autogps:true}
+      ]},
+    { key:'diagnosis', title:'2. Diagnosis',
+      desc:'Verify the reported issue, take the optical reading before repair, and photograph the fault if visible.',
+      fields:[
+        {k:'issue_found', type:'textarea', label:'Issue Found', req:true, placeholder:'e.g. Fiber cut near pole 3, LOS red on ONU'},
+        {k:'reading_before', type:'number', label:'Reading Before Repair (dBm)', step:'0.1', placeholder:'Leave blank if no signal'},
+        {k:'fault_photo', type:'photo', label:'Photo of Fault / Reading', req:true}
+      ]},
+    { key:'work', title:'3. Repair Work &amp; Materials',
+      desc:'Describe the corrective action taken and record all materials consumed.',
+      fields:[
+        {k:'work_done', type:'textarea', label:'Work Done', req:true},
+        {k:'cable_length', type:'number', label:'Cable Used (meters)', step:'1', placeholder:'0 if none'},
+        {k:'connectors', type:'number', label:'Connectors Used (pcs)', step:'1', placeholder:'0 if none'},
+        {k:'nap_id', type:'text', label:'NAP Box ID (if involved)'},
+        {k:'nap_port', type:'text', label:'Port (if changed)'}
+      ]},
+    { key:'verify', title:'4. Verification',
+      desc:'Take the reading after repair and photograph the restored service (power meter or speed test).',
+      fields:[
+        {k:'reading_after', type:'number', label:'Reading After Repair (dBm)', req:true, step:'0.1'},
+        {k:'verify_photo', type:'photo', label:'Photo of Reading / Speed Test', req:true},
+        {k:'location', type:'gps', label:'GPS of Repair Point (optional)'}
+      ]},
+    { key:'complete', title:'5. Completion',
+      desc:'Close the job with final notes and the customer\'s signature confirming service is restored.',
+      fields:[
+        {k:'final_notes', type:'textarea', label:'Completion Notes'},
+        {k:'signature', type:'signature', label:'Customer Signature', req:true}
+      ]}
+  ]
+};
+
+/* =================== AUTH =================== */
+async function doLogin(){
+  const btn = document.getElementById('loginBtn');
+  const err = document.getElementById('loginErr');
+  err.classList.add('hidden'); btn.disabled = true; btn.textContent = 'Logging in…';
+  try{
+    const r = await api('/api/login', 'POST', {
+      username: document.getElementById('lUser').value.trim(),
+      password: document.getElementById('lPass').value
+    });
+    TOKEN = r.token; USER = r.user;
+    localStorage.setItem('sl_token', TOKEN);
+    document.getElementById('lPass').value = '';
+    enterApp();
+  }catch(e){
+    err.textContent = e.message; err.classList.remove('hidden');
+  }
+  btn.disabled = false; btn.textContent = 'Log In';
+}
+function doLogout(silent){
+  if(TOKEN && !silent){ api('/api/logout','POST').catch(()=>{}); }
+  TOKEN = null; USER = null; tickets = []; currentId = null;
+  localStorage.removeItem('sl_token');
+  document.getElementById('hdr').classList.add('hidden');
+  document.getElementById('adminTabs').classList.add('hidden');
+  show('viewLogin');
+}
+async function enterApp(){
+  document.getElementById('hdr').classList.remove('hidden');
+  document.getElementById('hdrTitle').textContent = 'StarLine Field Ops';
+  document.getElementById('hdrSub').textContent = (USER.role==='admin'?'Admin':'Technician')+' — '+USER.name;
+  await refreshTickets();
+  if(USER.role==='admin'){
+    document.getElementById('adminTabs').classList.remove('hidden');
+    await loadUsers();
+    adminGo('dash');
+  }else{
+    show('viewTechList'); renderTechList();
+  }
+}
+
+/* =================== DATA LOADING =================== */
+async function refreshTickets(manual){
+  try{
+    const r = await api('/api/tickets');
+    // keep local dirty edits over server copies
+    const dirtyMap = {};
+    tickets.filter(t=>t._dirty).forEach(t=>dirtyMap[t.id]=t);
+    tickets = r.tickets.map(t => dirtyMap[t.id] || t);
+    setOffline(false); cacheTickets();
+  }catch(e){
+    if(e.message.includes('Session expired')) return;
+    try{ tickets = JSON.parse(localStorage.getItem('sl_cache'))||[]; }catch(_){ tickets=[]; }
+    setOffline(true);
+    if(manual) alert('Cannot reach the server. Showing jobs saved on this phone.');
+  }
+  if(currentView==='viewTechList') renderTechList();
+  if(currentView==='viewDash') renderDash();
+}
+async function loadUsers(){
+  try{ users = (await api('/api/users')).users; }catch(e){ users = []; }
+  const sel = document.getElementById('nAssign');
+  const techs = users.filter(u=>u.role==='tech');
+  sel.innerHTML = techs.length
+    ? techs.map(u=>`<option value="${u.id}">${esc(u.name)} (@${esc(u.username)})</option>`).join('')
+    : '<option value="">— no technicians yet, add one first —</option>';
+  const dsel = document.getElementById('dTech');
+  dsel.innerHTML = '<option value="">All technicians</option>'+techs.map(u=>`<option value="${u.id}">${esc(u.name)}</option>`).join('');
+}
+
+/* =================== NAVIGATION =================== */
+const ALL_VIEWS = ['viewLogin','viewTechList','viewTicket','viewDash','viewNew','viewReport','viewTechs'];
+function show(view){
+  ALL_VIEWS.forEach(v=>document.getElementById(v).classList.add('hidden'));
+  document.getElementById(view).classList.remove('hidden');
+  currentView = view;
+  document.getElementById('backBtn').style.display = (view==='viewTicket'||view==='viewReport')?'block':'none';
+  window.scrollTo(0,0);
+}
+function goBack(){
+  if(USER && USER.role==='admin'){ adminGo(adminBack); }
+  else { currentId=null; show('viewTechList'); renderTechList(); }
+}
+function adminGo(tab){
+  ['tabDash','tabNew','tabTechs'].forEach(t=>document.getElementById(t).classList.remove('active'));
+  if(tab==='dash'){ document.getElementById('tabDash').classList.add('active'); show('viewDash'); renderDash(); }
+  if(tab==='new'){ document.getElementById('tabNew').classList.add('active'); show('viewNew'); }
+  if(tab==='techs'){ document.getElementById('tabTechs').classList.add('active'); show('viewTechs'); renderUsers(); }
+  if(tab!=='report') adminBack = tab;
+}
+
+/* =================== BADGES / PROGRESS =================== */
+function statusBadge(s){
+  if(s==='completed') return '<span class="badge b-done">Completed</span>';
+  if(s==='in_progress') return '<span class="badge b-progress">In Progress</span>';
+  return '<span class="badge b-open">Open</span>';
+}
+function typeBadge(t){ return t==='repair' ? '<span class="badge b-repair">Repair</span>' : '<span class="badge b-install">Installation</span>'; }
+function stepComplete(t, step){ return step.fields.every(f => !f.req || hasValue(t, f)); }
+function hasValue(t, f){
+  const v = t.data[f.k];
+  if(v==null || v==='') return false;
+  if(f.type==='photo') return !!(v && v.img);
+  if(f.type==='gps') return !!(v && v.lat!=null && v.lng!=null);
+  return true;
+}
+function progress(t){
+  const steps = WORKFLOWS[t.type];
+  return Math.round(steps.filter(s=>stepComplete(t,s)).length/steps.length*100);
+}
+
+/* =================== TECH: LIST =================== */
+function renderTechList(){
+  const f = document.getElementById('fStatus').value;
+  let list = tickets.slice().sort((a,b)=>b.created-a.created);
+  if(f==='active') list = list.filter(t=>t.status!=='completed');
+  else if(f) list = list.filter(t=>t.status===f);
+  const el = document.getElementById('techList');
+  if(!list.length){
+    el.innerHTML = '<div class="empty"><div class="big">🎉</div>No jobs here. New tickets assigned to you will appear automatically.</div>';
+    return;
+  }
+  el.innerHTML = list.map(t=>`
+    <div class="card ticket-card" onclick="openTicket('${t.id}')">
+      <div class="ticket-top">
+        <span class="tnum">${esc(t.number)}</span>
+        <span>${typeBadge(t.type)} ${statusBadge(t.status)}</span>
+      </div>
+      <div class="tsub">${esc(t.subject)}</div>
+      <div class="tmeta">👤 ${esc(t.customer||'—')} ${t.phone?'· 📞 '+esc(t.phone):''}</div>
+      <div class="tmeta">📍 ${esc(t.address||'—')}</div>
+      ${t.message?`<div class="tmeta">💬 ${esc(t.message)}</div>`:''}
+      <div class="progressbar"><div style="width:${progress(t)}%"></div></div>
+    </div>`).join('');
+}
+
+/* =================== TECH: WIZARD =================== */
+function openTicket(id){
+  currentId = id;
+  renderTicket();
+  show('viewTicket');
+}
+function renderTicket(){
+  const t = byId(currentId);
+  if(!t){ goBack(); return; }
+  const steps = WORKFLOWS[t.type];
+  const pct = progress(t);
+  document.getElementById('ticketHead').innerHTML = `
+    <div class="ticket-top">
+      <span class="tnum">${esc(t.number)}</span>
+      <span>${typeBadge(t.type)} ${statusBadge(t.status)}</span>
+    </div>
+    <div class="tsub">${esc(t.subject)}</div>
+    <div class="tmeta">👤 ${esc(t.customer)} ${t.phone?'· 📞 '+esc(t.phone):''}</div>
+    <div class="tmeta">📍 ${esc(t.address||'—')}</div>
+    ${t.message?`<div class="tmeta" style="margin-top:6px">💬 ${esc(t.message)}</div>`:''}
+    <div class="progressbar"><div style="width:${pct}%"></div></div>
+    <div class="tmeta" style="margin-top:4px">${pct}% complete${t.completed?' · Finished '+fmt(t.completed):''}</div>`;
+
+  if(t.status==='completed'){
+    document.getElementById('wizardArea').innerHTML = `
+      <div class="wizard-btns"><button class="btn btn-ghost" onclick="window.print()">🖨 Print Report</button></div>`;
+    renderSummary(t, 'summaryArea');
+    return;
+  }
+  if(t.step >= steps.length) t.step = steps.length-1;
+  const s = steps[t.step];
+  const nav = steps.map((st,i)=>{
+    const cls = i===t.step?'active':(stepComplete(t,st)?'done':'');
+    return `<div class="step-dot ${cls}" onclick="gotoStep(${i})">${stepComplete(t,st)&&i!==t.step?'✓':i+1}</div>`;
+  }).join('');
+  const isLast = t.step===steps.length-1;
+  const allDone = steps.every(st=>stepComplete(t,st));
+  document.getElementById('wizardArea').innerHTML = `
+    <div class="steps-nav">${nav}</div>
+    <div class="card">
+      <div class="step-title">${s.title}</div>
+      <div class="step-desc">${s.desc}</div>
+      ${s.fields.map(f=>renderField(t,f)).join('')}
+      <div class="wizard-btns">
+        ${t.step>0?'<button class="btn btn-ghost" onclick="gotoStep('+(t.step-1)+')">‹ Back</button>':''}
+        ${!isLast
+          ? `<button class="btn btn-primary" onclick="nextStep()">Next ›</button>`
+          : `<button class="btn btn-ok" ${allDone?'':'disabled'} onclick="finishTicket()">✔ Complete Job</button>`}
+      </div>
+      ${isLast&&!allDone?'<div class="tmeta" style="margin-top:8px;color:var(--danger)">Finish all required (*) items in every step to complete the job.</div>':''}
+    </div>`;
+  renderSummary(t, 'summaryArea');
+  s.fields.forEach(f=>{ if(f.type==='signature') initSignature(f.k, t.data[f.k]); });
+}
+function gotoStep(i){ const t=byId(currentId); collectStep(); t.step=i; persist(t); renderTicket(); }
+function nextStep(){
+  const t = byId(currentId);
+  collectStep();
+  const s = WORKFLOWS[t.type][t.step];
+  const missing = s.fields.filter(f=>f.req && !hasValue(t,f)).map(f=>f.label);
+  if(missing.length){ alert('Required before continuing:\n• '+missing.join('\n• ')); persist(t); renderTicket(); return; }
+  if(t.status==='open') t.status='in_progress';
+  t.step++; persist(t); renderTicket();
+}
+function collectStep(){
+  const t = byId(currentId);
+  if(!t || t.status==='completed') return;
+  const s = WORKFLOWS[t.type][t.step];
+  if(!s) return;
+  s.fields.forEach(f=>{
+    if(f.type==='photo'||f.type==='signature') return;
+    if(f.type==='gps'){
+      const lat=document.getElementById('f_'+f.k+'_lat'), lng=document.getElementById('f_'+f.k+'_lng');
+      if(lat&&lng&&lat.value&&lng.value) t.data[f.k]={lat:parseFloat(lat.value),lng:parseFloat(lng.value)};
+      return;
+    }
+    const el = document.getElementById('f_'+f.k);
+    if(el) t.data[f.k]=el.value.trim();
+  });
+}
+function finishTicket(){
+  const t = byId(currentId);
+  collectStep();
+  const steps = WORKFLOWS[t.type];
+  const missing = [];
+  steps.forEach(s=>s.fields.forEach(f=>{ if(f.req&&!hasValue(t,f)) missing.push(s.title.replace(/&amp;/g,'&')+': '+f.label); }));
+  if(missing.length){ alert('Still missing:\n• '+missing.join('\n• ')); renderTicket(); return; }
+  if(!confirm('Mark this job as COMPLETED? The report will be sent to the office and locked.')) return;
+  t.status='completed'; t.completed=Date.now();
+  persist(t); renderTicket();
+}
+
+/* ---------- field renderers ---------- */
+function renderField(t,f){
+  const v = t.data[f.k];
+  const reqMark = f.req?' <span class="req">*</span>':'';
+  if(f.type==='photo'){
+    const inner = (v&&v.img)
+      ? `<img src="${v.img}"><div class="photo-stamp">📷 ${fmt(v.time)}${v.lat!=null?` · 📍 ${v.lat.toFixed(6)}, ${v.lng.toFixed(6)}`:''} — tap to retake</div>`
+      : `<div style="font-size:30px">📷</div>Tap to open camera`;
+    return `<label>${f.label}${reqMark}</label>
+      <div class="photo-box ${v&&v.img?'has':''}" onclick="openCamera('${f.k}',${!!f.autogps})">${inner}</div>`;
+  }
+  if(f.type==='gps'){
+    const lat=v&&v.lat!=null?v.lat:'', lng=v&&v.lng!=null?v.lng:'';
+    return `<label>${f.label}${reqMark}</label>
+      <div class="row2">
+        <input type="number" step="any" id="f_${f.k}_lat" placeholder="Latitude" value="${lat}">
+        <input type="number" step="any" id="f_${f.k}_lng" placeholder="Longitude" value="${lng}">
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="getGPS('${f.k}')">📍 Use My GPS Location</button>
+      <div class="gps-out hidden" id="f_${f.k}_out"></div>`;
+  }
+  if(f.type==='signature'){
+    return `<label>${f.label}${reqMark}</label>
+      <canvas class="sig-canvas" id="f_${f.k}"></canvas>
+      <button class="btn btn-ghost btn-sm" onclick="clearSignature('${f.k}')">Clear Signature</button>`;
+  }
+  if(f.type==='textarea'){
+    return `<label>${f.label}${reqMark}</label><textarea id="f_${f.k}" placeholder="${f.placeholder||''}">${esc(v||'')}</textarea>`;
+  }
+  const type = f.type==='number'?'number':'text';
+  return `<label>${f.label}${reqMark}</label>
+    <input type="${type}" ${f.step?'step="'+f.step+'"':''} id="f_${f.k}" placeholder="${f.placeholder||''}" value="${esc(v||'')}">`;
+}
+
+/* =================== CAMERA (opens directly) =================== */
+let camStream = null, camKey = null, camAutoGps = false;
+async function openCamera(key, autogps){
+  camKey = key; camAutoGps = autogps;
+  collectStep();
+  if(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.isSecureContext !== false){
+    try{
+      camStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal:'environment' }, width:{ideal:1920}, height:{ideal:1080} },
+        audio: false
+      });
+      const video = document.getElementById('camVideo');
+      video.srcObject = camStream;
+      document.getElementById('camOverlay').classList.remove('hidden');
+      return;
+    }catch(e){ /* fall through to native camera input */ }
+  }
+  fallbackCameraInput(key, autogps);
+}
+function closeCamera(){
+  if(camStream){ camStream.getTracks().forEach(tr=>tr.stop()); camStream=null; }
+  document.getElementById('camOverlay').classList.add('hidden');
+}
+function capturePhoto(){
+  const video = document.getElementById('camVideo');
+  if(!video.videoWidth){ return; }
+  const MAX = 1280;
+  let w = video.videoWidth, h = video.videoHeight;
+  if(Math.max(w,h)>MAX){ const r=MAX/Math.max(w,h); w=Math.round(w*r); h=Math.round(h*r); }
+  const c = document.createElement('canvas'); c.width=w; c.height=h;
+  c.getContext('2d').drawImage(video,0,0,w,h);
+  const img = c.toDataURL('image/jpeg',0.65);
+  closeCamera();
+  savePhoto(camKey, img, camAutoGps);
+}
+function fallbackCameraInput(key, autogps){
+  /* Native camera: the capture attribute makes phones open the camera app directly */
+  let inp = document.getElementById('camFallback');
+  if(inp) inp.remove();
+  inp = document.createElement('input');
+  inp.type='file'; inp.accept='image/*'; inp.id='camFallback';
+  inp.setAttribute('capture','environment');
+  inp.style.display='none';
+  inp.onchange = () => {
+    const file = inp.files && inp.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+      const im = new Image();
+      im.onload = () => {
+        const MAX=1280; let w=im.width,h=im.height;
+        if(Math.max(w,h)>MAX){ const r=MAX/Math.max(w,h); w=Math.round(w*r); h=Math.round(h*r); }
+        const c=document.createElement('canvas'); c.width=w; c.height=h;
+        c.getContext('2d').drawImage(im,0,0,w,h);
+        savePhoto(key, c.toDataURL('image/jpeg',0.65), autogps);
+      };
+      im.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+  document.body.appendChild(inp);
+  inp.click();
+}
+function savePhoto(key, img, autogps){
+  const t = byId(currentId);
+  const data = { img, time: Date.now() };
+  t.data[key] = data;
+  persist(t); renderTicket();
+  if(autogps && navigator.geolocation){
+    navigator.geolocation.getCurrentPosition(pn=>{
+      data.lat=pn.coords.latitude; data.lng=pn.coords.longitude;
+      persist(t); renderTicket();
+    }, ()=>{}, {enableHighAccuracy:true, timeout:8000});
+  }
+}
+
+/* =================== GPS =================== */
+function getGPS(key){
+  const out = document.getElementById('f_'+key+'_out');
+  if(!navigator.geolocation){ alert('GPS not available on this device/browser.'); return; }
+  out.classList.remove('hidden'); out.textContent='Getting GPS fix…';
+  navigator.geolocation.getCurrentPosition(pn=>{
+    document.getElementById('f_'+key+'_lat').value = pn.coords.latitude.toFixed(6);
+    document.getElementById('f_'+key+'_lng').value = pn.coords.longitude.toFixed(6);
+    out.textContent = `✔ ${pn.coords.latitude.toFixed(6)}, ${pn.coords.longitude.toFixed(6)} (±${Math.round(pn.coords.accuracy)} m)`;
+    const t=byId(currentId); collectStep(); persist(t);
+  }, err=>{ out.textContent='✖ GPS failed: '+err.message+'. Type coordinates manually.'; },
+  {enableHighAccuracy:true, timeout:12000});
+}
+
+/* =================== SIGNATURE =================== */
+function initSignature(key, existing){
+  const c = document.getElementById('f_'+key);
+  if(!c) return;
+  const dpr = window.devicePixelRatio||1;
+  c.width = c.offsetWidth*dpr; c.height = 140*dpr;
+  const ctx = c.getContext && c.getContext('2d');
+  if(!ctx) return;
+  ctx.scale(dpr,dpr);
+  ctx.lineWidth=2; ctx.lineCap='round'; ctx.strokeStyle='#0f172a';
+  if(existing){ const im=new Image(); im.onload=()=>ctx.drawImage(im,0,0,c.offsetWidth,140); im.src=existing; }
+  let drawing=false;
+  const pos = ev => {
+    const r=c.getBoundingClientRect();
+    const pt=ev.touches?ev.touches[0]:ev;
+    return {x:pt.clientX-r.left, y:pt.clientY-r.top};
+  };
+  const start=ev=>{ drawing=true; const pt=pos(ev); ctx.beginPath(); ctx.moveTo(pt.x,pt.y); ev.preventDefault(); };
+  const move=ev=>{ if(!drawing) return; const pt=pos(ev); ctx.lineTo(pt.x,pt.y); ctx.stroke(); ev.preventDefault(); };
+  const end=()=>{ if(!drawing) return; drawing=false;
+    const t=byId(currentId); t.data[key]=c.toDataURL('image/png'); persist(t); };
+  c.onmousedown=start; c.onmousemove=move; c.onmouseup=end; c.onmouseleave=end;
+  c.ontouchstart=start; c.ontouchmove=move; c.ontouchend=end;
+}
+function clearSignature(key){
+  const t=byId(currentId); delete t.data[key]; persist(t); renderTicket();
+}
+
+/* =================== ADMIN: DASHBOARD =================== */
+function renderDash(){
+  const open = tickets.filter(t=>t.status==='open').length;
+  const prog = tickets.filter(t=>t.status==='in_progress').length;
+  const done = tickets.filter(t=>t.status==='completed').length;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const doneToday = tickets.filter(t=>t.completed && t.completed>=today.getTime()).length;
+  const inst = tickets.filter(t=>t.type==='installation');
+  const rep = tickets.filter(t=>t.type==='repair');
+
+  document.getElementById('statCards').innerHTML = `
+    <div class="stat s-open"><div class="n">${open}</div><div class="l">Open</div></div>
+    <div class="stat s-prog"><div class="n">${prog}</div><div class="l">In Progress</div></div>
+    <div class="stat s-done"><div class="n">${done}</div><div class="l">Completed</div></div>`;
+  document.getElementById('statSplit').innerHTML = `
+    <div class="stat"><div><div class="l">Installations</div><div class="tmeta">${inst.filter(t=>t.status==='completed').length} done / ${inst.length} total</div></div><div class="n" style="color:#1d4ed8">${inst.filter(t=>t.status!=='completed').length}</div></div>
+    <div class="stat"><div><div class="l">Repairs</div><div class="tmeta">${rep.filter(t=>t.status==='completed').length} done / ${rep.length} total</div></div><div class="n" style="color:#b45309">${rep.filter(t=>t.status!=='completed').length}</div></div>
+    <div class="stat" style="grid-column:1/-1"><div class="l">Completed today</div><div class="n" style="color:#15803d">${doneToday}</div></div>`;
+
+  const ft=document.getElementById('dType').value, fs=document.getElementById('dStatus').value, fu=document.getElementById('dTech').value;
+  const list = tickets.filter(t=>(!ft||t.type===ft)&&(!fs||t.status===fs)&&(!fu||t.assignedTo===fu))
+                      .sort((a,b)=>b.created-a.created);
+  const el = document.getElementById('dashList');
+  if(!list.length){ el.innerHTML='<div class="empty"><div class="big">📋</div>No tickets match. Create one in the New Ticket tab.</div>'; return; }
+  el.innerHTML = list.map(t=>`
+    <div class="card ticket-card" onclick="openReport('${t.id}')">
+      <div class="ticket-top">
+        <span class="tnum">${esc(t.number)}</span>
+        <span>${typeBadge(t.type)} ${statusBadge(t.status)}</span>
+      </div>
+      <div class="tsub">${esc(t.subject)}</div>
+      <div class="tmeta">👤 ${esc(t.customer)} · 👷 ${esc(t.assignedName||'Unassigned')}</div>
+      <div class="tmeta">Created ${fmt(t.created)}${t.completed?' · Finished '+fmt(t.completed):''}</div>
+      <div class="progressbar"><div style="width:${progress(t)}%"></div></div>
+      <div class="tmeta" style="margin-top:4px">${progress(t)}% of workflow done</div>
+    </div>`).join('');
+}
+
+/* =================== ADMIN: NEW TICKET =================== */
+async function createTicket(){
+  const subject = document.getElementById('nSubject').value.trim();
+  const customer = document.getElementById('nCustomer').value.trim();
+  const assignedTo = document.getElementById('nAssign').value;
+  if(!subject || !customer){ alert('Subject and Customer Name are required.'); return; }
+  if(!assignedTo){ alert('Add a technician first (Technicians tab), then assign the job.'); return; }
+  try{
+    await api('/api/tickets','POST',{
+      number: document.getElementById('nTicket').value.trim(),
+      type: document.getElementById('nType').value,
+      subject, customer, assignedTo,
+      phone: document.getElementById('nPhone').value.trim(),
+      address: document.getElementById('nAddress').value.trim(),
+      message: document.getElementById('nMessage').value.trim()
+    });
+    ['nTicket','nSubject','nCustomer','nPhone','nAddress','nMessage'].forEach(i=>document.getElementById(i).value='');
+    await refreshTickets();
+    adminGo('dash');
+  }catch(e){ alert(e.message); }
+}
+
+/* =================== ADMIN: TICKET REPORT =================== */
+function openReport(id){
+  currentId = id;
+  const t = byId(id);
+  document.getElementById('repHead').innerHTML = `
+    <div class="ticket-top">
+      <span class="tnum">${esc(t.number)}</span>
+      <span>${typeBadge(t.type)} ${statusBadge(t.status)}</span>
+    </div>
+    <div class="tsub">${esc(t.subject)}</div>
+    <div class="tmeta">👤 ${esc(t.customer)} ${t.phone?'· 📞 '+esc(t.phone):''} · 📍 ${esc(t.address||'—')}</div>
+    <div class="tmeta">👷 ${esc(t.assignedName||'Unassigned')} · Created ${fmt(t.created)}${t.completed?' · Finished '+fmt(t.completed):''}</div>
+    <div class="progressbar"><div style="width:${progress(t)}%"></div></div>`;
+  const techs = users.filter(u=>u.role==='tech');
+  document.getElementById('repActions').innerHTML = `
+    <label>Reassign to</label>
+    <select id="repAssign">${techs.map(u=>`<option value="${u.id}" ${u.id===t.assignedTo?'selected':''}>${esc(u.name)}</option>`).join('')}</select>
+    <div class="wizard-btns">
+      <button class="btn btn-ghost btn-sm" onclick="reassignTicket()">Save Assignment</button>
+      <button class="btn btn-ghost btn-sm" onclick="window.print()">🖨 Print</button>
+      <button class="btn btn-ghost btn-sm" onclick="exportJSON()">⬇ JSON</button>
+    </div>
+    <div class="wizard-btns">
+      ${t.status==='completed'?'<button class="btn btn-ghost btn-sm" onclick="reopenTicket()">Reopen</button>':''}
+      <button class="btn btn-warn btn-sm" onclick="deleteTicket()">🗑 Delete Ticket</button>
+    </div>`;
+  renderSummary(t, 'repSummary');
+  show('viewReport');
+}
+async function reassignTicket(){
+  try{
+    await api('/api/tickets/'+currentId,'PUT',{assignedTo:document.getElementById('repAssign').value});
+    await refreshTickets(); openReport(currentId);
+  }catch(e){ alert(e.message); }
+}
+async function reopenTicket(){
+  if(!confirm('Reopen this completed ticket?')) return;
+  try{
+    await api('/api/tickets/'+currentId,'PUT',{status:'in_progress'});
+    await refreshTickets(); openReport(currentId);
+  }catch(e){ alert(e.message); }
+}
+async function deleteTicket(){
+  if(!confirm('Delete this ticket permanently?')) return;
+  try{
+    await api('/api/tickets/'+currentId,'DELETE');
+    await refreshTickets(); adminGo('dash');
+  }catch(e){ alert(e.message); }
+}
+function exportJSON(){
+  const t = byId(currentId);
+  const blob = new Blob([JSON.stringify(t,null,2)],{type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = t.number.replace(/[^\w-]/g,'_')+'.json';
+  a.click();
+}
+
+/* =================== ADMIN: USERS =================== */
+function renderUsers(){
+  const el = document.getElementById('userList');
+  if(!users.length){ el.innerHTML='<div class="tmeta">No accounts.</div>'; return; }
+  el.innerHTML = users.map(u=>`
+    <div class="user-row">
+      <div>
+        <div class="un">${esc(u.name)} ${u.role==='admin'?'<span class="badge b-install">Admin</span>':'<span class="badge b-done">Technician</span>'}</div>
+        <div class="um">@${esc(u.username)}</div>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" style="margin-top:0" onclick="resetPassword('${u.id}','${esc(u.name)}')">Reset PW</button>
+        ${u.id!==USER.id?`<button class="btn btn-warn btn-sm" style="margin-top:0" onclick="deleteUser('${u.id}','${esc(u.name)}')">✕</button>`:''}
+      </div>
+    </div>`).join('');
+}
+async function addUser(){
+  try{
+    await api('/api/users','POST',{
+      name: document.getElementById('uName').value.trim(),
+      username: document.getElementById('uUser').value.trim(),
+      password: document.getElementById('uPass').value
+    });
+    ['uName','uUser','uPass'].forEach(i=>document.getElementById(i).value='');
+    await loadUsers(); renderUsers();
+    alert('Technician added. Give them the username and password — they log in on their phone.');
+  }catch(e){ alert(e.message); }
+}
+async function deleteUser(id, name){
+  if(!confirm('Delete account "'+name+'"? Their assigned tickets stay in the system.')) return;
+  try{ await api('/api/users/'+id,'DELETE'); await loadUsers(); renderUsers(); }catch(e){ alert(e.message); }
+}
+async function resetPassword(id, name){
+  const pw = prompt('New password for '+name+' (min 6 characters):');
+  if(!pw) return;
+  try{ await api('/api/users/'+id+'/password','POST',{newPassword:pw}); alert('Password updated.'); }catch(e){ alert(e.message); }
+}
+async function changePassword(){
+  try{
+    await api('/api/password','POST',{
+      oldPassword: document.getElementById('pOld').value,
+      newPassword: document.getElementById('pNew').value
+    });
+    document.getElementById('pOld').value=''; document.getElementById('pNew').value='';
+    alert('Password changed.');
+  }catch(e){ alert(e.message); }
+}
+
+/* =================== SUMMARY / REPORT =================== */
+function renderSummary(t, targetId){
+  const steps = WORKFLOWS[t.type];
+  const rows=[], photos=[];
+  const add=(l,v)=>{ if(v!==''&&v!=null) rows.push([l,v]); };
+  add('Ticket Number', t.number);
+  add('Type', t.type==='repair'?'Repair':'Installation');
+  add('Status', t.status.replace('_',' '));
+  add('Customer', t.customer);
+  add('Technician', t.assignedName);
+  add('Created', fmt(t.created));
+  if(t.completed) add('Completed', fmt(t.completed));
+  steps.forEach(s=>s.fields.forEach(f=>{
+    const v=t.data[f.k];
+    if(v==null||v==='') return;
+    if(f.type==='photo'){ if(v.img) photos.push({cap:f.label+(v.time?' — '+fmt(v.time):''),img:v.img,gps:v.lat!=null?`${v.lat.toFixed(6)}, ${v.lng.toFixed(6)}`:null}); if(v.lat!=null) add(f.label+' GPS', v.lat.toFixed(6)+', '+v.lng.toFixed(6)); return; }
+    if(f.type==='gps'){ add(f.label, v.lat.toFixed(6)+', '+v.lng.toFixed(6)); return; }
+    if(f.type==='signature'){ return; }
+    add(f.label, v);
+  }));
+  const sig = t.data.signature;
+  document.getElementById(targetId).innerHTML = `
+    <div class="card">
+      <div class="step-title" style="font-size:15px">Job Report Summary</div>
+      <table class="summary-table">${rows.map(r=>`<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td></tr>`).join('')}</table>
+      ${photos.length?`<label style="margin-top:14px">Photos (${photos.length})</label>
+        <div class="photos-grid">${photos.map(p=>`<figure><img src="${p.img}"><figcaption>${esc(p.cap)}${p.gps?'<br>📍 '+p.gps:''}</figcaption></figure>`).join('')}</div>`:''}
+      ${sig?`<label style="margin-top:14px">Customer Signature</label><img src="${sig}" style="max-width:260px;border:1px solid var(--border);border-radius:8px;background:#fff">`:''}
+    </div>`;
+}
+
+/* =================== AUTO REFRESH =================== */
+setInterval(()=>{
+  if(!USER) return;
+  if(currentView==='viewTechList' || currentView==='viewDash') refreshTickets();
+}, 30000);
+
+/* =================== INIT =================== */
+(async function init(){
+  if(TOKEN){
+    try{
+      USER = (await api('/api/me')).user;
+      enterApp();
+      return;
+    }catch(e){ /* token invalid -> login */ }
+  }
+  show('viewLogin');
+})();
+</script>
+</body>
+</html>
