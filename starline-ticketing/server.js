@@ -220,7 +220,8 @@ const server = http.createServer(async (req, res) => {
       const t = {
         id: 'id' + Date.now() + Math.random().toString(36).slice(2, 6),
         number: String(b.number || '').trim() || `TKT-${new Date().getFullYear()}-${seq}`,
-        type: b.type === 'repair' ? 'repair' : 'installation',
+        type: ['repair', 'nap_install'].includes(b.type) ? b.type : 'installation',
+        priority: [1, 2, 3].includes(parseInt(b.priority)) ? parseInt(b.priority) : 3,
         subject: String(b.subject).trim(),
         customer: String(b.customer).trim(),
         phone: String(b.phone || '').trim(),
@@ -255,6 +256,7 @@ const server = http.createServer(async (req, res) => {
             const a = db.users.find(u => u.id === b.assignedTo);
             t.assignedTo = a ? a.id : null; t.assignedName = a ? a.name : null;
           }
+          if (b.priority !== undefined && [1, 2, 3].includes(parseInt(b.priority))) t.priority = parseInt(b.priority);
         }
         if (b.data !== undefined) t.data = b.data;
         if (b.step !== undefined) t.step = b.step;
@@ -267,7 +269,7 @@ const server = http.createServer(async (req, res) => {
             if (tech) {
               tech.inv = tech.inv || { cable: 0, connectors: 0 };
               let cableUsed = 0;
-              if (t.type === 'installation' && t.data && t.data.cable_start !== undefined && t.data.cable_end !== undefined) {
+              if (t.data && t.data.cable_start !== undefined && t.data.cable_end !== undefined) {
                 cableUsed = (parseFloat(t.data.cable_start) || 0) - (parseFloat(t.data.cable_end) || 0);
                 if (cableUsed < 0) cableUsed = 0;
                 t.data.cable_used = Math.round(cableUsed * 100) / 100;

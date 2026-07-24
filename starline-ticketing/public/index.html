@@ -107,6 +107,26 @@
   .cam-shutter{width:70px;height:70px;border-radius:50%;background:#fff;border:5px solid #94a3b8;cursor:pointer;margin:0 auto;flex-shrink:0}
   .cam-cancel{background:rgba(255,255,255,.15);color:#fff;border:none;border-radius:11px;padding:0 18px;font-weight:700;cursor:pointer}
 
+  /* type tabs + priority + accents */
+  .type-tabs{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+  .ttab{border:1.5px solid var(--border);background:#fff;color:var(--muted);padding:7px 13px;border-radius:99px;font-size:12.5px;font-weight:700;cursor:pointer}
+  .ttab.on-all{background:var(--text);color:#fff;border-color:var(--text)}
+  .ttab.on-installation{background:#1d4ed8;color:#fff;border-color:#1d4ed8}
+  .ttab.on-repair{background:#d97706;color:#fff;border-color:#d97706}
+  .ttab.on-nap_install{background:#7e22ce;color:#fff;border-color:#7e22ce}
+  .b-nap{background:#f3e8ff;color:#7e22ce}
+  .b-p1{background:#dc2626;color:#fff}
+  .b-p2{background:#f97316;color:#fff}
+  .b-p3{background:#16a34a;color:#fff}
+  .acc-installation{border-left:5px solid #1d4ed8}
+  .acc-repair{border-left:5px solid #d97706}
+  .acc-nap_install{border-left:5px solid #7e22ce}
+
+  /* signature modal */
+  #sigOverlay{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:210;display:flex;align-items:center;justify-content:center;padding:14px}
+  .sig-modal{background:#fff;border-radius:16px;padding:16px;width:100%;max-width:560px;box-shadow:0 20px 50px rgba(0,0,0,.3)}
+  .sig-modal canvas{width:100%;height:220px;border:1.5px dashed var(--border);border-radius:12px;touch-action:none;background:#fff;display:block}
+
   @media print{
     header,.tabs,.no-print,.steps-nav,.wizard-btns,.filter-row,.stats,.split{display:none!important}
     body{background:#fff;padding:0}
@@ -152,6 +172,7 @@
 
 <!-- ============ TECH: TICKET LIST ============ -->
 <div class="wrap hidden" id="viewTechList">
+  <div class="type-tabs no-print" id="techTypeTabs"></div>
   <div class="filter-row no-print">
     <select id="fStatus" onchange="renderTechList()">
       <option value="active">Active jobs</option>
@@ -177,10 +198,8 @@
   <div class="stats" id="statCards"></div>
   <div class="split" id="statSplit"></div>
   <div class="card" id="invPanel"></div>
+  <div class="type-tabs no-print" id="dashTypeTabs"></div>
   <div class="filter-row no-print">
-    <select id="dType" onchange="renderDash()">
-      <option value="">All types</option><option value="installation">Installation</option><option value="repair">Repair</option>
-    </select>
     <select id="dStatus" onchange="renderDash()">
       <option value="">All statuses</option><option value="open">Open</option><option value="in_progress">In Progress</option><option value="completed">Completed</option>
     </select>
@@ -201,13 +220,20 @@
     <select id="nType">
       <option value="installation">Installation (new FTTH subscriber)</option>
       <option value="repair">Repair / Maintenance</option>
+      <option value="nap_install">NAP Installation (new NAP box on a post)</option>
+    </select>
+    <label>Priority <span class="req">*</span></label>
+    <select id="nPriority">
+      <option value="3">Priority 3 — Normal (Green)</option>
+      <option value="2">Priority 2 — High (Orange)</option>
+      <option value="1">Priority 1 — Urgent (Red)</option>
     </select>
     <label>Subject <span class="req">*</span></label>
     <input id="nSubject" placeholder="e.g. New fiber installation — 100 Mbps plan">
     <label>Assign to Technician <span class="req">*</span></label>
     <select id="nAssign"></select>
-    <label>Customer Name <span class="req">*</span></label>
-    <input id="nCustomer">
+    <label>Customer / Site Name <span class="req">*</span></label>
+    <input id="nCustomer" placeholder="Subscriber name, or site name for NAP installation">
     <label>Contact Number</label>
     <input id="nPhone">
     <label>Address</label>
@@ -256,6 +282,22 @@
     <label>New Password (min 6 characters)</label>
     <input id="pNew" type="password">
     <button class="btn btn-ghost" onclick="changePassword()">Change Password</button>
+  </div>
+</div>
+
+<!-- ============ SIGNATURE MODAL ============ -->
+<div id="sigOverlay" class="hidden">
+  <div class="sig-modal">
+    <div class="step-title" style="font-size:16px">Customer Signature</div>
+    <div class="step-desc">Have the customer sign in the box with their finger, or type their full name below.</div>
+    <canvas id="sigCanvas"></canvas>
+    <label>Or Type Full Name</label>
+    <input id="sigTyped" placeholder="e.g. Juan Dela Cruz">
+    <div class="wizard-btns">
+      <button class="btn btn-ghost" onclick="sigClear()">Clear</button>
+      <button class="btn btn-warn" onclick="closeSigModal()">Cancel</button>
+      <button class="btn btn-ok" onclick="sigSubmit()">Submit</button>
+    </div>
   </div>
 </div>
 
@@ -373,7 +415,7 @@ const WORKFLOWS = {
       desc:'Check the meter marking on the reel again now that lining is done. The system automatically computes the cable used and deducts it, along with connectors, from your stock when the job is completed.',
       fields:[
         {k:'cable_end', type:'number', label:'Cable Meters Left on Reel — AFTER Lining (m)', req:true, placeholder:'e.g. 700', step:'0.1', cableCalc:true},
-        {k:'connectors', type:'number', label:'Connectors Used (pcs)', req:true, placeholder:'e.g. 2', step:'1'},
+        {k:'connectors', type:'select', label:'Connectors Used (pcs)', req:true, options:['1','2','3','4','5','6']},
         {k:'other_materials', type:'textarea', label:'Other Materials (clamps, hooks, patch cord…)'}
       ]},
     { key:'customer', title:'9. Customer Details',
@@ -393,6 +435,40 @@ const WORKFLOWS = {
         {k:'final_notes', type:'textarea', label:'Completion Notes (optional)'},
         {k:'customer_remarks', type:'textarea', label:'Remarks / Additional Request from Customer (optional)'},
         {k:'signature', type:'signature', label:'Customer Signature', req:true}
+      ]}
+  ],
+  nap_install: [
+    { key:'cable_start', title:'1. Fiber Cable — Starting Meter',
+      desc:'Before starting the NAP installation, check the meter marking on the cable reel and record how many meters are left.',
+      fields:[
+        {k:'cable_start', type:'number', label:'Cable Meters Left on Reel — BEFORE the Job (m)', req:true, placeholder:'e.g. 1200', step:'0.1'}
+      ]},
+    { key:'napbox', title:'2. NAP Box Installation',
+      desc:'Install the NAP box on the post (fed from the Main NAP), then take a photo of the box showing its tagging. Time and GPS are stamped automatically.',
+      fields:[
+        {k:'nap_id', type:'text', label:'NAP Box ID / Tag Name', req:true, placeholder:'e.g. NAP-BRGY1-015'},
+        {k:'main_nap', type:'text', label:'Source / Main NAP', placeholder:'e.g. MAIN-NAP-02'},
+        {k:'nap_box_photo', type:'photo', label:'Photo of NAP Box with Tagging', req:true, autogps:true}
+      ]},
+    { key:'reading', title:'3. NAP Box Reading',
+      desc:'Measure and record the optical reading at the newly installed NAP box.',
+      fields:[
+        {k:'nap_reading', type:'number', label:'NAP Box Reading (dBm)', req:true, placeholder:'e.g. -18.5', step:'0.1'},
+        {k:'nap_reading_photo', type:'photo', label:'Photo of Power Meter Reading', autogps:true}
+      ]},
+    { key:'post', title:'4. Post Location',
+      desc:'Take a photo of the actual post where the NAP box is installed and capture its GPS coordinates.',
+      fields:[
+        {k:'post_photo', type:'photo', label:'Photo of the Post with NAP Box', req:true, autogps:true},
+        {k:'location', type:'gps', label:'GPS Coordinates of the Post', req:true}
+      ]},
+    { key:'materials', title:'5. Materials &amp; Completion',
+      desc:'Check the reel meter again — the system auto-computes cable used and deducts materials from your stock when the job is completed.',
+      fields:[
+        {k:'cable_end', type:'number', label:'Cable Meters Left on Reel — AFTER the Job (m)', req:true, step:'0.1', cableCalc:true},
+        {k:'connectors', type:'select', label:'Connectors Used (pcs)', options:['0','1','2','3','4','5','6']},
+        {k:'other_materials', type:'textarea', label:'Other Materials'},
+        {k:'final_notes', type:'textarea', label:'Completion Notes (optional)'}
       ]}
   ],
   repair: [
@@ -540,7 +616,28 @@ function statusBadge(s){
   if(s==='in_progress') return '<span class="badge b-progress">In Progress</span>';
   return '<span class="badge b-open">Open</span>';
 }
-function typeBadge(t){ return t==='repair' ? '<span class="badge b-repair">Repair</span>' : '<span class="badge b-install">Installation</span>'; }
+function typeBadge(t){
+  if(t==='repair') return '<span class="badge b-repair">Repair</span>';
+  if(t==='nap_install') return '<span class="badge b-nap">NAP Install</span>';
+  return '<span class="badge b-install">Installation</span>';
+}
+function typeName(t){ return t==='repair'?'Repair':(t==='nap_install'?'NAP Installation':'Installation'); }
+function prioBadge(t){
+  const p = t.priority||3;
+  return `<span class="badge ${p===1?'b-p1':p===2?'b-p2':'b-p3'}">${p===1?'P1 Urgent':p===2?'P2 High':'P3 Normal'}</span>`;
+}
+function sortTickets(list){
+  return list.slice().sort((a,b)=>(a.priority||3)-(b.priority||3) || b.created-a.created);
+}
+/* colored type tabs */
+let techType='', dashType='';
+function renderTypeTabs(containerId, current, setter){
+  const types=[['','All'],['installation','Installation'],['repair','Repair'],['nap_install','NAP Install']];
+  document.getElementById(containerId).innerHTML = types.map(([v,l])=>
+    `<button class="ttab ${current===v?('on-'+(v||'all')):''}" onclick="${setter}('${v}')">${l}</button>`).join('');
+}
+function setTechType(v){ techType=v; renderTechList(); }
+function setDashType(v){ dashType=v; renderDash(); }
 function stepComplete(t, step){ return step.fields.every(f => !f.req || hasValue(t, f)); }
 function hasValue(t, f){
   const v = t.data[f.k];
@@ -556,8 +653,10 @@ function progress(t){
 
 /* =================== TECH: LIST =================== */
 function renderTechList(){
+  renderTypeTabs('techTypeTabs', techType, 'setTechType');
   const f = document.getElementById('fStatus').value;
-  let list = tickets.slice().sort((a,b)=>b.created-a.created);
+  let list = sortTickets(tickets);
+  if(techType) list = list.filter(t=>t.type===techType);
   if(f==='active') list = list.filter(t=>t.status!=='completed');
   else if(f) list = list.filter(t=>t.status===f);
   const el = document.getElementById('techList');
@@ -566,10 +665,10 @@ function renderTechList(){
     return;
   }
   el.innerHTML = list.map(t=>`
-    <div class="card ticket-card" onclick="openTicket('${t.id}')">
+    <div class="card ticket-card acc-${t.type}" onclick="openTicket('${t.id}')">
       <div class="ticket-top">
         <span class="tnum">${esc(t.number)}</span>
-        <span>${typeBadge(t.type)} ${statusBadge(t.status)}</span>
+        <span>${prioBadge(t)} ${typeBadge(t.type)} ${statusBadge(t.status)}</span>
       </div>
       <div class="tsub">${esc(t.subject)}</div>
       <div class="tmeta">👤 ${esc(t.customer||'—')} ${t.phone?'· 📞 '+esc(t.phone):''}</div>
@@ -593,7 +692,7 @@ function renderTicket(){
   document.getElementById('ticketHead').innerHTML = `
     <div class="ticket-top">
       <span class="tnum">${esc(t.number)}</span>
-      <span>${typeBadge(t.type)} ${statusBadge(t.status)}</span>
+      <span>${prioBadge(t)} ${typeBadge(t.type)} ${statusBadge(t.status)}</span>
     </div>
     <div class="tsub">${esc(t.subject)}</div>
     <div class="tmeta">👤 ${esc(t.customer)} ${t.phone?'· 📞 '+esc(t.phone):''}</div>
@@ -631,7 +730,6 @@ function renderTicket(){
       ${isLast&&!allDone?'<div class="tmeta" style="margin-top:8px;color:var(--danger)">Finish all required (*) items in every step to complete the job.</div>':''}
     </div>`;
   renderSummary(t, 'summaryArea');
-  s.fields.forEach(f=>{ if(f.type==='signature') initSignature(f.k, t.data[f.k]); });
 }
 function gotoStep(i){ const t=byId(currentId); collectStep(); t.step=i; persist(t); renderTicket(); }
 function nextStep(){
@@ -700,9 +798,18 @@ function renderField(t,f){
       <div class="gps-out hidden" id="f_${f.k}_out"></div>`;
   }
   if(f.type==='signature'){
+    const inner = v
+      ? `<img src="${v}" style="background:#fff;max-height:160px;object-fit:contain"><div class="photo-stamp">✍ Signed ${fmt(t.data[f.k+'_time'])} — tap to sign again</div>`
+      : `<div style="font-size:30px">✍</div>Tap here — the customer signs in a pop-up box`;
     return `<label>${f.label}${reqMark}</label>
-      <canvas class="sig-canvas" id="f_${f.k}"></canvas>
-      <button class="btn btn-ghost btn-sm" onclick="clearSignature('${f.k}')">Clear Signature</button>`;
+      <div class="photo-box ${v?'has':''}" onclick="openSigModal('${f.k}')">${inner}</div>`;
+  }
+  if(f.type==='select'){
+    return `<label>${f.label}${reqMark}</label>
+      <select id="f_${f.k}">
+        <option value="">— select —</option>
+        ${(f.options||[]).map(o=>`<option value="${esc(o)}" ${o===v?'selected':''}>${esc(o)}</option>`).join('')}
+      </select>`;
   }
   if(f.type==='textarea'){
     return `<label>${f.label}${reqMark}</label><textarea id="f_${f.k}" placeholder="${f.placeholder||''}">${esc(v||'')}</textarea>`;
@@ -831,32 +938,63 @@ function getGPS(key){
   {enableHighAccuracy:true, timeout:12000});
 }
 
-/* =================== SIGNATURE =================== */
-function initSignature(key, existing){
-  const c = document.getElementById('f_'+key);
-  if(!c) return;
+/* =================== SIGNATURE MODAL =================== */
+let sigKey=null, sigDrawn=false;
+function openSigModal(key){
+  sigKey=key; sigDrawn=false;
+  collectStep();
+  document.getElementById('sigTyped').value='';
+  document.getElementById('sigOverlay').classList.remove('hidden');
+  const c = document.getElementById('sigCanvas');
   const dpr = window.devicePixelRatio||1;
-  c.width = c.offsetWidth*dpr; c.height = 140*dpr;
-  const ctx = c.getContext && c.getContext('2d');
-  if(!ctx) return;
-  ctx.scale(dpr,dpr);
-  ctx.lineWidth=2; ctx.lineCap='round'; ctx.strokeStyle='#0f172a';
-  if(existing){ const im=new Image(); im.onload=()=>ctx.drawImage(im,0,0,c.offsetWidth,140); im.src=existing; }
-  let drawing=false;
-  const pos = ev => {
-    const r=c.getBoundingClientRect();
-    const pt=ev.touches?ev.touches[0]:ev;
-    return {x:pt.clientX-r.left, y:pt.clientY-r.top};
-  };
-  const start=ev=>{ drawing=true; const pt=pos(ev); ctx.beginPath(); ctx.moveTo(pt.x,pt.y); ev.preventDefault(); };
-  const move=ev=>{ if(!drawing) return; const pt=pos(ev); ctx.lineTo(pt.x,pt.y); ctx.stroke(); ev.preventDefault(); };
-  const end=()=>{ if(!drawing) return; drawing=false;
-    const t=byId(currentId); t.data[key]=c.toDataURL('image/png'); t.data[key+'_time']=Date.now(); persist(t); };
-  c.onmousedown=start; c.onmousemove=move; c.onmouseup=end; c.onmouseleave=end;
-  c.ontouchstart=start; c.ontouchmove=move; c.ontouchend=end;
+  requestAnimationFrame(()=>{
+    c.width = c.offsetWidth*dpr; c.height = 220*dpr;
+    const ctx = c.getContext && c.getContext('2d');
+    if(!ctx) return;
+    ctx.scale(dpr,dpr);
+    ctx.lineWidth=2.5; ctx.lineCap='round'; ctx.strokeStyle='#0f172a';
+    let drawing=false;
+    const pos = ev => {
+      const r=c.getBoundingClientRect();
+      const pt=ev.touches?ev.touches[0]:ev;
+      return {x:pt.clientX-r.left, y:pt.clientY-r.top};
+    };
+    c.onmousedown=c.ontouchstart=ev=>{ drawing=true; const pt=pos(ev); ctx.beginPath(); ctx.moveTo(pt.x,pt.y); ev.preventDefault(); };
+    c.onmousemove=c.ontouchmove=ev=>{ if(!drawing) return; const pt=pos(ev); ctx.lineTo(pt.x,pt.y); ctx.stroke(); sigDrawn=true; ev.preventDefault(); };
+    c.onmouseup=c.onmouseleave=c.ontouchend=()=>{ drawing=false; };
+  });
 }
-function clearSignature(key){
-  const t=byId(currentId); delete t.data[key]; delete t.data[key+'_time']; persist(t); renderTicket();
+function closeSigModal(){ document.getElementById('sigOverlay').classList.add('hidden'); sigKey=null; }
+function sigClear(){
+  sigDrawn=false;
+  document.getElementById('sigTyped').value='';
+  const c = document.getElementById('sigCanvas');
+  const ctx = c.getContext && c.getContext('2d');
+  if(ctx) ctx.clearRect(0,0,c.width,c.height);
+}
+function sigSubmit(){
+  const t = byId(currentId);
+  if(!t || !sigKey) return;
+  const c = document.getElementById('sigCanvas');
+  const typed = document.getElementById('sigTyped').value.trim();
+  if(!sigDrawn && !typed){ alert('Please sign in the box, or type the customer\'s full name.'); return; }
+  if(!sigDrawn && typed){
+    const ctx = c.getContext && c.getContext('2d');
+    if(ctx){
+      ctx.clearRect(0,0,c.width,c.height);
+      ctx.font='italic 600 36px "Brush Script MT","Segoe Script","Snell Roundhand",cursive';
+      ctx.fillStyle='#0f172a';
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(typed, c.offsetWidth/2, 110);
+    }
+  }
+  const key = sigKey;
+  let dataUrl = null;
+  try{ dataUrl = c.toDataURL('image/png'); }catch(e){}
+  t.data[key] = dataUrl || ('signed:'+(typed||'drawn'));
+  t.data[key+'_time'] = Date.now();
+  closeSigModal();
+  persist(t); renderTicket();
 }
 
 /* =================== ADMIN: DASHBOARD =================== */
@@ -868,6 +1006,7 @@ function renderDash(){
   const doneToday = tickets.filter(t=>t.completed && t.completed>=today.getTime()).length;
   const inst = tickets.filter(t=>t.type==='installation');
   const rep = tickets.filter(t=>t.type==='repair');
+  const nap = tickets.filter(t=>t.type==='nap_install');
 
   document.getElementById('statCards').innerHTML = `
     <div class="stat s-open"><div class="n">${open}</div><div class="l">Open</div></div>
@@ -876,7 +1015,9 @@ function renderDash(){
   document.getElementById('statSplit').innerHTML = `
     <div class="stat"><div><div class="l">Installations</div><div class="tmeta">${inst.filter(t=>t.status==='completed').length} done / ${inst.length} total</div></div><div class="n" style="color:#1d4ed8">${inst.filter(t=>t.status!=='completed').length}</div></div>
     <div class="stat"><div><div class="l">Repairs</div><div class="tmeta">${rep.filter(t=>t.status==='completed').length} done / ${rep.length} total</div></div><div class="n" style="color:#b45309">${rep.filter(t=>t.status!=='completed').length}</div></div>
-    <div class="stat" style="grid-column:1/-1"><div class="l">Completed today</div><div class="n" style="color:#15803d">${doneToday}</div></div>`;
+    <div class="stat"><div><div class="l">NAP Installs</div><div class="tmeta">${nap.filter(t=>t.status==='completed').length} done / ${nap.length} total</div></div><div class="n" style="color:#7e22ce">${nap.filter(t=>t.status!=='completed').length}</div></div>
+    <div class="stat"><div class="l">Completed today</div><div class="n" style="color:#15803d">${doneToday}</div></div>`;
+  renderTypeTabs('dashTypeTabs', dashType, 'setDashType');
 
   const techsInv = users.filter(u=>u.role==='tech');
   document.getElementById('invPanel').innerHTML = `
@@ -893,16 +1034,15 @@ function renderDash(){
     <div class="tmeta" style="margin-top:6px">Add stock in the Technicians tab. Materials are deducted automatically when a job is completed. Red = running low.</div>`
     : '<div class="tmeta">No technicians yet.</div>'}`;
 
-  const ft=document.getElementById('dType').value, fs=document.getElementById('dStatus').value, fu=document.getElementById('dTech').value;
-  const list = tickets.filter(t=>(!ft||t.type===ft)&&(!fs||t.status===fs)&&(!fu||t.assignedTo===fu))
-                      .sort((a,b)=>b.created-a.created);
+  const fs=document.getElementById('dStatus').value, fu=document.getElementById('dTech').value;
+  const list = sortTickets(tickets.filter(t=>(!dashType||t.type===dashType)&&(!fs||t.status===fs)&&(!fu||t.assignedTo===fu)));
   const el = document.getElementById('dashList');
   if(!list.length){ el.innerHTML='<div class="empty"><div class="big">📋</div>No tickets match. Create one in the New Ticket tab.</div>'; return; }
   el.innerHTML = list.map(t=>`
-    <div class="card ticket-card" onclick="openReport('${t.id}')">
+    <div class="card ticket-card acc-${t.type}" onclick="openReport('${t.id}')">
       <div class="ticket-top">
         <span class="tnum">${esc(t.number)}</span>
-        <span>${typeBadge(t.type)} ${statusBadge(t.status)}</span>
+        <span>${prioBadge(t)} ${typeBadge(t.type)} ${statusBadge(t.status)}</span>
       </div>
       <div class="tsub">${esc(t.subject)}</div>
       <div class="tmeta">👤 ${esc(t.customer)} · 👷 ${esc(t.assignedName||'Unassigned')}</div>
@@ -923,6 +1063,7 @@ async function createTicket(){
     await api('/api/tickets','POST',{
       number: document.getElementById('nTicket').value.trim(),
       type: document.getElementById('nType').value,
+      priority: parseInt(document.getElementById('nPriority').value),
       subject, customer, assignedTo,
       phone: document.getElementById('nPhone').value.trim(),
       address: document.getElementById('nAddress').value.trim(),
@@ -941,7 +1082,7 @@ function openReport(id){
   document.getElementById('repHead').innerHTML = `
     <div class="ticket-top">
       <span class="tnum">${esc(t.number)}</span>
-      <span>${typeBadge(t.type)} ${statusBadge(t.status)}</span>
+      <span>${prioBadge(t)} ${typeBadge(t.type)} ${statusBadge(t.status)}</span>
     </div>
     <div class="tsub">${esc(t.subject)}</div>
     <div class="tmeta">👤 ${esc(t.customer)} ${t.phone?'· 📞 '+esc(t.phone):''} · 📍 ${esc(t.address||'—')}</div>
@@ -951,8 +1092,14 @@ function openReport(id){
   document.getElementById('repActions').innerHTML = `
     <label>Reassign to</label>
     <select id="repAssign">${techs.map(u=>`<option value="${u.id}" ${u.id===t.assignedTo?'selected':''}>${esc(u.name)}</option>`).join('')}</select>
+    <label>Priority</label>
+    <select id="repPrio">
+      <option value="1" ${(t.priority||3)===1?'selected':''}>Priority 1 — Urgent (Red)</option>
+      <option value="2" ${(t.priority||3)===2?'selected':''}>Priority 2 — High (Orange)</option>
+      <option value="3" ${(t.priority||3)===3?'selected':''}>Priority 3 — Normal (Green)</option>
+    </select>
     <div class="wizard-btns">
-      <button class="btn btn-ghost btn-sm" onclick="reassignTicket()">Save Assignment</button>
+      <button class="btn btn-ghost btn-sm" onclick="reassignTicket()">Save Changes</button>
       <button class="btn btn-ghost btn-sm" onclick="window.print()">🖨 Print</button>
       <button class="btn btn-ghost btn-sm" onclick="exportJSON()">⬇ JSON</button>
     </div>
@@ -965,7 +1112,10 @@ function openReport(id){
 }
 async function reassignTicket(){
   try{
-    await api('/api/tickets/'+currentId,'PUT',{assignedTo:document.getElementById('repAssign').value});
+    await api('/api/tickets/'+currentId,'PUT',{
+      assignedTo: document.getElementById('repAssign').value,
+      priority: parseInt(document.getElementById('repPrio').value)
+    });
     await refreshTickets(); openReport(currentId);
   }catch(e){ alert(e.message); }
 }
@@ -1081,7 +1231,8 @@ function renderSummary(t, targetId){
   const rows=[], photos=[];
   const add=(l,v)=>{ if(v!==''&&v!=null) rows.push([l,v]); };
   add('Ticket Number', t.number);
-  add('Type', t.type==='repair'?'Repair':'Installation');
+  add('Type', typeName(t.type));
+  add('Priority', 'Priority '+(t.priority||3)+((t.priority||3)===1?' — Urgent':(t.priority||3)===2?' — High':' — Normal'));
   add('Status', t.status.replace('_',' '));
   add('Customer', t.customer);
   add('Technician', t.assignedName);
