@@ -1,6 +1,7 @@
 {
   "name": "starline-field-ops",
   "version": "1.0.0",
+  "description": "StarLine FTTH installation and repair ticketing system",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

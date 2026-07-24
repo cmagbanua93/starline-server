@@ -8,13 +8,15 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = process.env.PORT || 3000;
-const DB_FILE = path.join(__dirname, 'db.json');
+const DB_FILE = process.env.DB_FILE || path.join(__dirname, 'db.json');
 const PUBLIC = path.join(__dirname, 'public');
 
 /* ---------------- database (JSON file) ---------------- */
 let db = { users: [], tickets: [], sessions: {} };
 try { db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); } catch (e) {}
 db.users = db.users || []; db.tickets = db.tickets || []; db.sessions = db.sessions || {};
+db.settings = db.settings || { plans: [] };
+db.users.forEach(u => { u.inv = u.inv || { cable: 0, connectors: 0 }; });
 
 let saveTimer = null;
 function saveDB() {
@@ -86,7 +88,7 @@ function auth(req) {
   const user = db.users.find(u => u.id === db.sessions[token]);
   return user ? { user, token } : null;
 }
-function publicUser(u) { return { id: u.id, username: u.username, name: u.name, role: u.role }; }
+function publicUser(u) { return { id: u.id, username: u.username, name: u.name, role: u.role, inv: u.inv || { cable: 0, connectors: 0 } }; }
 
 /* ---------------- static files ---------------- */
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.json': 'application/json', '.ico': 'image/x-icon' };
@@ -141,6 +143,16 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true });
     }
 
+    /* ---- settings (plans) ---- */
+    if (p === '/api/settings' && req.method === 'GET') return json(res, 200, { settings: db.settings });
+    if (p === '/api/settings' && req.method === 'PUT') {
+      if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+      const b = await readBody(req);
+      if (Array.isArray(b.plans)) db.settings.plans = b.plans.map(x => String(x).trim()).filter(Boolean);
+      saveDB();
+      return json(res, 200, { settings: db.settings });
+    }
+
     /* ---- users (admin) ---- */
     if (p === '/api/users' && req.method === 'GET') {
       if (!isAdmin) return json(res, 403, { error: 'Admin only' });
@@ -155,7 +167,7 @@ const server = http.createServer(async (req, res) => {
       if (!username || !name || password.length < 6)
         return json(res, 400, { error: 'Name, username and a password of 6+ characters are required' });
       if (db.users.some(u => u.username === username)) return json(res, 400, { error: 'Username already taken' });
-      const u = { id: 'u' + Date.now() + Math.random().toString(36).slice(2, 6), username, name, role: b.role === 'admin' ? 'admin' : 'tech', pass: hashPassword(password) };
+      const u = { id: 'u' + Date.now() + Math.random().toString(36).slice(2, 6), username, name, role: b.role === 'admin' ? 'admin' : 'tech', pass: hashPassword(password), inv: { cable: 0, connectors: 0 } };
       db.users.push(u); saveDB();
       return json(res, 200, { user: publicUser(u) });
     }
@@ -168,6 +180,21 @@ const server = http.createServer(async (req, res) => {
       saveDB();
       return json(res, 200, { ok: true });
     }
+    m = p.match(/^\/api\/users\/([\w.]+)\/inventory$/);
+    if (m && req.method === 'POST') {
+      if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+      const b = await readBody(req);
+      const u = db.users.find(x => x.id === m[1]);
+      if (!u) return json(res, 404, { error: 'User not found' });
+      u.inv = u.inv || { cable: 0, connectors: 0 };
+      const cable = parseFloat(b.cable) || 0;
+      const connectors = parseInt(b.connectors) || 0;
+      u.inv.cable = Math.round((u.inv.cable + cable) * 100) / 100;
+      u.inv.connectors = u.inv.connectors + connectors;
+      saveDB();
+      return json(res, 200, { user: publicUser(u) });
+    }
+
     m = p.match(/^\/api\/users\/([\w.]+)\/password$/);
     if (m && req.method === 'POST') {
       if (!isAdmin) return json(res, 403, { error: 'Admin only' });
@@ -234,6 +261,25 @@ const server = http.createServer(async (req, res) => {
         if (b.status !== undefined && ['open', 'in_progress', 'completed'].includes(b.status)) {
           t.status = b.status;
           t.completed = b.status === 'completed' ? (b.completed || Date.now()) : null;
+          /* Deduct materials from the technician's inventory once, on first completion */
+          if (b.status === 'completed' && !t.invApplied && t.assignedTo) {
+            const tech = db.users.find(u => u.id === t.assignedTo);
+            if (tech) {
+              tech.inv = tech.inv || { cable: 0, connectors: 0 };
+              let cableUsed = 0;
+              if (t.type === 'installation' && t.data && t.data.cable_start !== undefined && t.data.cable_end !== undefined) {
+                cableUsed = (parseFloat(t.data.cable_start) || 0) - (parseFloat(t.data.cable_end) || 0);
+                if (cableUsed < 0) cableUsed = 0;
+                t.data.cable_used = Math.round(cableUsed * 100) / 100;
+              } else if (t.data && t.data.cable_length) {
+                cableUsed = parseFloat(t.data.cable_length) || 0;
+              }
+              const connUsed = parseInt(t.data && t.data.connectors) || 0;
+              tech.inv.cable = Math.round((tech.inv.cable - cableUsed) * 100) / 100;
+              tech.inv.connectors = tech.inv.connectors - connUsed;
+              t.invApplied = true;
+            }
+          }
         }
         t.updated = Date.now(); t.updatedBy = me.name;
         saveDB();

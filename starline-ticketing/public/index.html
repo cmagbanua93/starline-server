@@ -176,6 +176,7 @@
 <div class="wrap hidden" id="viewDash">
   <div class="stats" id="statCards"></div>
   <div class="split" id="statSplit"></div>
+  <div class="card" id="invPanel"></div>
   <div class="filter-row no-print">
     <select id="dType" onchange="renderDash()">
       <option value="">All types</option><option value="installation">Installation</option><option value="repair">Repair</option>
@@ -227,6 +228,14 @@
 <!-- ============ ADMIN: TECHNICIANS ============ -->
 <div class="wrap hidden" id="viewTechs">
   <div class="card">
+    <div class="step-title">Subscribed Plans</div>
+    <div class="step-desc">These appear as the plan dropdown in the technician's Customer Details step.</div>
+    <div id="planList"></div>
+    <label>New Plan</label>
+    <input id="planInput" placeholder="e.g. 100 Mbps — ₱1,299/mo">
+    <button class="btn btn-primary btn-sm" onclick="addPlan()">Add Plan</button>
+  </div>
+  <div class="card">
     <div class="step-title">Add Technician</div>
     <label>Full Name <span class="req">*</span></label>
     <input id="uName">
@@ -266,6 +275,7 @@ let TOKEN = localStorage.getItem('sl_token') || null;
 let USER = null;
 let tickets = [];
 let users = [];
+let SETTINGS = { plans: [] };
 let currentId = null;
 let currentView = 'viewLogin';
 let adminBack = 'dash';
@@ -327,13 +337,26 @@ const WORKFLOWS = {
       fields:[
         {k:'house_photo', type:'photo', label:'House Photo', req:true}
       ]},
-    { key:'reading', title:'3. Check Optical Reading',
-      desc:'Measure the optical power level with your power meter at the customer end and record the reading. Acceptable range is typically -8 to -27 dBm.',
+    { key:'cable_start', title:'3. Fiber Cable — Starting Meter',
+      desc:'Before you start lining the fiber cable from the NAP box, check the meter marking on the drop cable reel and record how many meters are LEFT on the reel.',
+      fields:[
+        {k:'cable_start', type:'number', label:'Cable Meters Left on Reel — BEFORE Lining (m)', req:true, placeholder:'e.g. 850', step:'0.1'}
+      ]},
+    { key:'nap', title:'4. NAP Box &amp; Port Details',
+      desc:'Record the NAP box the subscriber is connected to and the exact port used, then take a photo of the NAP box cassette. Time and GPS location are stamped on the photo automatically.',
+      fields:[
+        {k:'nap_id', type:'text', label:'NAP Box ID / Name', req:true, placeholder:'e.g. NAP-BRGY1-014'},
+        {k:'nap_port', type:'text', label:'Port Number Connected', req:true, placeholder:'e.g. Port 5 of 8'},
+        {k:'nap_photo', type:'photo', label:'Photo of NAP Box Cassette', req:true, autogps:true},
+        {k:'nap_reading', type:'number', label:'Reading at NAP (dBm, optional)', step:'0.1'}
+      ]},
+    { key:'reading', title:'5. Check Optical Reading',
+      desc:'Measure the optical power level with your power meter at the customer end and record the reading. Acceptable range is typically -8 to -27 dBm. Date and GPS are stamped on the photo automatically.',
       fields:[
         {k:'reading_value', type:'number', label:'Optical Reading (dBm)', req:true, placeholder:'e.g. -21.5', step:'0.1'},
-        {k:'reading_photo', type:'photo', label:'Photo of Power Meter Reading', req:true}
+        {k:'reading_photo', type:'photo', label:'Photo of Power Meter Reading', req:true, autogps:true}
       ]},
-    { key:'modem', title:'4. Modem / ONU Setup',
+    { key:'modem', title:'6. Modem / ONU Setup',
       desc:'Install the modem/ONU, then take a photo of the installed unit and record its details.',
       fields:[
         {k:'modem_photo', type:'photo', label:'Photo of Installed Modem/ONU', req:true},
@@ -341,41 +364,34 @@ const WORKFLOWS = {
         {k:'modem_model', type:'text', label:'Modem Model', placeholder:'e.g. Huawei EG8145V5'},
         {k:'modem_mac', type:'text', label:'MAC Address (optional)', placeholder:'e.g. AC:12:34:56:78:9A'}
       ]},
-    { key:'nap', title:'5. NAP &amp; Port Details',
-      desc:'Record the NAP box the subscriber is connected to and the exact port used. Take a photo of the NAP box connection.',
-      fields:[
-        {k:'nap_id', type:'text', label:'NAP Box ID / Name', req:true, placeholder:'e.g. NAP-BRGY1-014'},
-        {k:'nap_port', type:'text', label:'Port Number', req:true, placeholder:'e.g. Port 5 of 8'},
-        {k:'nap_photo', type:'photo', label:'Photo of NAP Connection', req:true},
-        {k:'nap_reading', type:'number', label:'Reading at NAP (dBm, optional)', step:'0.1'}
-      ]},
-    { key:'gps', title:'6. Location (Longitude &amp; Latitude)',
+    { key:'gps', title:'7. Location (Longitude &amp; Latitude)',
       desc:'Capture the GPS coordinates of the subscriber\'s home. Use the button to auto-fill from your phone\'s GPS, or type manually.',
       fields:[
         {k:'location', type:'gps', label:'GPS Coordinates', req:true}
       ]},
-    { key:'materials', title:'7. Materials Used',
-      desc:'Record the drop cable length and number of connectors consumed for inventory reconciliation.',
+    { key:'materials', title:'8. Materials Used',
+      desc:'Check the meter marking on the reel again now that lining is done. The system automatically computes the cable used and deducts it, along with connectors, from your stock when the job is completed.',
       fields:[
-        {k:'cable_length', type:'number', label:'Drop Cable Used (meters)', req:true, placeholder:'e.g. 150', step:'1'},
+        {k:'cable_end', type:'number', label:'Cable Meters Left on Reel — AFTER Lining (m)', req:true, placeholder:'e.g. 700', step:'0.1', cableCalc:true},
         {k:'connectors', type:'number', label:'Connectors Used (pcs)', req:true, placeholder:'e.g. 2', step:'1'},
         {k:'other_materials', type:'textarea', label:'Other Materials (clamps, hooks, patch cord…)'}
       ]},
-    { key:'customer', title:'8. Customer Details',
+    { key:'customer', title:'9. Customer Details',
       desc:'Confirm and record the subscriber\'s account information.',
       fields:[
         {k:'cust_name', type:'text', label:'Customer Full Name', req:true},
         {k:'cust_account', type:'text', label:'Account Number'},
         {k:'cust_phone', type:'text', label:'Contact Number', req:true},
         {k:'cust_email', type:'text', label:'Email Address'},
-        {k:'cust_plan', type:'text', label:'Subscribed Plan', req:true, placeholder:'e.g. 100 Mbps — ₱1,299/mo'},
+        {k:'cust_plan', type:'plan_select', label:'Subscribed Plan', req:true},
         {k:'cust_address', type:'textarea', label:'Complete Address', req:true}
       ]},
-    { key:'complete', title:'9. Testing &amp; Completion',
-      desc:'Run a speed test with the customer, take a photo of the result, get the customer\'s signature, and close the job.',
+    { key:'complete', title:'10. Testing &amp; Completion',
+      desc:'Run a speed test with the customer and take a photo of the result — date, time and GPS are stamped automatically. Then get the customer\'s signature to close the job.',
       fields:[
-        {k:'speedtest_photo', type:'photo', label:'Photo of Speed Test Result', req:true},
-        {k:'final_notes', type:'textarea', label:'Completion Notes'},
+        {k:'speedtest_photo', type:'photo', label:'Photo of Speed Test Result', req:true, autogps:true},
+        {k:'final_notes', type:'textarea', label:'Completion Notes (optional)'},
+        {k:'customer_remarks', type:'textarea', label:'Remarks / Additional Request from Customer (optional)'},
         {k:'signature', type:'signature', label:'Customer Signature', req:true}
       ]}
   ],
@@ -448,6 +464,7 @@ async function enterApp(){
   document.getElementById('hdr').classList.remove('hidden');
   document.getElementById('hdrTitle').textContent = 'StarLine Field Ops';
   document.getElementById('hdrSub').textContent = (USER.role==='admin'?'Admin':'Technician')+' — '+USER.name;
+  await loadSettings();
   await refreshTickets();
   if(USER.role==='admin'){
     document.getElementById('adminTabs').classList.remove('hidden');
@@ -467,6 +484,7 @@ async function refreshTickets(manual){
     tickets.filter(t=>t._dirty).forEach(t=>dirtyMap[t.id]=t);
     tickets = r.tickets.map(t => dirtyMap[t.id] || t);
     setOffline(false); cacheTickets();
+    if(USER && USER.role==='admin') await loadUsers(); // keep inventory display fresh
   }catch(e){
     if(e.message.includes('Session expired')) return;
     try{ tickets = JSON.parse(localStorage.getItem('sl_cache'))||[]; }catch(_){ tickets=[]; }
@@ -475,6 +493,14 @@ async function refreshTickets(manual){
   }
   if(currentView==='viewTechList') renderTechList();
   if(currentView==='viewDash') renderDash();
+}
+async function loadSettings(){
+  try{
+    SETTINGS = (await api('/api/settings')).settings || {plans:[]};
+    localStorage.setItem('sl_settings', JSON.stringify(SETTINGS));
+  }catch(e){
+    try{ SETTINGS = JSON.parse(localStorage.getItem('sl_settings'))||{plans:[]}; }catch(_){ SETTINGS={plans:[]}; }
+  }
 }
 async function loadUsers(){
   try{ users = (await api('/api/users')).users; }catch(e){ users = []; }
@@ -504,7 +530,7 @@ function adminGo(tab){
   ['tabDash','tabNew','tabTechs'].forEach(t=>document.getElementById(t).classList.remove('active'));
   if(tab==='dash'){ document.getElementById('tabDash').classList.add('active'); show('viewDash'); renderDash(); }
   if(tab==='new'){ document.getElementById('tabNew').classList.add('active'); show('viewNew'); }
-  if(tab==='techs'){ document.getElementById('tabTechs').classList.add('active'); show('viewTechs'); renderUsers(); }
+  if(tab==='techs'){ document.getElementById('tabTechs').classList.add('active'); show('viewTechs'); renderUsers(); renderPlans(); }
   if(tab!=='report') adminBack = tab;
 }
 
@@ -614,6 +640,13 @@ function nextStep(){
   const s = WORKFLOWS[t.type][t.step];
   const missing = s.fields.filter(f=>f.req && !hasValue(t,f)).map(f=>f.label);
   if(missing.length){ alert('Required before continuing:\n• '+missing.join('\n• ')); persist(t); renderTicket(); return; }
+  if(s.key==='materials' && t.type==='installation'){
+    const start = parseFloat(t.data.cable_start), end = parseFloat(t.data.cable_end);
+    if(!isNaN(start) && !isNaN(end)){
+      if(end > start){ alert('Cable meters left AFTER lining ('+end+' m) cannot be more than BEFORE lining ('+start+' m). Please re-check the reel reading.'); renderTicket(); return; }
+      t.data.cable_used = Math.round((start-end)*100)/100;
+    }
+  }
   if(t.status==='open') t.status='in_progress';
   t.step++; persist(t); renderTicket();
 }
@@ -674,9 +707,38 @@ function renderField(t,f){
   if(f.type==='textarea'){
     return `<label>${f.label}${reqMark}</label><textarea id="f_${f.k}" placeholder="${f.placeholder||''}">${esc(v||'')}</textarea>`;
   }
+  if(f.type==='plan_select'){
+    const plans = (SETTINGS.plans||[]);
+    if(!plans.length){
+      return `<label>${f.label}${reqMark}</label>
+        <input type="text" id="f_${f.k}" placeholder="No plans configured — ask admin to add plans" value="${esc(v||'')}">`;
+    }
+    return `<label>${f.label}${reqMark}</label>
+      <select id="f_${f.k}">
+        <option value="">— select plan —</option>
+        ${plans.map(pl=>`<option value="${esc(pl)}" ${pl===v?'selected':''}>${esc(pl)}</option>`).join('')}
+      </select>`;
+  }
   const type = f.type==='number'?'number':'text';
+  const calc = f.cableCalc ? ` oninput="updateCableCalc()"` : '';
+  const calcBox = f.cableCalc ? `<div class="gps-out" id="cableCalcOut" style="margin-top:8px">${cableCalcText(t)}</div>` : '';
   return `<label>${f.label}${reqMark}</label>
-    <input type="${type}" ${f.step?'step="'+f.step+'"':''} id="f_${f.k}" placeholder="${f.placeholder||''}" value="${esc(v||'')}">`;
+    <input type="${type}" ${f.step?'step="'+f.step+'"':''} id="f_${f.k}" placeholder="${f.placeholder||''}" value="${esc(v||'')}"${calc}>${calcBox}`;
+}
+function cableCalcText(t, endOverride){
+  const start = parseFloat(t.data.cable_start);
+  const endEl = document.getElementById('f_cable_end');
+  const end = endOverride!==undefined ? endOverride : parseFloat(endEl ? endEl.value : t.data.cable_end);
+  if(isNaN(start)) return '⚠ Starting meter was not recorded in Step 3 — go back and fill it in.';
+  if(isNaN(end)) return `Reel before lining: ${start} m — enter the meters left to auto-compute cable used.`;
+  const used = Math.round((start-end)*100)/100;
+  if(used < 0) return `✖ Meters left (${end} m) cannot be MORE than before lining (${start} m). Check the reading.`;
+  return `✔ Cable used (auto-computed): ${used} m   (${start} m − ${end} m)`;
+}
+function updateCableCalc(){
+  const t = byId(currentId);
+  const out = document.getElementById('cableCalcOut');
+  if(out && t) out.textContent = cableCalcText(t);
 }
 
 /* =================== CAMERA (opens directly) =================== */
@@ -789,12 +851,12 @@ function initSignature(key, existing){
   const start=ev=>{ drawing=true; const pt=pos(ev); ctx.beginPath(); ctx.moveTo(pt.x,pt.y); ev.preventDefault(); };
   const move=ev=>{ if(!drawing) return; const pt=pos(ev); ctx.lineTo(pt.x,pt.y); ctx.stroke(); ev.preventDefault(); };
   const end=()=>{ if(!drawing) return; drawing=false;
-    const t=byId(currentId); t.data[key]=c.toDataURL('image/png'); persist(t); };
+    const t=byId(currentId); t.data[key]=c.toDataURL('image/png'); t.data[key+'_time']=Date.now(); persist(t); };
   c.onmousedown=start; c.onmousemove=move; c.onmouseup=end; c.onmouseleave=end;
   c.ontouchstart=start; c.ontouchmove=move; c.ontouchend=end;
 }
 function clearSignature(key){
-  const t=byId(currentId); delete t.data[key]; persist(t); renderTicket();
+  const t=byId(currentId); delete t.data[key]; delete t.data[key+'_time']; persist(t); renderTicket();
 }
 
 /* =================== ADMIN: DASHBOARD =================== */
@@ -815,6 +877,21 @@ function renderDash(){
     <div class="stat"><div><div class="l">Installations</div><div class="tmeta">${inst.filter(t=>t.status==='completed').length} done / ${inst.length} total</div></div><div class="n" style="color:#1d4ed8">${inst.filter(t=>t.status!=='completed').length}</div></div>
     <div class="stat"><div><div class="l">Repairs</div><div class="tmeta">${rep.filter(t=>t.status==='completed').length} done / ${rep.length} total</div></div><div class="n" style="color:#b45309">${rep.filter(t=>t.status!=='completed').length}</div></div>
     <div class="stat" style="grid-column:1/-1"><div class="l">Completed today</div><div class="n" style="color:#15803d">${doneToday}</div></div>`;
+
+  const techsInv = users.filter(u=>u.role==='tech');
+  document.getElementById('invPanel').innerHTML = `
+    <div class="step-title" style="font-size:15px">Technician Inventory (remaining stock)</div>
+    ${techsInv.length ? `<table class="summary-table">
+      <tr><td style="width:40%">Technician</td><td><b>Fiber Cable</b></td><td><b>Connectors</b></td></tr>
+      ${techsInv.map(u=>{
+        const inv=u.inv||{cable:0,connectors:0};
+        const lowC = inv.cable<50?' style="color:var(--danger);font-weight:700"':'';
+        const lowK = inv.connectors<5?' style="color:var(--danger);font-weight:700"':'';
+        return `<tr><td>${esc(u.name)}</td><td${lowC}>${inv.cable} m</td><td${lowK}>${inv.connectors} pcs</td></tr>`;
+      }).join('')}
+    </table>
+    <div class="tmeta" style="margin-top:6px">Add stock in the Technicians tab. Materials are deducted automatically when a job is completed. Red = running low.</div>`
+    : '<div class="tmeta">No technicians yet.</div>'}`;
 
   const ft=document.getElementById('dType').value, fs=document.getElementById('dStatus').value, fu=document.getElementById('dTech').value;
   const list = tickets.filter(t=>(!ft||t.type===ft)&&(!fs||t.status===fs)&&(!fu||t.assignedTo===fu))
@@ -919,17 +996,52 @@ function exportJSON(){
 function renderUsers(){
   const el = document.getElementById('userList');
   if(!users.length){ el.innerHTML='<div class="tmeta">No accounts.</div>'; return; }
-  el.innerHTML = users.map(u=>`
+  el.innerHTML = users.map(u=>{
+    const inv = u.inv||{cable:0,connectors:0};
+    return `
     <div class="user-row">
       <div>
         <div class="un">${esc(u.name)} ${u.role==='admin'?'<span class="badge b-install">Admin</span>':'<span class="badge b-done">Technician</span>'}</div>
-        <div class="um">@${esc(u.username)}</div>
+        <div class="um">@${esc(u.username)}${u.role==='tech'?` · 🧵 ${inv.cable} m cable · 🔌 ${inv.connectors} pcs connectors`:''}</div>
       </div>
-      <div style="display:flex;gap:6px">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+        ${u.role==='tech'?`<button class="btn btn-ok btn-sm" style="margin-top:0" onclick="addStock('${u.id}','${esc(u.name)}')">＋ Stock</button>`:''}
         <button class="btn btn-ghost btn-sm" style="margin-top:0" onclick="resetPassword('${u.id}','${esc(u.name)}')">Reset PW</button>
         ${u.id!==USER.id?`<button class="btn btn-warn btn-sm" style="margin-top:0" onclick="deleteUser('${u.id}','${esc(u.name)}')">✕</button>`:''}
       </div>
-    </div>`).join('');
+    </div>`;}).join('');
+}
+async function addStock(id, name){
+  const cable = prompt('Meters of fiber cable to give '+name+' (0 if none):','0');
+  if(cable===null) return;
+  const connectors = prompt('Connectors (pcs) to give '+name+' (0 if none):','0');
+  if(connectors===null) return;
+  try{
+    await api('/api/users/'+id+'/inventory','POST',{cable:parseFloat(cable)||0, connectors:parseInt(connectors)||0});
+    await loadUsers(); renderUsers();
+  }catch(e){ alert(e.message); }
+}
+function renderPlans(){
+  const el = document.getElementById('planList');
+  const plans = SETTINGS.plans||[];
+  el.innerHTML = plans.length
+    ? plans.map((p,i)=>`<div class="user-row"><div class="un">${esc(p)}</div>
+        <button class="btn btn-warn btn-sm" style="margin-top:0" onclick="removePlan(${i})">✕</button></div>`).join('')
+    : '<div class="tmeta">No plans yet — technicians will see a free-text field until you add plans.</div>';
+}
+async function addPlan(){
+  const v = document.getElementById('planInput').value.trim();
+  if(!v) return;
+  try{
+    SETTINGS = (await api('/api/settings','PUT',{plans:[...(SETTINGS.plans||[]), v]})).settings;
+    document.getElementById('planInput').value='';
+    renderPlans();
+  }catch(e){ alert(e.message); }
+}
+async function removePlan(i){
+  const plans = (SETTINGS.plans||[]).slice(); plans.splice(i,1);
+  try{ SETTINGS = (await api('/api/settings','PUT',{plans})).settings; renderPlans(); }
+  catch(e){ alert(e.message); }
 }
 async function addUser(){
   try{
@@ -975,6 +1087,7 @@ function renderSummary(t, targetId){
   add('Technician', t.assignedName);
   add('Created', fmt(t.created));
   if(t.completed) add('Completed', fmt(t.completed));
+  if(t.data.cable_used!==undefined) add('Cable Used (auto-computed)', t.data.cable_used+' m');
   steps.forEach(s=>s.fields.forEach(f=>{
     const v=t.data[f.k];
     if(v==null||v==='') return;
@@ -990,7 +1103,7 @@ function renderSummary(t, targetId){
       <table class="summary-table">${rows.map(r=>`<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td></tr>`).join('')}</table>
       ${photos.length?`<label style="margin-top:14px">Photos (${photos.length})</label>
         <div class="photos-grid">${photos.map(p=>`<figure><img src="${p.img}"><figcaption>${esc(p.cap)}${p.gps?'<br>📍 '+p.gps:''}</figcaption></figure>`).join('')}</div>`:''}
-      ${sig?`<label style="margin-top:14px">Customer Signature</label><img src="${sig}" style="max-width:260px;border:1px solid var(--border);border-radius:8px;background:#fff">`:''}
+      ${sig?`<label style="margin-top:14px">Customer Signature${t.data.signature_time?' — signed '+fmt(t.data.signature_time):''}</label><img src="${sig}" style="max-width:260px;border:1px solid var(--border);border-radius:8px;background:#fff">`:''}
     </div>`;
 }
 
