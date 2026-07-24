@@ -293,11 +293,10 @@
 <div id="sigOverlay" class="hidden">
   <div class="sig-modal">
     <div class="step-title" style="font-size:16px">Customer Signature</div>
-    <div class="step-desc">Hand the phone to the customer to type their full name as their signature.</div>
+    <div class="step-desc">Hand the phone to the customer: sign in the box below with your finger, then type your full name.</div>
+    <canvas id="sigCanvas"></canvas>
     <label>Full Name</label>
-    <input id="sigTyped" placeholder="e.g. Juan Dela Cruz" oninput="sigPreview()">
-    <div class="gps-out" id="sigPreviewBox" style="font-family:'Brush Script MT','Segoe Script','Snell Roundhand',cursive;font-size:26px;font-style:italic;min-height:44px;background:#fff;border-color:var(--border);color:var(--text)"></div>
-    <canvas id="sigCanvas" style="display:none"></canvas>
+    <input id="sigTyped" placeholder="e.g. Juan Dela Cruz">
     <div class="wizard-btns">
       <button class="btn btn-ghost" onclick="sigClear()">Clear</button>
       <button class="btn btn-warn" onclick="closeSigModal()">Cancel</button>
@@ -448,18 +447,19 @@ const WORKFLOWS = {
       fields:[
         {k:'cable_start', type:'number', label:'Cable Meters Left on Reel — BEFORE the Job (m)', req:true, placeholder:'e.g. 1200', step:'0.1'}
       ]},
-    { key:'napbox', title:'2. NAP Box &amp; Main NAP Details',
-      desc:'Install the NAP box on the post (fed from the Main NAP). Record the Main NAP details and the fiber color used from the Main NAP going to the NAP on the post, then photograph both the Main NAP and the new NAP box with its tagging. Time and GPS are stamped automatically.',
+    { key:'mainnap', title:'2. Main NAP Details',
+      desc:'Fill out the details of the Main NAP box feeding the new NAP: the port number used for the new NAP box and the fiber color of the run. Then take a photo of the Main NAP — time and GPS are stamped automatically.',
       fields:[
-        {k:'nap_id', type:'text', label:'NAP Box ID / Tag Name', req:true, placeholder:'e.g. NAP-BRGY1-015'},
-        {k:'main_nap', type:'text', label:'Main NAP Details (ID / location)', req:true, placeholder:'e.g. MAIN-NAP-02, corner post Brgy 1'},
-        {k:'fiber_color', type:'select', label:'Fiber Color Used (Main NAP → NAP on post)', req:true, options:['Blue','Orange','Green','Brown','Slate','White','Red','Black','Yellow','Violet','Rose','Aqua']},
-        {k:'main_nap_photo', type:'photo', label:'Photo of Main NAP', req:true, autogps:true},
-        {k:'nap_box_photo', type:'photo', label:'Photo of NAP Box with Tagging', req:true, autogps:true}
+        {k:'main_nap', type:'text', label:'Main NAP Box Details (ID / location)', req:true, placeholder:'e.g. MAIN-NAP-02, corner post Brgy 1'},
+        {k:'main_nap_port', type:'text', label:'Port Number Used for the New NAP Box', req:true, placeholder:'e.g. Port 3 of 8'},
+        {k:'fiber_color', type:'select', label:'Fiber Color Used (Main NAP → New NAP)', req:true, options:['Blue','Orange','Green','Brown','Slate','White','Red','Black','Yellow','Violet','Rose','Aqua']},
+        {k:'main_nap_photo', type:'photo', label:'Photo of Main NAP', req:true, autogps:true}
       ]},
-    { key:'reading', title:'3. NAP Box Reading',
-      desc:'Measure and record the optical reading at the newly installed NAP box.',
+    { key:'napbox', title:'3. New NAP Box &amp; Reading',
+      desc:'Install the new NAP box on the post, take a photo of it with its tagging, and record its optical reading.',
       fields:[
+        {k:'nap_id', type:'text', label:'New NAP Box ID / Tag Name', req:true, placeholder:'e.g. NAP-BRGY1-015'},
+        {k:'nap_box_photo', type:'photo', label:'Photo of New NAP Box with Tagging', req:true, autogps:true},
         {k:'nap_reading', type:'number', label:'NAP Box Reading (dBm)', req:true, placeholder:'e.g. -18.5', step:'0.1'},
         {k:'nap_reading_photo', type:'photo', label:'Photo of Power Meter Reading', autogps:true}
       ]},
@@ -806,7 +806,7 @@ function renderField(t,f){
   if(f.type==='signature'){
     const inner = v
       ? `<img src="${v}" style="background:#fff;max-height:160px;object-fit:contain"><div class="photo-stamp">✍ Signed ${fmt(t.data[f.k+'_time'])} — tap to sign again</div>`
-      : `<div style="font-size:30px">✍</div>Tap here — the customer types their Full Name as signature`;
+      : `<div style="font-size:30px">✍</div>Tap here — the customer signs and types their full name`;
     return `<label>${f.label}${reqMark}</label>
       <div class="photo-box ${v?'has':''}" onclick="openSigModal('${f.k}')">${inner}</div>`;
   }
@@ -944,44 +944,55 @@ function getGPS(key){
   {enableHighAccuracy:true, timeout:12000});
 }
 
-/* =================== SIGNATURE MODAL (typed full name) =================== */
-let sigKey=null;
+/* =================== SIGNATURE MODAL (draw + full name) =================== */
+let sigKey=null, sigDrawn=false;
 function openSigModal(key){
-  sigKey=key;
+  sigKey=key; sigDrawn=false;
   collectStep();
   document.getElementById('sigTyped').value='';
-  document.getElementById('sigPreviewBox').textContent='';
   document.getElementById('sigOverlay').classList.remove('hidden');
-  setTimeout(()=>{ try{ document.getElementById('sigTyped').focus(); }catch(e){} }, 50);
-}
-function sigPreview(){
-  document.getElementById('sigPreviewBox').textContent = document.getElementById('sigTyped').value;
+  const c = document.getElementById('sigCanvas');
+  const dpr = window.devicePixelRatio||1;
+  requestAnimationFrame(()=>{
+    c.width = c.offsetWidth*dpr; c.height = 220*dpr;
+    const ctx = c.getContext && c.getContext('2d');
+    if(!ctx) return;
+    ctx.scale(dpr,dpr);
+    ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,c.offsetWidth,220);
+    ctx.lineWidth=2.5; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#0e2f55';
+    let drawing=false;
+    const pos = ev => {
+      const r=c.getBoundingClientRect();
+      const pt=ev.touches?ev.touches[0]:ev;
+      return {x:pt.clientX-r.left, y:pt.clientY-r.top};
+    };
+    c.onmousedown=c.ontouchstart=ev=>{ drawing=true; const pt=pos(ev); ctx.beginPath(); ctx.moveTo(pt.x,pt.y); ev.preventDefault(); };
+    c.onmousemove=c.ontouchmove=ev=>{ if(!drawing) return; const pt=pos(ev); ctx.lineTo(pt.x,pt.y); ctx.stroke(); sigDrawn=true; ev.preventDefault(); };
+    c.onmouseup=c.onmouseleave=c.ontouchend=()=>{ drawing=false; };
+  });
 }
 function closeSigModal(){ document.getElementById('sigOverlay').classList.add('hidden'); sigKey=null; }
 function sigClear(){
+  sigDrawn=false;
   document.getElementById('sigTyped').value='';
-  document.getElementById('sigPreviewBox').textContent='';
+  const c = document.getElementById('sigCanvas');
+  const ctx = c.getContext && c.getContext('2d');
+  if(ctx){
+    ctx.clearRect(0,0,c.width,c.height);
+    ctx.fillStyle='#ffffff';
+    ctx.fillRect(0,0,c.width,c.height);
+    ctx.fillStyle='#0e2f55';
+  }
 }
 function sigSubmit(){
   const t = byId(currentId);
   if(!t || !sigKey) return;
   const typed = document.getElementById('sigTyped').value.trim();
-  if(!typed){ alert('Please ask the customer to type their full name.'); return; }
-  /* render the typed name as a signature image */
+  if(!sigDrawn){ alert('Please ask the customer to sign in the box.'); return; }
+  if(!typed){ alert('Please ask the customer to type their full name below the signature.'); return; }
   const c = document.getElementById('sigCanvas');
-  const dpr = window.devicePixelRatio||1;
-  c.width = 520*dpr; c.height = 160*dpr;
   let dataUrl = null;
-  try{
-    const ctx = c.getContext('2d');
-    ctx.scale(dpr,dpr);
-    ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,520,160);
-    ctx.font='italic 600 40px "Brush Script MT","Segoe Script","Snell Roundhand",cursive';
-    ctx.fillStyle='#0e2f55';
-    ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.fillText(typed, 260, 80);
-    dataUrl = c.toDataURL('image/png');
-  }catch(e){}
+  try{ dataUrl = c.toDataURL('image/png'); }catch(e){}
   const key = sigKey;
   t.data[key] = dataUrl || ('signed:'+typed);
   t.data[key+'_name'] = typed;
