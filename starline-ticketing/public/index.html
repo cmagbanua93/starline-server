@@ -452,7 +452,7 @@ const WORKFLOWS = {
       fields:[
         {k:'main_nap', type:'text', label:'Main NAP Box Details (ID / location)', req:true, placeholder:'e.g. MAIN-NAP-02, corner post Brgy 1'},
         {k:'main_nap_port', type:'text', label:'Port Number Used for the New NAP Box', req:true, placeholder:'e.g. Port 3 of 8'},
-        {k:'fiber_color', type:'select', label:'Fiber Color Used (Main NAP → New NAP)', req:true, options:['Blue','Orange','Green','Brown','Slate','White','Red','Black','Yellow','Violet','Rose','Aqua']},
+        {k:'fiber_color', type:'select', label:'Fiber Color Used (Main NAP → New NAP)', req:true, options:['No Color','Blue','Orange','Green','Brown','Slate','White','Red','Black','Yellow','Violet','Rose','Aqua']},
         {k:'main_nap_photo', type:'photo', label:'Photo of Main NAP', req:true, autogps:true}
       ]},
     { key:'napbox', title:'3. New NAP Box &amp; Reading',
@@ -926,7 +926,13 @@ function savePhoto(key, img, autogps){
     navigator.geolocation.getCurrentPosition(pn=>{
       data.lat=pn.coords.latitude; data.lng=pn.coords.longitude;
       persist(t); renderTicket();
-    }, ()=>{}, {enableHighAccuracy:true, timeout:8000});
+    }, ()=>{
+      /* first attempt failed — retry once with relaxed accuracy so the photo still gets GPS */
+      navigator.geolocation.getCurrentPosition(pn=>{
+        data.lat=pn.coords.latitude; data.lng=pn.coords.longitude;
+        persist(t); renderTicket();
+      }, ()=>{}, {enableHighAccuracy:false, timeout:15000, maximumAge:60000});
+    }, {enableHighAccuracy:true, timeout:10000});
   }
 }
 
