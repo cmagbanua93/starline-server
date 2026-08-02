@@ -142,6 +142,17 @@
   .sig-modal{background:#fff;border-radius:16px;padding:16px;width:100%;max-width:560px;box-shadow:0 20px 50px rgba(0,0,0,.3)}
   .sig-modal canvas{width:100%;height:220px;border:1.5px dashed var(--border);border-radius:12px;touch-action:none;background:#fff;display:block}
 
+  /* loading splash */
+  #splash{position:fixed;inset:0;z-index:300;background:linear-gradient(150deg,#12406e,#081c34);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;transition:opacity .35s}
+  #splash.splash-hide{opacity:0;pointer-events:none}
+  #splash svg{width:74px;height:74px;animation:pulse 1.4s ease-in-out infinite}
+  #splash .sp-title{color:#fff;font-size:20px;font-weight:800}
+  #splash .sp-title span{color:var(--gold)}
+  #splash .sp-sub{color:#93b3d4;font-size:12px}
+  .spinner{width:34px;height:34px;border:4px solid rgba(255,255,255,.2);border-top-color:var(--gold);border-radius:50%;animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
+
   @media print{
     header,.tabs,.no-print,.steps-nav,.wizard-btns,.filter-row,.stats,.split{display:none!important}
     body{background:#fff;padding:0}
@@ -150,6 +161,14 @@
 </style>
 </head>
 <body>
+
+<!-- ============ LOADING SPLASH ============ -->
+<div id="splash">
+  <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><polygon points="50,6 62.4,38.2 96,38.2 68.8,58.6 80.9,92 50,71.8 19.1,92 31.2,58.6 4,38.2 37.6,38.2" fill="#f2c230"/></svg>
+  <div class="sp-title"><span>Star</span>Line Internet</div>
+  <div class="spinner"></div>
+  <div class="sp-sub">Loading, please wait…</div>
+</div>
 
 <header id="hdr" class="hidden">
   <button class="hbtn" id="backBtn" onclick="goBack()" style="display:none">‹ Back</button>
@@ -190,6 +209,7 @@
 <div class="wrap hidden" id="viewTechList">
   <div class="step-title" style="font-size:15px;margin-bottom:8px">✅ Completed Tickets</div>
   <div class="stats" id="techStats"></div>
+  <div class="card" id="techStockPanel" onclick="showTechReq()" style="cursor:pointer"></div>
   <div class="type-tabs no-print" id="techTypeTabs"></div>
   <div class="filter-row no-print">
     <select id="fStatus" onchange="renderTechList()">
@@ -742,6 +762,21 @@ function renderTechList(){
     <div class="tstat tstat-week"><div class="n">${doneSince(weekStart)}</div><div class="l">This Week</div></div>
     <div class="tstat tstat-today"><div class="n">${doneSince(dayStart)}</div><div class="l">✔ Today</div></div>
     <div class="tstat tstat-month"><div class="n">${doneSince(monthStart)}</div><div class="l">This Month</div></div>`;
+
+  /* current stock on hand */
+  const inv = (USER&&USER.inv)||{connectors:0,cables:[],items:[]};
+  const reels = (inv.cables||[]).filter(r=>r.meters>0);
+  const lowFic = (inv.connectors||0)<5;
+  document.getElementById('techStockPanel').innerHTML = `
+    <div class="ticket-top" style="margin-bottom:4px">
+      <span class="step-title" style="font-size:14px">📦 My Stock on Hand</span>
+      <span class="badge b-install">Tap to request ›</span>
+    </div>
+    <div class="tmeta" style="font-size:13px${lowFic?';color:var(--danger);font-weight:700':''}">🔌 FIC Connectors: ${inv.connectors||0} pcs${lowFic?' — running low!':''}</div>
+    ${reels.length
+      ? reels.map(r=>`<div class="tmeta" style="font-size:13px${r.meters<50?';color:var(--danger);font-weight:700':''}">🧵 ${esc(r.name)}: ${r.meters} m left${r.meters<50?' — running low!':''}</div>`).join('')
+      : '<div class="tmeta" style="font-size:13px;color:var(--danger);font-weight:700">🧵 No fiber cable — request from admin!</div>'}
+    ${(inv.items||[]).map(i=>`<div class="tmeta" style="font-size:13px">📦 ${esc(i.name)}: ${i.qty} pcs</div>`).join('')}`;
 
   renderTypeTabs('techTypeTabs', techType, 'setTechType');
   const f = document.getElementById('fStatus').value;
@@ -1673,15 +1708,23 @@ setInterval(()=>{
 }, 30000);
 
 /* =================== INIT =================== */
+function hideSplash(){
+  const el = document.getElementById('splash');
+  if(!el) return;
+  el.classList.add('splash-hide');
+  setTimeout(()=>el.classList.add('hidden'), 400);
+}
 (async function init(){
   if(TOKEN){
     try{
       USER = (await api('/api/me')).user;
-      enterApp();
+      await enterApp();
+      hideSplash();
       return;
     }catch(e){ /* token invalid -> login */ }
   }
   show('viewLogin');
+  hideSplash();
 })();
 </script>
 </body>
