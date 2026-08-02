@@ -1473,11 +1473,71 @@ function renderUsers(){
         <div class="um">@${esc(u.username)}${u.role==='tech'?` · 🧵 ${reelTxt} · 🔌 ${inv.connectors||0} pcs FIC`:''}</div>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
-        ${u.role==='tech'?`<button class="btn btn-ok btn-sm" style="margin-top:0" onclick="addStock('${u.id}','${esc(u.name)}')">＋ Stock</button>`:''}
+        ${u.role==='tech'?`<button class="btn btn-ok btn-sm" style="margin-top:0" onclick="addStock('${u.id}','${esc(u.name)}')">＋ Stock</button>
+        <button class="btn btn-ghost btn-sm" style="margin-top:0" onclick="toggleManage('${u.id}')">⚙ Manage</button>`:''}
         <button class="btn btn-ghost btn-sm" style="margin-top:0" onclick="resetPassword('${u.id}','${esc(u.name)}')">Reset PW</button>
         ${u.id!==USER.id?`<button class="btn btn-warn btn-sm" style="margin-top:0" onclick="deleteUser('${u.id}','${esc(u.name)}')">✕</button>`:''}
       </div>
-    </div>`;}).join('');
+    </div>
+    ${u.role==='tech' && manageUserId===u.id ? manageStockHtml(u) : ''}`;}).join('');
+}
+/* ---- per-technician stock editor ---- */
+let manageUserId = null;
+function toggleManage(id){ manageUserId = manageUserId===id ? null : id; renderUsers(); }
+function manageStockHtml(u){
+  const inv = u.inv||{connectors:0,cables:[],items:[]};
+  return `<div style="background:#f8fafc;border:1px solid var(--border);border-radius:10px;padding:10px;margin:6px 0 12px">
+    <div class="tmeta" style="font-weight:700;margin-bottom:6px">Edit stock on hand — ${esc(u.name)}</div>
+    ${(inv.cables||[]).map(r=>`
+      <div class="user-row" style="padding:6px 0">
+        <div class="um">🧵 ${esc(r.name)} — <b>${r.meters} m</b></div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-sm" style="margin-top:0;padding:4px 10px" onclick="editReel('${u.id}','${r.id}','${esc(r.name)}',${r.meters})">✎ Edit</button>
+          <button class="btn btn-warn btn-sm" style="margin-top:0;padding:4px 10px" onclick="deleteReel('${u.id}','${r.id}','${esc(r.name)}')">✕</button>
+        </div>
+      </div>`).join('')||'<div class="um">No cable reels.</div>'}
+    <div class="user-row" style="padding:6px 0">
+      <div class="um">🔌 FIC Connectors — <b>${inv.connectors||0} pcs</b></div>
+      <button class="btn btn-ghost btn-sm" style="margin-top:0;padding:4px 10px" onclick="adjustConnectors('${u.id}',${inv.connectors||0})">✎ Adjust</button>
+    </div>
+    ${(inv.items||[]).map(i=>`
+      <div class="user-row" style="padding:6px 0">
+        <div class="um">📦 ${esc(i.name)} — <b>${i.qty} pcs</b></div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-sm" style="margin-top:0;padding:4px 10px" onclick="adjustItem('${u.id}','${esc(i.name)}',${i.qty})">✎ Adjust</button>
+          <button class="btn btn-warn btn-sm" style="margin-top:0;padding:4px 10px" onclick="adjustItem('${u.id}','${esc(i.name)}',${i.qty},true)">✕</button>
+        </div>
+      </div>`).join('')}
+  </div>`;
+}
+async function invPost(userId, body){
+  try{ await api('/api/users/'+userId+'/inventory','POST',body); await loadUsers(); renderUsers(); }
+  catch(e){ alert(e.message); }
+}
+function editReel(userId, reelId, name, current){
+  const v = prompt('New remaining meters for "'+name+'":', current);
+  if(v===null) return;
+  invPost(userId, {setReelId:reelId, setReelMeters:parseFloat(v)||0});
+}
+function deleteReel(userId, reelId, name){
+  if(!confirm('Remove cable "'+name+'" from this technician?')) return;
+  invPost(userId, {removeReel:reelId});
+}
+function adjustConnectors(userId, current){
+  const v = prompt('Set new FIC connector count (currently '+current+'):', current);
+  if(v===null) return;
+  const target = parseInt(v)||0;
+  invPost(userId, {connectors: target-current});
+}
+function adjustItem(userId, name, current, remove){
+  if(remove){
+    if(!confirm('Remove all "'+name+'" from this technician?')) return;
+    invPost(userId, {itemName:name, itemQty:-current});
+    return;
+  }
+  const v = prompt('Set new quantity of "'+name+'" (currently '+current+'):', current);
+  if(v===null) return;
+  invPost(userId, {itemName:name, itemQty:(parseInt(v)||0)-current});
 }
 async function addStock(id, name){
   const cableName = prompt('Cable type/name to give '+name+' (e.g. "1 core", blank if none):','');
