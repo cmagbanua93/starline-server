@@ -17,6 +17,8 @@ try { db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); } catch (e) {}
 db.users = db.users || []; db.tickets = db.tickets || []; db.sessions = db.sessions || {};
 db.settings = db.settings || { plans: [] };
 db.requests = db.requests || [];
+/* warehouse/office stock: cables are reel types {id, name, meters (per reel), qty (pcs)} */
+db.warehouse = db.warehouse || { connectors: 0, cables: [] };
 /* inventory model: { connectors: N, cables: [{id, name, meters}] } — migrate old flat cable number */
 db.users.forEach(u => {
   u.inv = u.inv || {};
@@ -171,6 +173,25 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { settings: db.settings });
     }
 
+    /* ---- warehouse inventory ---- */
+    if (p === '/api/warehouse' && req.method === 'GET') return json(res, 200, { warehouse: db.warehouse });
+    if (p === '/api/warehouse' && req.method === 'POST') {
+      if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+      const b = await readBody(req);
+      const name = String(b.cableName || '').trim();
+      const meters = parseFloat(b.reelMeters) || 0;
+      const qty = parseInt(b.qty) || 0;
+      if (name && meters > 0 && qty !== 0) {
+        const existing = db.warehouse.cables.find(c => c.name.toLowerCase() === name.toLowerCase() && c.meters === meters);
+        if (existing) { existing.qty += qty; if (existing.qty <= 0) db.warehouse.cables = db.warehouse.cables.filter(c => c !== existing); }
+        else if (qty > 0) db.warehouse.cables.push({ id: 'w' + Date.now() + Math.random().toString(36).slice(2, 6), name, meters, qty });
+      }
+      if (b.connectors !== undefined) db.warehouse.connectors = Math.max(0, (db.warehouse.connectors || 0) + (parseInt(b.connectors) || 0));
+      if (b.removeCable) db.warehouse.cables = db.warehouse.cables.filter(c => c.id !== b.removeCable);
+      saveDB();
+      return json(res, 200, { warehouse: db.warehouse });
+    }
+
     /* ---- material requests ---- */
     if (p === '/api/requests' && req.method === 'GET') {
       const list = isAdmin ? db.requests : db.requests.filter(r => r.techId === me.id);
@@ -215,7 +236,23 @@ const server = http.createServer(async (req, res) => {
           if (!['pending', 'approved'].includes(r.status)) return json(res, 400, { error: 'Already processed' });
           const tech = db.users.find(u => u.id === r.techId);
           if (!tech) return json(res, 400, { error: 'Technician no longer exists' });
-          addStockTo(tech, r.cableName, r.cableMeters, r.connectors);
+          /* take the items out of warehouse stock */
+          let reelsToGive = [];
+          if (r.cableName && r.cableMeters > 0) {
+            const wh = db.warehouse.cables.find(c => c.name.toLowerCase() === r.cableName.toLowerCase());
+            if (!wh) return json(res, 400, { error: 'No "' + r.cableName + '" cable in warehouse inventory. Add it first (Requests tab > Warehouse Inventory).' });
+            const reelsNeeded = Math.ceil(r.cableMeters / wh.meters);
+            if (wh.qty < reelsNeeded) return json(res, 400, { error: 'Not enough stock: request needs ' + reelsNeeded + ' pc(s) of ' + wh.name + ' (' + wh.meters + ' m/reel) but warehouse has only ' + wh.qty + ' pc(s).' });
+            wh.qty -= reelsNeeded;
+            if (wh.qty <= 0) db.warehouse.cables = db.warehouse.cables.filter(c => c !== wh);
+            for (let i = 0; i < reelsNeeded; i++) reelsToGive.push({ name: wh.name, meters: wh.meters });
+          }
+          if (r.connectors > 0) {
+            if ((db.warehouse.connectors || 0) < r.connectors) return json(res, 400, { error: 'Not enough FIC connectors in warehouse: requested ' + r.connectors + ', available ' + (db.warehouse.connectors || 0) + '.' });
+            db.warehouse.connectors -= r.connectors;
+          }
+          reelsToGive.forEach(reel => addStockTo(tech, reel.name, reel.meters, 0));
+          addStockTo(tech, '', 0, r.connectors);
           r.status = 'released'; r.released = Date.now();
         } else return json(res, 400, { error: 'Unknown action' });
         r.decidedBy = me.name;
