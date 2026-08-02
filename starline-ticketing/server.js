@@ -320,7 +320,7 @@ const server = http.createServer(async (req, res) => {
       if (!username || !name || password.length < 6)
         return json(res, 400, { error: 'Name, username and a password of 6+ characters are required' });
       if (db.users.some(u => u.username === username)) return json(res, 400, { error: 'Username already taken' });
-      const u = { id: 'u' + Date.now() + Math.random().toString(36).slice(2, 6), username, name, role: b.role === 'admin' ? 'admin' : 'tech', pass: hashPassword(password), inv: { cable: 0, connectors: 0 } };
+      const u = { id: 'u' + Date.now() + Math.random().toString(36).slice(2, 6), username, name, role: b.role === 'admin' ? 'admin' : 'tech', pass: hashPassword(password), inv: { connectors: 0, cables: [], items: [] } };
       db.users.push(u); saveDB();
       return json(res, 200, { user: publicUser(u) });
     }
@@ -340,7 +340,12 @@ const server = http.createServer(async (req, res) => {
       const u = db.users.find(x => x.id === m[1]);
       if (!u) return json(res, 404, { error: 'User not found' });
       addStockTo(u, b.cableName, b.cableMeters, b.connectors);
+      if (b.itemName !== undefined && b.itemQty !== undefined) addItemTo(u, b.itemName, b.itemQty);
       if (b.removeReel) { u.inv.cables = (u.inv.cables || []).filter(r => r.id !== b.removeReel); }
+      if (b.setReelId && b.setReelMeters !== undefined) {
+        const reel = (u.inv.cables || []).find(r => r.id === b.setReelId);
+        if (reel) reel.meters = Math.round((parseFloat(b.setReelMeters) || 0) * 100) / 100;
+      }
       saveDB();
       return json(res, 200, { user: publicUser(u) });
     }
