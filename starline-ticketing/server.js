@@ -17,13 +17,16 @@ try { db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); } catch (e) {}
 db.users = db.users || []; db.tickets = db.tickets || []; db.sessions = db.sessions || {};
 db.settings = db.settings || { plans: [] };
 db.requests = db.requests || [];
-/* warehouse/office stock: cables are reel types {id, name, meters (per reel), qty (pcs)} */
-db.warehouse = db.warehouse || { connectors: 0, cables: [] };
+/* warehouse/office stock: cables are reel types {id, name, meters (per reel), qty (pcs)};
+   items are any other stock {id, name, qty} */
+db.warehouse = db.warehouse || { connectors: 0, cables: [], items: [] };
+db.warehouse.items = db.warehouse.items || [];
 /* inventory model: { connectors: N, cables: [{id, name, meters}] } — migrate old flat cable number */
 db.users.forEach(u => {
   u.inv = u.inv || {};
   if (u.inv.connectors === undefined) u.inv.connectors = 0;
   if (!Array.isArray(u.inv.cables)) u.inv.cables = [];
+  if (!Array.isArray(u.inv.items)) u.inv.items = [];
   if (typeof u.inv.cable === 'number') {
     if (u.inv.cable > 0) u.inv.cables.push({ id: 'r' + Date.now() + Math.random().toString(36).slice(2, 6), name: 'Stock cable', meters: u.inv.cable });
     delete u.inv.cable;
@@ -100,7 +103,17 @@ function auth(req) {
   const user = db.users.find(u => u.id === db.sessions[token]);
   return user ? { user, token } : null;
 }
-function publicUser(u) { return { id: u.id, username: u.username, name: u.name, role: u.role, inv: u.inv || { connectors: 0, cables: [] } }; }
+function publicUser(u) { return { id: u.id, username: u.username, name: u.name, role: u.role, inv: u.inv || { connectors: 0, cables: [], items: [] } }; }
+function addItemTo(u, name, qty) {
+  u.inv = u.inv || { connectors: 0, cables: [], items: [] };
+  u.inv.items = u.inv.items || [];
+  const n = String(name || '').trim();
+  const q = parseInt(qty) || 0;
+  if (!n || q === 0) return;
+  const ex = u.inv.items.find(i => i.name.toLowerCase() === n.toLowerCase());
+  if (ex) { ex.qty += q; if (ex.qty <= 0) u.inv.items = u.inv.items.filter(i => i !== ex); }
+  else if (q > 0) u.inv.items.push({ name: n, qty: q });
+}
 function addStockTo(u, cableName, cableMeters, connectors) {
   u.inv = u.inv || { connectors: 0, cables: [] };
   u.inv.cables = u.inv.cables || [];
@@ -187,7 +200,16 @@ const server = http.createServer(async (req, res) => {
         else if (qty > 0) db.warehouse.cables.push({ id: 'w' + Date.now() + Math.random().toString(36).slice(2, 6), name, meters, qty });
       }
       if (b.connectors !== undefined) db.warehouse.connectors = Math.max(0, (db.warehouse.connectors || 0) + (parseInt(b.connectors) || 0));
+      /* generic items (modems, clamps, hooks, patch cords, ...) */
+      const itemName = String(b.itemName || '').trim();
+      const itemQty = parseInt(b.itemQty) || 0;
+      if (itemName && itemQty !== 0) {
+        const ex = db.warehouse.items.find(i => i.name.toLowerCase() === itemName.toLowerCase());
+        if (ex) { ex.qty += itemQty; if (ex.qty <= 0) db.warehouse.items = db.warehouse.items.filter(i => i !== ex); }
+        else if (itemQty > 0) db.warehouse.items.push({ id: 'i' + Date.now() + Math.random().toString(36).slice(2, 6), name: itemName, qty: itemQty });
+      }
       if (b.removeCable) db.warehouse.cables = db.warehouse.cables.filter(c => c.id !== b.removeCable);
+      if (b.removeItem) db.warehouse.items = db.warehouse.items.filter(i => i.id !== b.removeItem);
       saveDB();
       return json(res, 200, { warehouse: db.warehouse });
     }
@@ -199,16 +221,26 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/requests' && req.method === 'POST') {
       const b = await readBody(req);
-      const cableName = String(b.cableName || '').trim();
-      const cableMeters = parseFloat(b.cableMeters) || 0;
-      const connectors = parseInt(b.connectors) || 0;
-      if (!(connectors > 0) && !(cableName && cableMeters > 0))
-        return json(res, 400, { error: 'Request at least connectors, or a cable type with meters (e.g. "1 core", 1000)' });
+      const kind = String(b.kind || '').trim();       // 'cable' | 'connector' | 'item'
+      const name = String(b.name || b.cableName || '').trim();
+      const qty = parseInt(b.qty || b.cableReels || b.connectors) || 0;
+      if (!['cable', 'connector', 'item'].includes(kind)) return json(res, 400, { error: 'Select an item to request' });
+      if (qty <= 0) return json(res, 400, { error: 'Enter a quantity greater than zero' });
+      let cableMeters = 0;
+      if (kind === 'cable') {
+        const wh = db.warehouse.cables.find(c => c.name.toLowerCase() === name.toLowerCase());
+        if (!wh) return json(res, 400, { error: 'That cable type is not in the warehouse inventory' });
+        cableMeters = qty * wh.meters;
+      }
+      if (kind === 'item') {
+        const wh = db.warehouse.items.find(i => i.name.toLowerCase() === name.toLowerCase());
+        if (!wh) return json(res, 400, { error: 'That item is not in the warehouse inventory' });
+      }
       const r = {
         id: 'q' + Date.now() + Math.random().toString(36).slice(2, 6),
         techId: me.id, techName: me.name,
-        cableName: cableName || null, cableMeters: cableMeters || 0,
-        connectors, note: String(b.note || '').trim(),
+        kind, name: kind === 'connector' ? 'FIC Connector' : name, qty, cableMeters,
+        note: String(b.note || '').trim(),
         status: 'pending', created: Date.now()
       };
       db.requests.push(r); saveDB();
@@ -236,23 +268,35 @@ const server = http.createServer(async (req, res) => {
           if (!['pending', 'approved'].includes(r.status)) return json(res, 400, { error: 'Already processed' });
           const tech = db.users.find(u => u.id === r.techId);
           if (!tech) return json(res, 400, { error: 'Technician no longer exists' });
-          /* take the items out of warehouse stock */
-          let reelsToGive = [];
-          if (r.cableName && r.cableMeters > 0) {
-            const wh = db.warehouse.cables.find(c => c.name.toLowerCase() === r.cableName.toLowerCase());
-            if (!wh) return json(res, 400, { error: 'No "' + r.cableName + '" cable in warehouse inventory. Add it first (Requests tab > Warehouse Inventory).' });
-            const reelsNeeded = Math.ceil(r.cableMeters / wh.meters);
-            if (wh.qty < reelsNeeded) return json(res, 400, { error: 'Not enough stock: request needs ' + reelsNeeded + ' pc(s) of ' + wh.name + ' (' + wh.meters + ' m/reel) but warehouse has only ' + wh.qty + ' pc(s).' });
-            wh.qty -= reelsNeeded;
+          /* take the items out of warehouse stock and move to the technician */
+          const kind = r.kind || (r.cableName ? 'cable' : 'connector');       // legacy support
+          const name = r.name || r.cableName;
+          const qty = r.qty || r.cableReels || r.connectors || 0;
+          if (kind === 'cable' && name && qty > 0) {
+            const wh = db.warehouse.cables.find(c => c.name.toLowerCase() === name.toLowerCase());
+            if (!wh) return json(res, 400, { error: 'No "' + name + '" cable in warehouse inventory. Add it first (Requests tab > Warehouse Inventory).' });
+            if (wh.qty < qty) return json(res, 400, { error: 'Not enough stock: request needs ' + qty + ' reel(s) of ' + wh.name + ' (' + wh.meters + ' m/reel) but warehouse has only ' + wh.qty + '.' });
+            wh.qty -= qty;
             if (wh.qty <= 0) db.warehouse.cables = db.warehouse.cables.filter(c => c !== wh);
-            for (let i = 0; i < reelsNeeded; i++) reelsToGive.push({ name: wh.name, meters: wh.meters });
+            for (let i = 0; i < qty; i++) addStockTo(tech, wh.name, wh.meters, 0);
+          } else if (kind === 'connector' && qty > 0) {
+            if ((db.warehouse.connectors || 0) < qty) return json(res, 400, { error: 'Not enough FIC connectors in warehouse: requested ' + qty + ', available ' + (db.warehouse.connectors || 0) + '.' });
+            db.warehouse.connectors -= qty;
+            addStockTo(tech, '', 0, qty);
+          } else if (kind === 'item' && name && qty > 0) {
+            const wh = db.warehouse.items.find(i => i.name.toLowerCase() === name.toLowerCase());
+            if (!wh) return json(res, 400, { error: 'No "' + name + '" in warehouse inventory. Add it first.' });
+            if (wh.qty < qty) return json(res, 400, { error: 'Not enough stock: requested ' + qty + ' of ' + wh.name + ' but warehouse has only ' + wh.qty + '.' });
+            wh.qty -= qty;
+            if (wh.qty <= 0) db.warehouse.items = db.warehouse.items.filter(i => i !== wh);
+            addItemTo(tech, wh.name, qty);
           }
-          if (r.connectors > 0) {
-            if ((db.warehouse.connectors || 0) < r.connectors) return json(res, 400, { error: 'Not enough FIC connectors in warehouse: requested ' + r.connectors + ', available ' + (db.warehouse.connectors || 0) + '.' });
+          /* legacy combined requests (cable + connectors in one) */
+          if (!r.kind && r.cableName && r.connectors > 0) {
+            if ((db.warehouse.connectors || 0) < r.connectors) return json(res, 400, { error: 'Not enough FIC connectors in warehouse.' });
             db.warehouse.connectors -= r.connectors;
+            addStockTo(tech, '', 0, r.connectors);
           }
-          reelsToGive.forEach(reel => addStockTo(tech, reel.name, reel.meters, 0));
-          addStockTo(tech, '', 0, r.connectors);
           r.status = 'released'; r.released = Date.now();
         } else return json(res, 400, { error: 'Unknown action' });
         r.decidedBy = me.name;
