@@ -212,7 +212,7 @@
   <div class="card" id="techStockPanel" onclick="showTechReq()" style="cursor:pointer"></div>
   <div class="type-tabs no-print" id="techTypeTabs"></div>
   <div class="filter-row no-print">
-    <select id="fStatus" onchange="renderTechList()">
+    <select id="fStatus" onchange="techPeriod=null;renderTechList()">
       <option value="active">Active jobs</option>
       <option value="">All</option>
       <option value="open">Open</option>
@@ -735,6 +735,13 @@ function renderTypeTabs(containerId, current, setter){
     `<button class="ttab ${current===v?('on-'+(v||'all')):''}" onclick="${setter}('${v}')">${l}</button>`).join('');
 }
 function setTechType(v){ techType=v; renderTechList(); }
+let techPeriod = null;
+function filterCompleted(p){
+  techPeriod = techPeriod===p ? null : p;  // tap again to clear
+  if(techPeriod) document.getElementById('fStatus').value='completed';
+  else document.getElementById('fStatus').value='active';
+  renderTechList();
+}
 function setDashType(v){ dashType=v; renderDash(); }
 function stepComplete(t, step){ return step.fields.every(f => !f.req || hasValue(t, f)); }
 function hasValue(t, f){
@@ -758,10 +765,11 @@ function renderTechList(){
   const weekStart = dayStart - wd*86400000;
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
   const doneSince = ts => tickets.filter(t=>t.status==='completed' && t.completed && t.completed>=ts).length;
+  const sel = p => techPeriod===p ? 'outline:3px solid #fff;outline-offset:-6px;' : '';
   document.getElementById('techStats').innerHTML = `
-    <div class="tstat tstat-week"><div class="n">${doneSince(weekStart)}</div><div class="l">This Week</div></div>
-    <div class="tstat tstat-today"><div class="n">${doneSince(dayStart)}</div><div class="l">✔ Today</div></div>
-    <div class="tstat tstat-month"><div class="n">${doneSince(monthStart)}</div><div class="l">This Month</div></div>`;
+    <div class="tstat tstat-week" style="cursor:pointer;${sel('week')}" onclick="filterCompleted('week')"><div class="n">${doneSince(weekStart)}</div><div class="l">This Week</div></div>
+    <div class="tstat tstat-today" style="cursor:pointer;${sel('day')}" onclick="filterCompleted('day')"><div class="n">${doneSince(dayStart)}</div><div class="l">✔ Today</div></div>
+    <div class="tstat tstat-month" style="cursor:pointer;${sel('month')}" onclick="filterCompleted('month')"><div class="n">${doneSince(monthStart)}</div><div class="l">This Month</div></div>`;
 
   /* current stock on hand */
   const inv = (USER&&USER.inv)||{connectors:0,cables:[],items:[]};
@@ -782,7 +790,11 @@ function renderTechList(){
   const f = document.getElementById('fStatus').value;
   let list = sortTickets(tickets);
   if(techType) list = list.filter(t=>t.type===techType);
-  if(f==='active') list = list.filter(t=>t.status!=='completed');
+  if(techPeriod){
+    const startMap = {day:dayStart, week:weekStart, month:monthStart};
+    list = list.filter(t=>t.status==='completed' && t.completed && t.completed>=startMap[techPeriod]);
+  }
+  else if(f==='active') list = list.filter(t=>t.status!=='completed');
   else if(f) list = list.filter(t=>t.status===f);
   const el = document.getElementById('techList');
   if(!list.length){
