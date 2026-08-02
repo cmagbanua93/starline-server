@@ -119,6 +119,8 @@
   .ttab.on-repair{background:#d97706;color:#fff;border-color:#d97706}
   .ttab.on-nap_install{background:#7e22ce;color:#fff;border-color:#7e22ce}
   .b-nap{background:#f3e8ff;color:#7e22ce}
+  .b-rej{background:#fee2e2;color:#991b1b}
+  .b-cancel{background:#e2e8f0;color:#475569}
   .b-p1{background:#dc2626;color:#fff}
   .b-p2{background:#f97316;color:#fff}
   .b-p3{background:#16a34a;color:#fff}
@@ -154,6 +156,7 @@
 <div class="tabs hidden no-print" id="adminTabs">
   <button class="tab active" id="tabDash" onclick="adminGo('dash')">📊 Dashboard</button>
   <button class="tab" id="tabNew" onclick="adminGo('new')">＋ New Ticket</button>
+  <button class="tab" id="tabReq" onclick="adminGo('requests')">📦 Requests</button>
   <button class="tab" id="tabTechs" onclick="adminGo('techs')">👷 Technicians</button>
 </div>
 
@@ -186,8 +189,39 @@
       <option value="completed">Completed</option>
     </select>
     <button class="btn btn-ghost btn-sm" style="margin-top:0" onclick="refreshTickets(true)">↻ Refresh</button>
+    <button class="btn btn-primary btn-sm" style="margin-top:0" onclick="showTechReq()">📦 Materials</button>
   </div>
   <div id="techList"></div>
+</div>
+
+<!-- ============ TECH: MATERIALS & REQUESTS ============ -->
+<div class="wrap hidden" id="viewTechReq">
+  <div class="card">
+    <div class="step-title" style="font-size:15px">My Stock</div>
+    <div id="myStock"></div>
+  </div>
+  <div class="card">
+    <div class="step-title" style="font-size:15px">Request Materials</div>
+    <div class="step-desc">Send a request to the admin. Once approved and released, the items appear in your stock.</div>
+    <label>Fiber Cable Type</label>
+    <input id="rqCableName" placeholder="e.g. 1 core / 2 core (leave blank if none)">
+    <label>Cable Meters</label>
+    <input id="rqCableMeters" type="number" step="1" placeholder="e.g. 1000">
+    <label>FIC Connectors (pcs)</label>
+    <input id="rqConnectors" type="number" step="1" placeholder="e.g. 20 (0 if none)">
+    <label>Note (optional)</label>
+    <input id="rqNote" placeholder="e.g. for Brgy 2 installations this week">
+    <button class="btn btn-primary" onclick="submitRequest()">Send Request</button>
+  </div>
+  <div class="card">
+    <div class="step-title" style="font-size:15px">My Requests</div>
+    <div id="myRequests"></div>
+  </div>
+</div>
+
+<!-- ============ ADMIN: REQUESTS ============ -->
+<div class="wrap hidden" id="viewRequests">
+  <div id="reqList"></div>
 </div>
 
 <!-- ============ TECH: TICKET WIZARD ============ -->
@@ -202,6 +236,7 @@
   <div class="stats" id="statCards"></div>
   <div class="split" id="statSplit"></div>
   <div class="card" id="invPanel"></div>
+  <div class="card" id="usagePanel"></div>
   <div class="type-tabs no-print" id="dashTypeTabs"></div>
   <div class="filter-row no-print">
     <select id="dStatus" onchange="renderDash()">
@@ -322,6 +357,7 @@ let USER = null;
 let tickets = [];
 let users = [];
 let SETTINGS = { plans: [] };
+let REQUESTS = [];
 let currentId = null;
 let currentView = 'viewLogin';
 let adminBack = 'dash';
@@ -416,8 +452,9 @@ const WORKFLOWS = {
         {k:'location', type:'gps', label:'GPS Coordinates', req:true}
       ]},
     { key:'materials', title:'8. Materials Used',
-      desc:'Check the meter marking on the reel again now that lining is done. The system automatically computes the cable used and deducts it, along with connectors, from your stock when the job is completed.',
+      desc:'Select which cable you are using, then check the meter marking on the reel again now that lining is done. The system automatically computes the cable used and deducts it from that cable, along with connectors, when the job is completed.',
       fields:[
+        {k:'cable_reel', type:'reel_select', label:'Cable Used (from your released stock)', req:true},
         {k:'cable_end', type:'number', label:'Cable Meters Left on Reel — AFTER Lining (m)', req:true, placeholder:'e.g. 700', step:'0.1', cableCalc:true},
         {k:'connectors', type:'select', label:'Connectors Used (pcs)', req:true, options:['1','2','3','4','5','6']},
         {k:'other_materials', type:'textarea', label:'Other Materials (clamps, hooks, patch cord…)'}
@@ -470,8 +507,9 @@ const WORKFLOWS = {
         {k:'location', type:'gps', label:'GPS Coordinates of the Post', req:true}
       ]},
     { key:'materials', title:'5. Materials &amp; Completion',
-      desc:'Check the reel meter again — the system auto-computes cable used and deducts materials from your stock when the job is completed.',
+      desc:'Select which cable you used, then check the reel meter again — the system auto-computes cable used and deducts it from that cable when the job is completed.',
       fields:[
+        {k:'cable_reel', type:'reel_select', label:'Cable Used (from your released stock)', req:true},
         {k:'cable_end', type:'number', label:'Cable Meters Left on Reel — AFTER the Job (m)', req:true, step:'0.1', cableCalc:true},
         {k:'other_materials', type:'textarea', label:'Other Materials'},
         {k:'final_notes', type:'textarea', label:'Completion Notes (optional)'}
@@ -494,6 +532,7 @@ const WORKFLOWS = {
       desc:'Describe the corrective action taken and record all materials consumed.',
       fields:[
         {k:'work_done', type:'textarea', label:'Work Done', req:true},
+        {k:'cable_reel', type:'reel_select', label:'Cable Used (select if cable was replaced)'},
         {k:'cable_length', type:'number', label:'Cable Used (meters)', step:'1', placeholder:'0 if none'},
         {k:'connectors', type:'number', label:'Connectors Used (pcs)', step:'1', placeholder:'0 if none'},
         {k:'nap_id', type:'text', label:'NAP Box ID (if involved)'},
@@ -551,6 +590,7 @@ async function enterApp(){
   if(USER.role==='admin'){
     document.getElementById('adminTabs').classList.remove('hidden');
     await loadUsers();
+    await loadRequests();
     adminGo('dash');
   }else{
     show('viewTechList'); renderTechList();
@@ -567,6 +607,7 @@ async function refreshTickets(manual){
     tickets = r.tickets.map(t => dirtyMap[t.id] || t);
     setOffline(false); cacheTickets();
     if(USER && USER.role==='admin') await loadUsers(); // keep inventory display fresh
+    if(USER && USER.role==='tech'){ try{ USER = (await api('/api/me')).user; }catch(e){} } // fresh reel stock
   }catch(e){
     if(e.message.includes('Session expired')) return;
     try{ tickets = JSON.parse(localStorage.getItem('sl_cache'))||[]; }catch(_){ tickets=[]; }
@@ -596,12 +637,12 @@ async function loadUsers(){
 }
 
 /* =================== NAVIGATION =================== */
-const ALL_VIEWS = ['viewLogin','viewTechList','viewTicket','viewDash','viewNew','viewReport','viewTechs'];
+const ALL_VIEWS = ['viewLogin','viewTechList','viewTicket','viewDash','viewNew','viewReport','viewTechs','viewTechReq','viewRequests'];
 function show(view){
   ALL_VIEWS.forEach(v=>document.getElementById(v).classList.add('hidden'));
   document.getElementById(view).classList.remove('hidden');
   currentView = view;
-  document.getElementById('backBtn').style.display = (view==='viewTicket'||view==='viewReport')?'block':'none';
+  document.getElementById('backBtn').style.display = (view==='viewTicket'||view==='viewReport'||view==='viewTechReq')?'block':'none';
   window.scrollTo(0,0);
 }
 function goBack(){
@@ -609,10 +650,11 @@ function goBack(){
   else { currentId=null; show('viewTechList'); renderTechList(); }
 }
 function adminGo(tab){
-  ['tabDash','tabNew','tabTechs'].forEach(t=>document.getElementById(t).classList.remove('active'));
+  ['tabDash','tabNew','tabTechs','tabReq'].forEach(t=>document.getElementById(t).classList.remove('active'));
   if(tab==='dash'){ document.getElementById('tabDash').classList.add('active'); show('viewDash'); renderDash(); }
   if(tab==='new'){ document.getElementById('tabNew').classList.add('active'); show('viewNew'); }
   if(tab==='techs'){ document.getElementById('tabTechs').classList.add('active'); show('viewTechs'); renderUsers(); renderPlans(); }
+  if(tab==='requests'){ document.getElementById('tabReq').classList.add('active'); show('viewRequests'); loadRequests().then(renderRequests); }
   if(tab!=='report') adminBack = tab;
 }
 
@@ -767,7 +809,13 @@ function collectStep(){
       return;
     }
     const el = document.getElementById('f_'+f.k);
-    if(el) t.data[f.k]=el.value.trim();
+    if(el){
+      t.data[f.k]=el.value.trim();
+      if(f.type==='reel_select'){
+        const reel = ((USER&&USER.inv&&USER.inv.cables)||[]).find(r=>r.id===el.value);
+        t.data[f.k+'_name'] = reel ? reel.name : '';
+      }
+    }
   });
 }
 function finishTicket(){
@@ -809,6 +857,18 @@ function renderField(t,f){
       : `<div style="font-size:30px">✍</div>Tap here — the customer signs and types their full name`;
     return `<label>${f.label}${reqMark}</label>
       <div class="photo-box ${v?'has':''}" onclick="openSigModal('${f.k}')">${inner}</div>`;
+  }
+  if(f.type==='reel_select'){
+    const reels = ((USER&&USER.inv&&USER.inv.cables)||[]).filter(r=>r.meters>0);
+    if(!reels.length){
+      return `<label>${f.label}${reqMark}</label>
+        <div class="gps-out" style="background:#fef3c7;border-color:#fcd34d;color:#92400e">No fiber cable in your stock. Tap 📦 Materials on your job list to request cable from the admin${f.req?' — required to finish this job':''}.</div>`;
+    }
+    return `<label>${f.label}${reqMark}</label>
+      <select id="f_${f.k}">
+        <option value="">— select cable —</option>
+        ${reels.map(r=>`<option value="${esc(r.id)}" ${r.id===v?'selected':''}>${esc(r.name)} — ${r.meters} m left</option>`).join('')}
+      </select>`;
   }
   if(f.type==='select'){
     return `<label>${f.label}${reqMark}</label>
@@ -1007,6 +1067,101 @@ function sigSubmit(){
   persist(t); renderTicket();
 }
 
+/* =================== MATERIAL REQUESTS =================== */
+async function loadRequests(){
+  try{ REQUESTS = (await api('/api/requests')).requests || []; }catch(e){ REQUESTS = []; }
+  if(USER && USER.role==='admin'){
+    const n = REQUESTS.filter(r=>r.status==='pending').length;
+    document.getElementById('tabReq').textContent = '📦 Requests'+(n?` (${n})`:'');
+  }
+}
+function reqBadge(s){
+  const map = {pending:['b-progress','Pending'], approved:['b-install','Approved'], released:['b-done','Released'], rejected:['b-rej','Rejected'], cancelled:['b-cancel','Cancelled']};
+  const [cls,lbl] = map[s]||['b-cancel',s];
+  return `<span class="badge ${cls}">${lbl}</span>`;
+}
+function reqItems(r){
+  const parts=[];
+  if(r.cableName && r.cableMeters) parts.push(`🧵 ${esc(r.cableName)} — ${r.cableMeters} m`);
+  if(r.connectors) parts.push(`🔌 ${r.connectors} pcs FIC connector`);
+  return parts.join(' · ')||'—';
+}
+/* ---- tech side ---- */
+async function showTechReq(){
+  await loadRequests();
+  try{ USER = (await api('/api/me')).user; }catch(e){}
+  renderTechReq();
+  show('viewTechReq');
+}
+function renderTechReq(){
+  const inv = (USER&&USER.inv)||{connectors:0,cables:[]};
+  const reels = inv.cables||[];
+  document.getElementById('myStock').innerHTML = `
+    <table class="summary-table">
+      <tr><td>FIC Connectors</td><td>${inv.connectors||0} pcs</td></tr>
+      ${reels.length ? reels.map(r=>`<tr><td>🧵 ${esc(r.name)}</td><td>${r.meters} m left</td></tr>`).join('') : '<tr><td>Fiber cable</td><td>none</td></tr>'}
+    </table>`;
+  const list = REQUESTS.slice().sort((a,b)=>b.created-a.created);
+  document.getElementById('myRequests').innerHTML = list.length ? list.map(r=>`
+    <div class="user-row">
+      <div>
+        <div class="un">${reqItems(r)}</div>
+        <div class="um">${fmt(r.created)}${r.note?' · '+esc(r.note):''}${r.decidedBy?' · by '+esc(r.decidedBy):''}</div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">
+        ${reqBadge(r.status)}
+        ${r.status==='pending'?`<button class="btn btn-warn btn-sm" style="margin-top:0" onclick="cancelRequest('${r.id}')">✕</button>`:''}
+      </div>
+    </div>`).join('') : '<div class="tmeta">No requests yet.</div>';
+}
+async function submitRequest(){
+  try{
+    await api('/api/requests','POST',{
+      cableName: document.getElementById('rqCableName').value.trim(),
+      cableMeters: parseFloat(document.getElementById('rqCableMeters').value)||0,
+      connectors: parseInt(document.getElementById('rqConnectors').value)||0,
+      note: document.getElementById('rqNote').value.trim()
+    });
+    ['rqCableName','rqCableMeters','rqConnectors','rqNote'].forEach(i=>document.getElementById(i).value='');
+    await loadRequests(); renderTechReq();
+    alert('Request sent to the admin for approval.');
+  }catch(e){ alert(e.message); }
+}
+async function cancelRequest(id){
+  if(!confirm('Cancel this request?')) return;
+  try{ await api('/api/requests/'+id,'PUT',{action:'cancel'}); await loadRequests(); renderTechReq(); }
+  catch(e){ alert(e.message); }
+}
+/* ---- admin side ---- */
+function renderRequests(){
+  const order = {pending:0, approved:1, released:2, rejected:3, cancelled:4};
+  const list = REQUESTS.slice().sort((a,b)=>(order[a.status]-order[b.status]) || b.created-a.created);
+  document.getElementById('reqList').innerHTML = list.length ? list.map(r=>`
+    <div class="card">
+      <div class="ticket-top">
+        <span class="tnum">👷 ${esc(r.techName)}</span>
+        ${reqBadge(r.status)}
+      </div>
+      <div class="tsub">${reqItems(r)}</div>
+      <div class="tmeta">Requested ${fmt(r.created)}${r.note?' · 💬 '+esc(r.note):''}${r.decidedBy?' · handled by '+esc(r.decidedBy):''}</div>
+      ${['pending','approved'].includes(r.status)?`
+      <div class="wizard-btns">
+        ${r.status==='pending'?`<button class="btn btn-ghost btn-sm" onclick="reqAction('${r.id}','approve')">✓ Approve</button>`:''}
+        <button class="btn btn-ok btn-sm" onclick="reqAction('${r.id}','release')">📦 Release Items</button>
+        <button class="btn btn-warn btn-sm" onclick="reqAction('${r.id}','reject')">✕ Reject</button>
+      </div>`:''}
+    </div>`).join('') : '<div class="empty"><div class="big">📦</div>No material requests yet. Technicians send requests from their app.</div>';
+}
+async function reqAction(id, action){
+  if(action==='release' && !confirm('Release these items? They will be added to the technician\'s stock.')) return;
+  if(action==='reject' && !confirm('Reject this request?')) return;
+  try{
+    await api('/api/requests/'+id,'PUT',{action});
+    await loadRequests(); renderRequests();
+    if(action==='release') await loadUsers();
+  }catch(e){ alert(e.message); }
+}
+
 /* =================== ADMIN: DASHBOARD =================== */
 function renderDash(){
   const open = tickets.filter(t=>t.status==='open').length;
@@ -1033,16 +1188,38 @@ function renderDash(){
   document.getElementById('invPanel').innerHTML = `
     <div class="step-title" style="font-size:15px">Technician Inventory (remaining stock)</div>
     ${techsInv.length ? `<table class="summary-table">
-      <tr><td style="width:40%">Technician</td><td><b>Fiber Cable</b></td><td><b>Connectors</b></td></tr>
+      <tr><td style="width:32%">Technician</td><td><b>Fiber Cable</b></td><td><b>FIC Connectors</b></td></tr>
       ${techsInv.map(u=>{
-        const inv=u.inv||{cable:0,connectors:0};
-        const lowC = inv.cable<50?' style="color:var(--danger);font-weight:700"':'';
-        const lowK = inv.connectors<5?' style="color:var(--danger);font-weight:700"':'';
-        return `<tr><td>${esc(u.name)}</td><td${lowC}>${inv.cable} m</td><td${lowK}>${inv.connectors} pcs</td></tr>`;
+        const inv=u.inv||{connectors:0,cables:[]};
+        const reels=(inv.cables||[]).filter(r=>r.meters!==0);
+        const cableHtml = reels.length
+          ? reels.map(r=>{
+              const low = r.meters<50?' style="color:var(--danger);font-weight:700"':'';
+              return `<div${low}>${esc(r.name)}: ${r.meters} m</div>`;
+            }).join('')
+          : '<span style="color:var(--danger);font-weight:700">none</span>';
+        const lowK = (inv.connectors||0)<5?' style="color:var(--danger);font-weight:700"':'';
+        return `<tr><td>${esc(u.name)}</td><td>${cableHtml}</td><td${lowK}>${inv.connectors||0} pcs</td></tr>`;
       }).join('')}
     </table>
-    <div class="tmeta" style="margin-top:6px">Add stock in the Technicians tab. Materials are deducted automatically when a job is completed. Red = running low.</div>`
+    <div class="tmeta" style="margin-top:6px">Stock is added by releasing technician requests (📦 Requests tab) or directly in the Technicians tab. Materials are deducted automatically when a job is completed. Red = running low.</div>`
     : '<div class="tmeta">No technicians yet.</div>'}`;
+
+  /* material usage per ticket */
+  const used = tickets.filter(t=>t.invApplied && ((t.data&&t.data.cable_used)||(t.data&&parseInt(t.data.connectors))))
+                      .sort((a,b)=>(b.completed||0)-(a.completed||0)).slice(0,25);
+  document.getElementById('usagePanel').innerHTML = `
+    <div class="step-title" style="font-size:15px">Material Usage by Ticket</div>
+    ${used.length ? `<table class="summary-table">
+      <tr><td style="width:24%">Ticket</td><td>Technician</td><td>Cable</td><td>Meters</td><td>FIC</td></tr>
+      ${used.map(t=>`<tr>
+        <td style="color:var(--primary);font-weight:700;cursor:pointer" onclick="openReport('${t.id}')">${esc(t.number)}</td>
+        <td>${esc(t.assignedName||'—')}</td>
+        <td>${esc(t.data.cable_reel_name || (t.data.cable_reel?'(reel)':'—'))}</td>
+        <td>${t.data.cable_used!==undefined?t.data.cable_used+' m':'—'}</td>
+        <td>${parseInt(t.data.connectors)||0} pcs</td>
+      </tr>`).join('')}
+    </table>` : '<div class="tmeta">No completed jobs with materials yet.</div>'}`;
 
   const fs=document.getElementById('dStatus').value, fu=document.getElementById('dTech').value;
   const list = sortTickets(tickets.filter(t=>(!dashType||t.type===dashType)&&(!fs||t.status===fs)&&(!fu||t.assignedTo===fu)));
@@ -1157,12 +1334,13 @@ function renderUsers(){
   const el = document.getElementById('userList');
   if(!users.length){ el.innerHTML='<div class="tmeta">No accounts.</div>'; return; }
   el.innerHTML = users.map(u=>{
-    const inv = u.inv||{cable:0,connectors:0};
+    const inv = u.inv||{connectors:0,cables:[]};
+    const reelTxt = (inv.cables||[]).map(r=>`${esc(r.name)} ${r.meters}m`).join(', ')||'no cable';
     return `
     <div class="user-row">
       <div>
         <div class="un">${esc(u.name)} ${u.role==='admin'?'<span class="badge b-install">Admin</span>':'<span class="badge b-done">Technician</span>'}</div>
-        <div class="um">@${esc(u.username)}${u.role==='tech'?` · 🧵 ${inv.cable} m cable · 🔌 ${inv.connectors} pcs connectors`:''}</div>
+        <div class="um">@${esc(u.username)}${u.role==='tech'?` · 🧵 ${reelTxt} · 🔌 ${inv.connectors||0} pcs FIC`:''}</div>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
         ${u.role==='tech'?`<button class="btn btn-ok btn-sm" style="margin-top:0" onclick="addStock('${u.id}','${esc(u.name)}')">＋ Stock</button>`:''}
@@ -1172,12 +1350,18 @@ function renderUsers(){
     </div>`;}).join('');
 }
 async function addStock(id, name){
-  const cable = prompt('Meters of fiber cable to give '+name+' (0 if none):','0');
-  if(cable===null) return;
-  const connectors = prompt('Connectors (pcs) to give '+name+' (0 if none):','0');
+  const cableName = prompt('Cable type/name to give '+name+' (e.g. "1 core", blank if none):','');
+  if(cableName===null) return;
+  let cableMeters = 0;
+  if(cableName.trim()){
+    const mtr = prompt('How many meters of "'+cableName.trim()+'"?','1000');
+    if(mtr===null) return;
+    cableMeters = parseFloat(mtr)||0;
+  }
+  const connectors = prompt('FIC connectors (pcs) to give '+name+' (0 if none):','0');
   if(connectors===null) return;
   try{
-    await api('/api/users/'+id+'/inventory','POST',{cable:parseFloat(cable)||0, connectors:parseInt(connectors)||0});
+    await api('/api/users/'+id+'/inventory','POST',{cableName:cableName.trim(), cableMeters, connectors:parseInt(connectors)||0});
     await loadUsers(); renderUsers();
   }catch(e){ alert(e.message); }
 }
@@ -1255,6 +1439,7 @@ function renderSummary(t, targetId){
     if(f.type==='photo'){ if(v.img) photos.push({cap:f.label+(v.time?' — '+fmt(v.time):''),img:v.img,gps:v.lat!=null?`${v.lat.toFixed(6)}, ${v.lng.toFixed(6)}`:null}); if(v.lat!=null) add(f.label+' GPS', v.lat.toFixed(6)+', '+v.lng.toFixed(6)); return; }
     if(f.type==='gps'){ add(f.label, v.lat.toFixed(6)+', '+v.lng.toFixed(6)); return; }
     if(f.type==='signature'){ return; }
+    if(f.type==='reel_select'){ add(f.label, t.data[f.k+'_name']||t.data.cable_reel_name||'(cable reel)'); return; }
     add(f.label, v);
   }));
   const sig = t.data.signature;
