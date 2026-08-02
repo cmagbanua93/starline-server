@@ -202,13 +202,12 @@
   </div>
   <div class="card">
     <div class="step-title" style="font-size:15px">Request Materials</div>
-    <div class="step-desc">Send a request to the admin. Once approved and released, the items appear in your stock.</div>
-    <label>Fiber Cable Type</label>
-    <select id="rqCableName"><option value="">— no cable needed —</option></select>
-    <label>Cable Meters</label>
-    <input id="rqCableMeters" type="number" step="1" placeholder="e.g. 1000">
-    <label>FIC Connectors (pcs)</label>
-    <input id="rqConnectors" type="number" step="1" placeholder="e.g. 20 (0 if none)">
+    <div class="step-desc">Select an item, enter the quantity, and send. Once approved and released by the admin, the items appear in your stock.</div>
+    <label>Item</label>
+    <select id="rqItem" onchange="rqCalc()"><option value="">— select item —</option></select>
+    <label id="rqQtyLabel">Quantity</label>
+    <input id="rqQty" type="number" step="1" min="1" placeholder="e.g. 2" oninput="rqCalc()">
+    <div class="gps-out hidden" id="rqCalcOut"></div>
     <label>Note (optional)</label>
     <input id="rqNote" placeholder="e.g. for Brgy 2 installations this week">
     <button class="btn btn-primary" onclick="submitRequest()">Send Request</button>
@@ -235,6 +234,11 @@
     <label>Add FIC Connectors (pcs)</label>
     <input id="whConn" type="number" step="1" placeholder="e.g. 100">
     <button class="btn btn-ghost btn-sm" onclick="whAddConnectors()">＋ Add Connectors</button>
+    <div class="row2" style="margin-top:8px">
+      <div><label>Other Item Name</label><input id="whItemName" placeholder="e.g. Modem EG8145V5, S-clamp"></div>
+      <div><label>Quantity (pcs)</label><input id="whItemQty" type="number" step="1" placeholder="e.g. 10"></div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="whAddItem()">＋ Add Other Item</button>
   </div>
   <div id="reqList"></div>
 </div>
@@ -435,8 +439,9 @@ const WORKFLOWS = {
         {k:'house_photo', type:'photo', label:'House Photo', req:true}
       ]},
     { key:'cable_start', title:'3. Fiber Cable — Starting Meter',
-      desc:'Before you start lining the fiber cable from the NAP box, check the meter marking on the drop cable reel and record how many meters are LEFT on the reel.',
+      desc:'Select which cable from your stock you will use for this installation, then check the meter marking on the reel and record how many meters are LEFT before lining.',
       fields:[
+        {k:'cable_reel', type:'reel_select', label:'Cable Type Used (from your stock)', req:true},
         {k:'cable_start', type:'number', label:'Cable Meters Left on Reel — BEFORE Lining (m)', req:true, placeholder:'e.g. 850', step:'0.1'}
       ]},
     { key:'nap', title:'4. NAP Box &amp; Port Details',
@@ -467,9 +472,8 @@ const WORKFLOWS = {
         {k:'location', type:'gps', label:'GPS Coordinates', req:true}
       ]},
     { key:'materials', title:'8. Materials Used',
-      desc:'Select which cable you are using, then check the meter marking on the reel again now that lining is done. The system automatically computes the cable used and deducts it from that cable, along with connectors, when the job is completed.',
+      desc:'Check the meter marking on the reel again now that lining is done. The system automatically computes the cable used and deducts it from the cable you selected in Step 3, along with connectors, when the job is completed.',
       fields:[
-        {k:'cable_reel', type:'reel_select', label:'Cable Used (from your released stock)', req:true},
         {k:'cable_end', type:'number', label:'Cable Meters Left on Reel — AFTER Lining (m)', req:true, placeholder:'e.g. 700', step:'0.1', cableCalc:true},
         {k:'connectors', type:'select', label:'Connectors Used (pcs)', req:true, options:['1','2','3','4','5','6']},
         {k:'other_materials', type:'textarea', label:'Other Materials (clamps, hooks, patch cord…)'}
@@ -495,8 +499,9 @@ const WORKFLOWS = {
   ],
   nap_install: [
     { key:'cable_start', title:'1. Fiber Cable — Starting Meter',
-      desc:'Before starting the NAP installation, check the meter marking on the cable reel and record how many meters are left.',
+      desc:'Select which cable from your stock you will use for this NAP installation, then check the meter marking on the reel and record how many meters are left.',
       fields:[
+        {k:'cable_reel', type:'reel_select', label:'Cable Type Used (from your stock)', req:true},
         {k:'cable_start', type:'number', label:'Cable Meters Left on Reel — BEFORE the Job (m)', req:true, placeholder:'e.g. 1200', step:'0.1'}
       ]},
     { key:'mainnap', title:'2. Main NAP Details',
@@ -522,9 +527,8 @@ const WORKFLOWS = {
         {k:'location', type:'gps', label:'GPS Coordinates of the Post', req:true}
       ]},
     { key:'materials', title:'5. Materials &amp; Completion',
-      desc:'Select which cable you used, then check the reel meter again — the system auto-computes cable used and deducts it from that cable when the job is completed.',
+      desc:'Check the reel meter again — the system auto-computes cable used and deducts it from the cable you selected in Step 1 when the job is completed.',
       fields:[
-        {k:'cable_reel', type:'reel_select', label:'Cable Used (from your released stock)', req:true},
         {k:'cable_end', type:'number', label:'Cable Meters Left on Reel — AFTER the Job (m)', req:true, step:'0.1', cableCalc:true},
         {k:'other_materials', type:'textarea', label:'Other Materials'},
         {k:'final_notes', type:'textarea', label:'Completion Notes (optional)'}
@@ -880,7 +884,7 @@ function renderField(t,f){
         <div class="gps-out" style="background:#fef3c7;border-color:#fcd34d;color:#92400e">No fiber cable in your stock. Tap 📦 Materials on your job list to request cable from the admin${f.req?' — required to finish this job':''}.</div>`;
     }
     return `<label>${f.label}${reqMark}</label>
-      <select id="f_${f.k}">
+      <select id="f_${f.k}" onchange="onReelChange()">
         <option value="">— select cable —</option>
         ${reels.map(r=>`<option value="${esc(r.id)}" ${r.id===v?'selected':''}>${esc(r.name)} — ${r.meters} m left</option>`).join('')}
       </select>`;
@@ -927,6 +931,14 @@ function updateCableCalc(){
   const t = byId(currentId);
   const out = document.getElementById('cableCalcOut');
   if(out && t) out.textContent = cableCalcText(t);
+}
+function onReelChange(){
+  /* auto-fill the starting meter with the reel's tracked remaining meters */
+  const sel = document.getElementById('f_cable_reel');
+  const startEl = document.getElementById('f_cable_start');
+  if(!sel) return;
+  const reel = ((USER&&USER.inv&&USER.inv.cables)||[]).find(r=>r.id===sel.value);
+  if(reel && startEl && !startEl.value) startEl.value = reel.meters;
 }
 
 /* =================== CAMERA (opens directly) =================== */
@@ -1096,10 +1108,41 @@ function reqBadge(s){
   return `<span class="badge ${cls}">${lbl}</span>`;
 }
 function reqItems(r){
+  /* new single-item shape */
+  if(r.kind){
+    const icon = r.kind==='cable'?'🧵':r.kind==='connector'?'🔌':'📦';
+    if(r.kind==='cable') return `${icon} ${esc(r.name)} — ${r.qty} reel${r.qty>1?'s':''}${r.cableMeters?` (${r.cableMeters} m)`:''}`;
+    return `${icon} ${esc(r.name)} — ${r.qty} pcs`;
+  }
+  /* legacy shape */
   const parts=[];
-  if(r.cableName && r.cableMeters) parts.push(`🧵 ${esc(r.cableName)} — ${r.cableMeters} m`);
+  if(r.cableName && (r.cableReels||r.cableMeters)){
+    const reelTxt = r.cableReels ? `${r.cableReels} reel${r.cableReels>1?'s':''}` : '';
+    const mTxt = r.cableMeters ? `${r.cableMeters} m` : '';
+    parts.push(`🧵 ${esc(r.cableName)} — ${reelTxt}${reelTxt&&mTxt?' (':''}${mTxt}${reelTxt&&mTxt?')':''}`);
+  }
   if(r.connectors) parts.push(`🔌 ${r.connectors} pcs FIC connector`);
   return parts.join(' · ')||'—';
+}
+function rqOptions(){
+  /* everything the admin has in the warehouse becomes selectable */
+  const opts=['<option value="">— select item —</option>'];
+  (WAREHOUSE.cables||[]).forEach(c=>opts.push(`<option value="cable|${esc(c.name)}">🧵 Fiber Cable — ${esc(c.name)} (${c.meters} m/reel · ${c.qty} pcs available)</option>`));
+  if((WAREHOUSE.connectors||0)>0 || true) opts.push(`<option value="connector|FIC Connector">🔌 FIC Connector (${WAREHOUSE.connectors||0} pcs available)</option>`);
+  (WAREHOUSE.items||[]).forEach(i=>opts.push(`<option value="item|${esc(i.name)}">📦 ${esc(i.name)} (${i.qty} pcs available)</option>`));
+  return opts.join('');
+}
+function rqCalc(){
+  const out = document.getElementById('rqCalcOut');
+  const sel = document.getElementById('rqItem').value;
+  const qty = parseInt(document.getElementById('rqQty').value)||0;
+  const [kind,name] = sel? sel.split('|') : ['',''];
+  document.getElementById('rqQtyLabel').textContent = kind==='cable' ? 'Number of Reels' : 'Quantity (pcs)';
+  const wh = kind==='cable' ? (WAREHOUSE.cables||[]).find(c=>c.name===name) : null;
+  if(kind==='cable' && qty>0 && wh){
+    out.classList.remove('hidden');
+    out.textContent = `= ${qty} × ${wh.meters} m = ${qty*wh.meters} meters of ${name}`;
+  } else out.classList.add('hidden');
 }
 /* ---- warehouse ---- */
 let WAREHOUSE = { connectors:0, cables:[] };
@@ -1119,7 +1162,27 @@ function renderWarehouse(){
         <td><button class="btn btn-warn btn-sm" style="margin-top:0;padding:4px 9px" onclick="whRemove('${c.id}')">✕</button></td>
       </tr>`).join('')}
       <tr><td>🔌 FIC Connectors</td><td>—</td><td${(WAREHOUSE.connectors||0)<10?' style="color:var(--danger);font-weight:700"':''}>${WAREHOUSE.connectors||0} pcs</td><td>—</td><td></td></tr>
+      ${(WAREHOUSE.items||[]).map(i=>`<tr>
+        <td>📦 ${esc(i.name)}</td><td>—</td>
+        <td${i.qty<3?' style="color:var(--danger);font-weight:700"':''}>${i.qty} pcs</td><td>—</td>
+        <td><button class="btn btn-warn btn-sm" style="margin-top:0;padding:4px 9px" onclick="whRemoveItem('${i.id}')">✕</button></td>
+      </tr>`).join('')}
     </table>`;
+}
+async function whAddItem(){
+  const name = document.getElementById('whItemName').value.trim();
+  const qty = parseInt(document.getElementById('whItemQty').value)||0;
+  if(!name || qty===0){ alert('Enter the item name and quantity.'); return; }
+  try{
+    WAREHOUSE = (await api('/api/warehouse','POST',{itemName:name, itemQty:qty})).warehouse;
+    ['whItemName','whItemQty'].forEach(i=>document.getElementById(i).value='');
+    renderWarehouse();
+  }catch(e){ alert(e.message); }
+}
+async function whRemoveItem(id){
+  if(!confirm('Remove this item from the warehouse?')) return;
+  try{ WAREHOUSE = (await api('/api/warehouse','POST',{removeItem:id})).warehouse; renderWarehouse(); }
+  catch(e){ alert(e.message); }
 }
 async function whAddCable(){
   const name = document.getElementById('whName').value.trim();
@@ -1151,9 +1214,7 @@ async function showTechReq(){
   await loadRequests();
   await loadWarehouse();
   try{ USER = (await api('/api/me')).user; }catch(e){}
-  const sel = document.getElementById('rqCableName');
-  sel.innerHTML = '<option value="">— no cable needed —</option>' +
-    (WAREHOUSE.cables||[]).map(c=>`<option value="${esc(c.name)}">${esc(c.name)} (${c.meters} m/reel · ${c.qty} pcs available)</option>`).join('');
+  document.getElementById('rqItem').innerHTML = rqOptions();
   renderTechReq();
   show('viewTechReq');
 }
@@ -1162,8 +1223,9 @@ function renderTechReq(){
   const reels = inv.cables||[];
   document.getElementById('myStock').innerHTML = `
     <table class="summary-table">
-      <tr><td>FIC Connectors</td><td>${inv.connectors||0} pcs</td></tr>
-      ${reels.length ? reels.map(r=>`<tr><td>🧵 ${esc(r.name)}</td><td>${r.meters} m left</td></tr>`).join('') : '<tr><td>Fiber cable</td><td>none</td></tr>'}
+      <tr><td>🔌 FIC Connectors</td><td>${inv.connectors||0} pcs</td></tr>
+      ${reels.length ? reels.map(r=>`<tr><td>🧵 ${esc(r.name)}</td><td>${r.meters} m left</td></tr>`).join('') : '<tr><td>🧵 Fiber cable</td><td>none</td></tr>'}
+      ${(inv.items||[]).map(i=>`<tr><td>📦 ${esc(i.name)}</td><td>${i.qty} pcs</td></tr>`).join('')}
     </table>`;
   const list = REQUESTS.slice().sort((a,b)=>b.created-a.created);
   document.getElementById('myRequests').innerHTML = list.length ? list.map(r=>`
@@ -1179,14 +1241,17 @@ function renderTechReq(){
     </div>`).join('') : '<div class="tmeta">No requests yet.</div>';
 }
 async function submitRequest(){
+  const sel = document.getElementById('rqItem').value;
+  if(!sel){ alert('Select an item to request.'); return; }
+  const [kind,name] = sel.split('|');
   try{
     await api('/api/requests','POST',{
-      cableName: document.getElementById('rqCableName').value.trim(),
-      cableMeters: parseFloat(document.getElementById('rqCableMeters').value)||0,
-      connectors: parseInt(document.getElementById('rqConnectors').value)||0,
+      kind, name,
+      qty: parseInt(document.getElementById('rqQty').value)||0,
       note: document.getElementById('rqNote').value.trim()
     });
-    ['rqCableName','rqCableMeters','rqConnectors','rqNote'].forEach(i=>document.getElementById(i).value='');
+    ['rqItem','rqQty','rqNote'].forEach(i=>document.getElementById(i).value='');
+    document.getElementById('rqCalcOut').classList.add('hidden');
     await loadRequests(); renderTechReq();
     alert('Request sent to the admin for approval.');
   }catch(e){ alert(e.message); }
@@ -1263,7 +1328,8 @@ function renderDash(){
             }).join('')
           : '<span style="color:var(--danger);font-weight:700">none</span>';
         const lowK = (inv.connectors||0)<5?' style="color:var(--danger);font-weight:700"':'';
-        return `<tr><td>${esc(u.name)}</td><td>${cableHtml}</td><td${lowK}>${inv.connectors||0} pcs</td></tr>`;
+        const itemsHtml = (inv.items||[]).map(i=>`<div>📦 ${esc(i.name)}: ${i.qty}</div>`).join('');
+        return `<tr><td>${esc(u.name)}</td><td>${cableHtml}</td><td${lowK}>${inv.connectors||0} pcs${itemsHtml?'<div style="margin-top:4px">'+itemsHtml+'</div>':''}</td></tr>`;
       }).join('')}
     </table>
     <div class="tmeta" style="margin-top:6px">Stock is added by releasing technician requests (📦 Requests tab) or directly in the Technicians tab. Materials are deducted automatically when a job is completed. Red = running low.</div>`
