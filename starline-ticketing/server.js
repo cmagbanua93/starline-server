@@ -16,7 +16,17 @@ let db = { users: [], tickets: [], sessions: {} };
 try { db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); } catch (e) {}
 db.users = db.users || []; db.tickets = db.tickets || []; db.sessions = db.sessions || {};
 db.settings = db.settings || { plans: [] };
-db.users.forEach(u => { u.inv = u.inv || { cable: 0, connectors: 0 }; });
+db.requests = db.requests || [];
+/* inventory model: { connectors: N, cables: [{id, name, meters}] } — migrate old flat cable number */
+db.users.forEach(u => {
+  u.inv = u.inv || {};
+  if (u.inv.connectors === undefined) u.inv.connectors = 0;
+  if (!Array.isArray(u.inv.cables)) u.inv.cables = [];
+  if (typeof u.inv.cable === 'number') {
+    if (u.inv.cable > 0) u.inv.cables.push({ id: 'r' + Date.now() + Math.random().toString(36).slice(2, 6), name: 'Stock cable', meters: u.inv.cable });
+    delete u.inv.cable;
+  }
+});
 
 let saveTimer = null;
 function saveDB() {
@@ -88,7 +98,15 @@ function auth(req) {
   const user = db.users.find(u => u.id === db.sessions[token]);
   return user ? { user, token } : null;
 }
-function publicUser(u) { return { id: u.id, username: u.username, name: u.name, role: u.role, inv: u.inv || { cable: 0, connectors: 0 } }; }
+function publicUser(u) { return { id: u.id, username: u.username, name: u.name, role: u.role, inv: u.inv || { connectors: 0, cables: [] } }; }
+function addStockTo(u, cableName, cableMeters, connectors) {
+  u.inv = u.inv || { connectors: 0, cables: [] };
+  u.inv.cables = u.inv.cables || [];
+  const name = String(cableName || '').trim();
+  const meters = parseFloat(cableMeters) || 0;
+  if (name && meters > 0) u.inv.cables.push({ id: 'r' + Date.now() + Math.random().toString(36).slice(2, 6), name, meters: Math.round(meters * 100) / 100 });
+  u.inv.connectors = (u.inv.connectors || 0) + (parseInt(connectors) || 0);
+}
 
 /* ---------------- static files ---------------- */
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.json': 'application/json', '.ico': 'image/x-icon' };
@@ -153,6 +171,60 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { settings: db.settings });
     }
 
+    /* ---- material requests ---- */
+    if (p === '/api/requests' && req.method === 'GET') {
+      const list = isAdmin ? db.requests : db.requests.filter(r => r.techId === me.id);
+      return json(res, 200, { requests: list });
+    }
+    if (p === '/api/requests' && req.method === 'POST') {
+      const b = await readBody(req);
+      const cableName = String(b.cableName || '').trim();
+      const cableMeters = parseFloat(b.cableMeters) || 0;
+      const connectors = parseInt(b.connectors) || 0;
+      if (!(connectors > 0) && !(cableName && cableMeters > 0))
+        return json(res, 400, { error: 'Request at least connectors, or a cable type with meters (e.g. "1 core", 1000)' });
+      const r = {
+        id: 'q' + Date.now() + Math.random().toString(36).slice(2, 6),
+        techId: me.id, techName: me.name,
+        cableName: cableName || null, cableMeters: cableMeters || 0,
+        connectors, note: String(b.note || '').trim(),
+        status: 'pending', created: Date.now()
+      };
+      db.requests.push(r); saveDB();
+      return json(res, 200, { request: r });
+    }
+    let m = p.match(/^\/api\/requests\/([\w.]+)$/);
+    if (m && req.method === 'PUT') {
+      const r = db.requests.find(x => x.id === m[1]);
+      if (!r) return json(res, 404, { error: 'Request not found' });
+      const b = await readBody(req);
+      const action = b.action;
+      if (action === 'cancel') {
+        if (r.techId !== me.id && !isAdmin) return json(res, 403, { error: 'Not your request' });
+        if (r.status !== 'pending') return json(res, 400, { error: 'Only pending requests can be cancelled' });
+        r.status = 'cancelled';
+      } else {
+        if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+        if (action === 'approve') {
+          if (r.status !== 'pending') return json(res, 400, { error: 'Only pending requests can be approved' });
+          r.status = 'approved';
+        } else if (action === 'reject') {
+          if (!['pending', 'approved'].includes(r.status)) return json(res, 400, { error: 'Already processed' });
+          r.status = 'rejected';
+        } else if (action === 'release') {
+          if (!['pending', 'approved'].includes(r.status)) return json(res, 400, { error: 'Already processed' });
+          const tech = db.users.find(u => u.id === r.techId);
+          if (!tech) return json(res, 400, { error: 'Technician no longer exists' });
+          addStockTo(tech, r.cableName, r.cableMeters, r.connectors);
+          r.status = 'released'; r.released = Date.now();
+        } else return json(res, 400, { error: 'Unknown action' });
+        r.decidedBy = me.name;
+      }
+      r.updated = Date.now();
+      saveDB();
+      return json(res, 200, { request: r });
+    }
+
     /* ---- users (admin) ---- */
     if (p === '/api/users' && req.method === 'GET') {
       if (!isAdmin) return json(res, 403, { error: 'Admin only' });
@@ -171,7 +243,7 @@ const server = http.createServer(async (req, res) => {
       db.users.push(u); saveDB();
       return json(res, 200, { user: publicUser(u) });
     }
-    let m = p.match(/^\/api\/users\/([\w.]+)$/);
+    m = p.match(/^\/api\/users\/([\w.]+)$/);
     if (m && req.method === 'DELETE') {
       if (!isAdmin) return json(res, 403, { error: 'Admin only' });
       if (m[1] === me.id) return json(res, 400, { error: 'You cannot delete your own account' });
@@ -186,11 +258,8 @@ const server = http.createServer(async (req, res) => {
       const b = await readBody(req);
       const u = db.users.find(x => x.id === m[1]);
       if (!u) return json(res, 404, { error: 'User not found' });
-      u.inv = u.inv || { cable: 0, connectors: 0 };
-      const cable = parseFloat(b.cable) || 0;
-      const connectors = parseInt(b.connectors) || 0;
-      u.inv.cable = Math.round((u.inv.cable + cable) * 100) / 100;
-      u.inv.connectors = u.inv.connectors + connectors;
+      addStockTo(u, b.cableName, b.cableMeters, b.connectors);
+      if (b.removeReel) { u.inv.cables = (u.inv.cables || []).filter(r => r.id !== b.removeReel); }
       saveDB();
       return json(res, 200, { user: publicUser(u) });
     }
@@ -267,7 +336,8 @@ const server = http.createServer(async (req, res) => {
           if (b.status === 'completed' && !t.invApplied && t.assignedTo) {
             const tech = db.users.find(u => u.id === t.assignedTo);
             if (tech) {
-              tech.inv = tech.inv || { cable: 0, connectors: 0 };
+              tech.inv = tech.inv || { connectors: 0, cables: [] };
+              tech.inv.cables = tech.inv.cables || [];
               let cableUsed = 0;
               if (t.data && t.data.cable_start !== undefined && t.data.cable_end !== undefined) {
                 cableUsed = (parseFloat(t.data.cable_start) || 0) - (parseFloat(t.data.cable_end) || 0);
@@ -275,9 +345,17 @@ const server = http.createServer(async (req, res) => {
                 t.data.cable_used = Math.round(cableUsed * 100) / 100;
               } else if (t.data && t.data.cable_length) {
                 cableUsed = parseFloat(t.data.cable_length) || 0;
+                t.data.cable_used = Math.round(cableUsed * 100) / 100;
+              }
+              /* deduct from the specific reel the technician selected */
+              if (cableUsed > 0 && t.data && t.data.cable_reel) {
+                const reel = tech.inv.cables.find(r => r.id === t.data.cable_reel);
+                if (reel) {
+                  reel.meters = Math.round((reel.meters - cableUsed) * 100) / 100;
+                  t.data.cable_reel_name = reel.name;
+                }
               }
               const connUsed = parseInt(t.data && t.data.connectors) || 0;
-              tech.inv.cable = Math.round((tech.inv.cable - cableUsed) * 100) / 100;
               tech.inv.connectors = tech.inv.connectors - connUsed;
               t.invApplied = true;
             }
