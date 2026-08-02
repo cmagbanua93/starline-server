@@ -204,7 +204,7 @@
     <div class="step-title" style="font-size:15px">Request Materials</div>
     <div class="step-desc">Send a request to the admin. Once approved and released, the items appear in your stock.</div>
     <label>Fiber Cable Type</label>
-    <input id="rqCableName" placeholder="e.g. 1 core / 2 core (leave blank if none)">
+    <select id="rqCableName"><option value="">— no cable needed —</option></select>
     <label>Cable Meters</label>
     <input id="rqCableMeters" type="number" step="1" placeholder="e.g. 1000">
     <label>FIC Connectors (pcs)</label>
@@ -221,6 +221,21 @@
 
 <!-- ============ ADMIN: REQUESTS ============ -->
 <div class="wrap hidden" id="viewRequests">
+  <div class="card">
+    <div class="step-title" style="font-size:15px">🏢 Warehouse Inventory</div>
+    <div class="step-desc">Stock in the office/warehouse. Releasing a technician's request takes items from here and moves them to the technician's profile.</div>
+    <div id="whList"></div>
+    <div class="row2">
+      <div><label>Cable Type</label><input id="whName" placeholder="e.g. 1 core"></div>
+      <div><label>Meters per Reel</label><input id="whMeters" type="number" step="1" placeholder="e.g. 1000"></div>
+    </div>
+    <label>Quantity (pcs)</label>
+    <input id="whQty" type="number" step="1" placeholder="e.g. 6">
+    <button class="btn btn-primary btn-sm" onclick="whAddCable()">＋ Add Cable Stock</button>
+    <label>Add FIC Connectors (pcs)</label>
+    <input id="whConn" type="number" step="1" placeholder="e.g. 100">
+    <button class="btn btn-ghost btn-sm" onclick="whAddConnectors()">＋ Add Connectors</button>
+  </div>
   <div id="reqList"></div>
 </div>
 
@@ -654,7 +669,7 @@ function adminGo(tab){
   if(tab==='dash'){ document.getElementById('tabDash').classList.add('active'); show('viewDash'); renderDash(); }
   if(tab==='new'){ document.getElementById('tabNew').classList.add('active'); show('viewNew'); }
   if(tab==='techs'){ document.getElementById('tabTechs').classList.add('active'); show('viewTechs'); renderUsers(); renderPlans(); }
-  if(tab==='requests'){ document.getElementById('tabReq').classList.add('active'); show('viewRequests'); loadRequests().then(renderRequests); }
+  if(tab==='requests'){ document.getElementById('tabReq').classList.add('active'); show('viewRequests'); loadRequests().then(renderRequests); loadWarehouse().then(renderWarehouse); }
   if(tab!=='report') adminBack = tab;
 }
 
@@ -1086,10 +1101,59 @@ function reqItems(r){
   if(r.connectors) parts.push(`🔌 ${r.connectors} pcs FIC connector`);
   return parts.join(' · ')||'—';
 }
+/* ---- warehouse ---- */
+let WAREHOUSE = { connectors:0, cables:[] };
+async function loadWarehouse(){
+  try{ WAREHOUSE = (await api('/api/warehouse')).warehouse || {connectors:0,cables:[]}; }catch(e){}
+}
+function renderWarehouse(){
+  const el = document.getElementById('whList');
+  const cables = WAREHOUSE.cables||[];
+  el.innerHTML = `
+    <table class="summary-table">
+      <tr><td style="width:34%">Item</td><td>Per Reel</td><td>Qty</td><td>Total</td><td></td></tr>
+      ${cables.map(c=>`<tr>
+        <td>🧵 ${esc(c.name)}</td><td>${c.meters} m</td>
+        <td${c.qty<2?' style="color:var(--danger);font-weight:700"':''}>${c.qty} pcs</td>
+        <td>${c.qty*c.meters} m</td>
+        <td><button class="btn btn-warn btn-sm" style="margin-top:0;padding:4px 9px" onclick="whRemove('${c.id}')">✕</button></td>
+      </tr>`).join('')}
+      <tr><td>🔌 FIC Connectors</td><td>—</td><td${(WAREHOUSE.connectors||0)<10?' style="color:var(--danger);font-weight:700"':''}>${WAREHOUSE.connectors||0} pcs</td><td>—</td><td></td></tr>
+    </table>`;
+}
+async function whAddCable(){
+  const name = document.getElementById('whName').value.trim();
+  const meters = parseFloat(document.getElementById('whMeters').value)||0;
+  const qty = parseInt(document.getElementById('whQty').value)||0;
+  if(!name || meters<=0 || qty===0){ alert('Enter cable type, meters per reel, and quantity.'); return; }
+  try{
+    WAREHOUSE = (await api('/api/warehouse','POST',{cableName:name, reelMeters:meters, qty})).warehouse;
+    ['whName','whMeters','whQty'].forEach(i=>document.getElementById(i).value='');
+    renderWarehouse();
+  }catch(e){ alert(e.message); }
+}
+async function whAddConnectors(){
+  const n = parseInt(document.getElementById('whConn').value)||0;
+  if(!n){ alert('Enter the number of connectors.'); return; }
+  try{
+    WAREHOUSE = (await api('/api/warehouse','POST',{connectors:n})).warehouse;
+    document.getElementById('whConn').value='';
+    renderWarehouse();
+  }catch(e){ alert(e.message); }
+}
+async function whRemove(id){
+  if(!confirm('Remove this cable stock from the warehouse?')) return;
+  try{ WAREHOUSE = (await api('/api/warehouse','POST',{removeCable:id})).warehouse; renderWarehouse(); }
+  catch(e){ alert(e.message); }
+}
 /* ---- tech side ---- */
 async function showTechReq(){
   await loadRequests();
+  await loadWarehouse();
   try{ USER = (await api('/api/me')).user; }catch(e){}
+  const sel = document.getElementById('rqCableName');
+  sel.innerHTML = '<option value="">— no cable needed —</option>' +
+    (WAREHOUSE.cables||[]).map(c=>`<option value="${esc(c.name)}">${esc(c.name)} (${c.meters} m/reel · ${c.qty} pcs available)</option>`).join('');
   renderTechReq();
   show('viewTechReq');
 }
@@ -1158,7 +1222,7 @@ async function reqAction(id, action){
   try{
     await api('/api/requests/'+id,'PUT',{action});
     await loadRequests(); renderRequests();
-    if(action==='release') await loadUsers();
+    if(action==='release'){ await loadUsers(); await loadWarehouse(); renderWarehouse(); }
   }catch(e){ alert(e.message); }
 }
 
