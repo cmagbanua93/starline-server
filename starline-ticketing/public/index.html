@@ -71,6 +71,15 @@
   .stat .n{font-size:26px;font-weight:800}
   .stat .l{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
   .stat.s-open .n{color:#4338ca}.stat.s-prog .n{color:#a16207}.stat.s-done .n{color:#15803d}
+  /* technician solid stat cards */
+  .tstat{border:none;border-radius:var(--radius);padding:14px 10px;text-align:center;color:#fff;box-shadow:0 3px 10px rgba(15,23,42,.18)}
+  .tstat .n{font-size:32px;font-weight:800;line-height:1.1}
+  .tstat .l{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;opacity:.9;margin-top:2px}
+  .tstat-today{background:linear-gradient(135deg,#16a34a,#15803d);transform:scale(1.06);box-shadow:0 6px 18px rgba(22,163,74,.45)}
+  .tstat-today .n{font-size:38px}
+  .tstat-week{background:linear-gradient(135deg,#12406e,#0e2f55)}
+  .tstat-month{background:linear-gradient(135deg,#f2c230,#d99f0b);color:#0e2f55}
+  .tstat-month .l{opacity:.75}
   .split{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
   .split .stat{text-align:left;display:flex;justify-content:space-between;align-items:center}
 
@@ -179,6 +188,7 @@
 
 <!-- ============ TECH: TICKET LIST ============ -->
 <div class="wrap hidden" id="viewTechList">
+  <div class="stats" id="techStats"></div>
   <div class="type-tabs no-print" id="techTypeTabs"></div>
   <div class="filter-row no-print">
     <select id="fStatus" onchange="renderTechList()">
@@ -720,6 +730,18 @@ function progress(t){
 
 /* =================== TECH: LIST =================== */
 function renderTechList(){
+  /* completed today / this week / this month */
+  const now = new Date();
+  const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const wd = (now.getDay()+6)%7; // Monday = start of week
+  const weekStart = dayStart - wd*86400000;
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  const doneSince = ts => tickets.filter(t=>t.status==='completed' && t.completed && t.completed>=ts).length;
+  document.getElementById('techStats').innerHTML = `
+    <div class="tstat tstat-week"><div class="n">${doneSince(weekStart)}</div><div class="l">This Week</div></div>
+    <div class="tstat tstat-today"><div class="n">${doneSince(dayStart)}</div><div class="l">✔ Today</div></div>
+    <div class="tstat tstat-month"><div class="n">${doneSince(monthStart)}</div><div class="l">This Month</div></div>`;
+
   renderTypeTabs('techTypeTabs', techType, 'setTechType');
   const f = document.getElementById('fStatus').value;
   let list = sortTickets(tickets);
