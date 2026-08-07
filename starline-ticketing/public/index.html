@@ -114,6 +114,13 @@
 
   /* camera overlay */
   #camOverlay{position:fixed;inset:0;background:#000;z-index:200;display:flex;flex-direction:column}
+  #photoLightbox{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:300;display:flex;align-items:center;justify-content:center;padding:26px;overflow:auto}
+  #photoLightbox img{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px;box-shadow:0 10px 40px rgba(0,0,0,.5);cursor:zoom-in;transition:transform .15s ease}
+  #photoLightbox.zoomed{align-items:flex-start;justify-content:flex-start}
+  #photoLightbox.zoomed img{max-width:none;max-height:none;width:auto;height:auto;transform:scale(2);transform-origin:top left;cursor:zoom-out}
+  .lightbox-close{position:fixed;top:14px;right:16px;width:44px;height:44px;border-radius:50%;border:none;background:rgba(255,255,255,.15);color:#fff;font-size:26px;line-height:1;cursor:pointer;z-index:301}
+  .lightbox-close:hover{background:rgba(255,255,255,.32)}
+  .photos-grid figure img,.zoomable-photo{cursor:zoom-in}
   #camVideo{flex:1;width:100%;object-fit:cover;background:#000}
   #camBar{display:flex;gap:10px;padding:16px;background:#000}
   #camBar .btn{margin-top:0}
@@ -400,6 +407,12 @@
   </div>
 </div>
 
+<!-- ============ PHOTO LIGHTBOX (zoom viewer) ============ -->
+<div id="photoLightbox" class="hidden no-print" onclick="if(event.target===this) closeLightbox()">
+  <button class="lightbox-close" onclick="closeLightbox()" aria-label="Close">&times;</button>
+  <img id="lightboxImg" src="" alt="Photo" onclick="toggleLightboxZoom(event)" title="Click to zoom in/out">
+</div>
+
 <script>
 /* =================== STATE / API =================== */
 let TOKEN = localStorage.getItem('sl_token') || null;
@@ -530,10 +543,11 @@ const WORKFLOWS = {
   ],
   nap_install: [
     { key:'cable_start', title:'1. Fiber Cable — Starting Meter',
-      desc:'Select which cable from your stock you will use for this NAP installation, then check the meter marking on the reel and record how many meters are left.',
+      desc:'Select which cable from your stock you will use for this NAP installation, then check the meter marking on the reel, record how many meters are left, and take a photo of the actual cable showing the exact meter mark.',
       fields:[
         {k:'cable_reel', type:'reel_select', label:'Cable Type Used (from your stock)', req:true},
-        {k:'cable_start', type:'number', label:'Cable Meters Left on Reel — BEFORE the Job (m)', req:true, placeholder:'e.g. 1200', step:'0.1'}
+        {k:'cable_start', type:'number', label:'Cable Meters Left on Reel — BEFORE the Job (m)', req:true, placeholder:'e.g. 1200', step:'0.1'},
+        {k:'cable_start_photo', type:'photo', label:'Photo of Cable Showing Meter Mark (Before)', req:true, autogps:true}
       ]},
     { key:'mainnap', title:'2. Main NAP Details',
       desc:'Fill out the details of the Main NAP box feeding the new NAP: the port number used for the new NAP box and the fiber color of the run. Then take a photo of the Main NAP — time and GPS are stamped automatically.',
@@ -558,9 +572,10 @@ const WORKFLOWS = {
         {k:'location', type:'gps', label:'GPS Coordinates of the Post', req:true}
       ]},
     { key:'materials', title:'5. Materials &amp; Completion',
-      desc:'Check the reel meter again — the system auto-computes cable used and deducts it from the cable you selected in Step 1 when the job is completed.',
+      desc:'Check the reel meter again and take a photo of the actual cable showing the meter mark — the system auto-computes cable used and deducts it from the cable you selected in Step 1 when the job is completed.',
       fields:[
         {k:'cable_end', type:'number', label:'Cable Meters Left on Reel — AFTER the Job (m)', req:true, step:'0.1', cableCalc:true},
+        {k:'cable_end_photo', type:'photo', label:'Photo of Cable Showing Meter Mark (After)', req:true, autogps:true},
         {k:'other_materials', type:'textarea', label:'Other Materials'},
         {k:'final_notes', type:'textarea', label:'Completion Notes (optional)'}
       ]}
@@ -743,6 +758,12 @@ function filterCompleted(p){
   renderTechList();
 }
 function setDashType(v){ dashType=v; renderDash(); }
+function setDashStatus(s){
+  const sel = document.getElementById('dStatus');
+  if(!sel) return;
+  sel.value = (sel.value===s) ? '' : s;  // tap again to clear
+  renderDash();
+}
 function stepComplete(t, step){ return step.fields.every(f => !f.req || hasValue(t, f)); }
 function hasValue(t, f){
   const v = t.data[f.k];
@@ -1034,6 +1055,23 @@ function closeCamera(){
   if(camStream){ camStream.getTracks().forEach(tr=>tr.stop()); camStream=null; }
   document.getElementById('camOverlay').classList.add('hidden');
 }
+/* =================== PHOTO LIGHTBOX (zoom viewer) =================== */
+function openLightbox(src){
+  if(!src) return;
+  document.getElementById('lightboxImg').src = src;
+  document.getElementById('photoLightbox').classList.remove('hidden');
+  document.getElementById('photoLightbox').classList.remove('zoomed');
+}
+function closeLightbox(){
+  document.getElementById('photoLightbox').classList.add('hidden');
+  document.getElementById('photoLightbox').classList.remove('zoomed');
+  document.getElementById('lightboxImg').src = '';
+}
+function toggleLightboxZoom(e){
+  if(e) e.stopPropagation();
+  document.getElementById('photoLightbox').classList.toggle('zoomed');
+}
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeLightbox(); });
 function capturePhoto(){
   const video = document.getElementById('camVideo');
   if(!video.videoWidth){ return; }
@@ -1372,10 +1410,12 @@ function renderDash(){
   const rep = tickets.filter(t=>t.type==='repair');
   const nap = tickets.filter(t=>t.type==='nap_install');
 
+  const curDashStatus = (document.getElementById('dStatus')||{}).value || '';
+  const dsSel = s => curDashStatus===s ? 'outline:3px solid var(--primary);outline-offset:-4px;' : '';
   document.getElementById('statCards').innerHTML = `
-    <div class="stat s-open"><div class="n">${open}</div><div class="l">Open</div></div>
-    <div class="stat s-prog"><div class="n">${prog}</div><div class="l">In Progress</div></div>
-    <div class="stat s-done"><div class="n">${done}</div><div class="l">Completed</div></div>`;
+    <div class="stat s-open" style="cursor:pointer;${dsSel('open')}" onclick="setDashStatus('open')"><div class="n">${open}</div><div class="l">Open</div></div>
+    <div class="stat s-prog" style="cursor:pointer;${dsSel('in_progress')}" onclick="setDashStatus('in_progress')"><div class="n">${prog}</div><div class="l">In Progress</div></div>
+    <div class="stat s-done" style="cursor:pointer;${dsSel('completed')}" onclick="setDashStatus('completed')"><div class="n">${done}</div><div class="l">Completed</div></div>`;
   document.getElementById('statSplit').innerHTML = `
     <div class="stat"><div><div class="l">Installations</div><div class="tmeta">${inst.filter(t=>t.status==='completed').length} done / ${inst.length} total</div></div><div class="n" style="color:#1d4ed8">${inst.filter(t=>t.status!=='completed').length}</div></div>
     <div class="stat"><div><div class="l">Repairs</div><div class="tmeta">${rep.filter(t=>t.status==='completed').length} done / ${rep.length} total</div></div><div class="n" style="color:#b45309">${rep.filter(t=>t.status!=='completed').length}</div></div>
@@ -1708,8 +1748,8 @@ function renderSummary(t, targetId){
       <div class="step-title" style="font-size:15px">Job Report Summary</div>
       <table class="summary-table">${rows.map(r=>`<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td></tr>`).join('')}</table>
       ${photos.length?`<label style="margin-top:14px">Photos (${photos.length})</label>
-        <div class="photos-grid">${photos.map(p=>`<figure><img src="${p.img}"><figcaption>${esc(p.cap)}${p.gps?'<br>📍 '+p.gps:''}</figcaption></figure>`).join('')}</div>`:''}
-      ${sig?`<label style="margin-top:14px">Customer Signature${t.data.signature_name?' — '+esc(t.data.signature_name):''}${t.data.signature_time?' — signed '+fmt(t.data.signature_time):''}</label><img src="${sig}" style="max-width:260px;border:1px solid var(--border);border-radius:8px;background:#fff">`:''}
+        <div class="photos-grid">${photos.map(p=>`<figure><img src="${p.img}" class="zoomable-photo" onclick="openLightbox(this.src)"><figcaption>${esc(p.cap)}${p.gps?'<br>📍 '+p.gps:''}</figcaption></figure>`).join('')}</div>`:''}
+      ${sig?`<label style="margin-top:14px">Customer Signature${t.data.signature_name?' — '+esc(t.data.signature_name):''}${t.data.signature_time?' — signed '+fmt(t.data.signature_time):''}</label><img src="${sig}" class="zoomable-photo" onclick="openLightbox(this.src)" style="max-width:260px;border:1px solid var(--border);border-radius:8px;background:#fff">`:''}
     </div>`;
 }
 
