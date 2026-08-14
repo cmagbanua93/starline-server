@@ -7,7 +7,7 @@
 <style>
   :root{
     --primary:#0e2f55; --primary-dark:#081c34; --gold:#f2c230;
-    --bg:#f1f5f9; --card:#ffffff; --text:#0f172a; --muted:#64748b;
+    --bg:#e7ecf3; --card:#ffffff; --text:#0f172a; --muted:#64748b;
     --ok:#16a34a; --danger:#dc2626; --border:#e2e8f0; --radius:14px;
   }
   *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
@@ -70,7 +70,12 @@
   .stat{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:12px;text-align:center}
   .stat .n{font-size:26px;font-weight:800}
   .stat .l{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+  .stat.s-open{background:#eef2ff;border-color:#c7d2fe}.stat.s-prog{background:#fffbeb;border-color:#fde68a}.stat.s-done{background:#f0fdf4;border-color:#bbf7d0}
   .stat.s-open .n{color:#4338ca}.stat.s-prog .n{color:#a16207}.stat.s-done .n{color:#15803d}
+  .stat.stat-installation{background:#eff6ff;border-color:#bfdbfe}
+  .stat.stat-repair{background:#fffbeb;border-color:#fde68a}
+  .stat.stat-nap_install{background:#faf5ff;border-color:#e9d5ff}
+  .stat.stat-today{background:#f0fdf4;border-color:#bbf7d0}
   /* technician solid stat cards */
   .tstat{border:none;border-radius:var(--radius);padding:14px 10px;text-align:center;color:#fff;box-shadow:0 3px 10px rgba(15,23,42,.18)}
   .tstat .n{font-size:32px;font-weight:800;line-height:1.1}
@@ -82,6 +87,13 @@
   .tstat-month .l{opacity:.75}
   .split{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
   .split .stat{text-align:left;display:flex;justify-content:space-between;align-items:center}
+  .kpi-row .kpi:nth-child(1){background:linear-gradient(135deg,#eff6ff,#ffffff);border-color:#bfdbfe}
+  .kpi-row .kpi:nth-child(2){background:linear-gradient(135deg,#f0fdf4,#ffffff);border-color:#bbf7d0}
+  #cbdPanelAdmin,#cbdPanelTech{border-top:4px solid var(--primary)}
+  #trendPanelAdmin,#trendPanelTech{border-top:4px solid var(--gold)}
+  #techPerfPanel{border-top:4px solid #0e2f55}
+  #prioPanel{border-top:4px solid #dc2626}
+  #invPanel{border-top:4px solid #16a34a}
 
   /* wizard */
   .steps-nav{display:flex;gap:6px;overflow-x:auto;padding:4px 0 10px;-webkit-overflow-scrolling:touch}
@@ -130,6 +142,9 @@
   /* type tabs + priority + accents */
   .type-tabs{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
   .ttab{border:1.5px solid var(--border);background:#fff;color:var(--muted);padding:7px 13px;border-radius:99px;font-size:12.5px;font-weight:700;cursor:pointer}
+  .ttab-installation{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8}
+  .ttab-repair{background:#fffbeb;border-color:#fde68a;color:#b45309}
+  .ttab-nap_install{background:#faf5ff;border-color:#e9d5ff;color:#7e22ce}
   .ttab.on-all{background:var(--text);color:#fff;border-color:var(--text)}
   .ttab.on-installation{background:#1d4ed8;color:#fff;border-color:#1d4ed8}
   .ttab.on-repair{background:#d97706;color:#fff;border-color:#d97706}
@@ -140,9 +155,9 @@
   .b-p1{background:#dc2626;color:#fff}
   .b-p2{background:#f97316;color:#fff}
   .b-p3{background:#16a34a;color:#fff}
-  .acc-installation{border-left:5px solid #1d4ed8}
-  .acc-repair{border-left:5px solid #d97706}
-  .acc-nap_install{border-left:5px solid #7e22ce}
+  .acc-installation{border-left:5px solid #1d4ed8;background:linear-gradient(90deg,#eff6ff 0%,#ffffff 20%)}
+  .acc-repair{border-left:5px solid #d97706;background:linear-gradient(90deg,#fffbeb 0%,#ffffff 20%)}
+  .acc-nap_install{border-left:5px solid #7e22ce;background:linear-gradient(90deg,#faf5ff 0%,#ffffff 20%)}
 
   /* signature modal */
   #sigOverlay{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:210;display:flex;align-items:center;justify-content:center;padding:14px}
@@ -169,7 +184,11 @@
   .cbd-dot.installation{background:#1d4ed8}.cbd-dot.repair{background:#d97706}.cbd-dot.nap_install{background:#7e22ce}
   .cbd-cell{display:block;width:100%;border:none;background:#f1f5f9;border-radius:9px;padding:9px 4px;text-align:center;cursor:pointer;font-weight:800;font-size:15px;color:var(--text)}
   .cbd-cell:active{transform:scale(.96)}
-  .cbd-cell.active{outline:2px solid var(--primary);outline-offset:-2px;background:#e0e7ff}
+  .cbd-cell.cbd-installation{background:#e0ecff}
+  .cbd-cell.cbd-repair{background:#fef3d6}
+  .cbd-cell.cbd-nap_install{background:#f2e2fe}
+  .cbd-cell.active{outline:2px solid var(--primary);outline-offset:-2px;background:#c7d2fe}
+  .hbar-row:nth-child(odd){background:#f8fafc;border-radius:8px}
 
   /* small vertical trend bar chart */
   .vbar-chart{display:flex;align-items:flex-end;gap:8px;margin-top:10px}
@@ -181,7 +200,7 @@
   .vbar-lbl{font-size:9.5px;color:var(--muted);font-weight:700;white-space:nowrap}
 
   /* horizontal bar chart (technician performance / priority mix) */
-  .hbar-row{display:flex;align-items:center;gap:8px;margin:7px 0}
+  .hbar-row{display:flex;align-items:center;gap:8px;margin:5px 0;padding:4px 6px;border-radius:8px}
   .hbar-label{width:38%;font-size:12px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0}
   .hbar-track{flex:1;position:relative;background:#f1f5f9;border-radius:99px;height:20px;display:flex;align-items:center;min-width:0}
   .hbar-fill{height:14px;margin-left:3px;background:var(--primary);border:none;border-radius:0 4px 4px 0;cursor:pointer;min-width:8px;padding:0}
@@ -804,7 +823,7 @@ let dashPeriod = null, dashTrendDay = null, dashPriority = '';
 function renderTypeTabs(containerId, current, setter){
   const types=[['','All'],['installation','Installation'],['repair','Repair'],['nap_install','NAP Install']];
   document.getElementById(containerId).innerHTML = types.map(([v,l])=>
-    `<button class="ttab ${current===v?('on-'+(v||'all')):''}" onclick="${setter}('${v}')">${l}</button>`).join('');
+    `<button class="ttab ttab-${v||'all'} ${current===v?('on-'+(v||'all')):''}" onclick="${setter}('${v}')">${l}</button>`).join('');
 }
 function setTechType(v){ techType = (techType===v && v!=='') ? '' : v; techTrendDay=null; renderTechList(); }
 let techPeriod = null;
@@ -865,7 +884,7 @@ function renderCompletedGrid(list, activeType, activePeriod, clickFn){
           ${CBD_PERIODS.map(([pkey])=>{
             const n = completedSince(list, type, sinceMap[pkey]);
             const active = activeType===type && activePeriod===pkey;
-            return `<td><button class="cbd-cell${active?' active':''}" onclick="${clickFn}('${type}','${pkey}')">${n}</button></td>`;
+            return `<td><button class="cbd-cell cbd-${type}${active?' active':''}" onclick="${clickFn}('${type}','${pkey}')">${n}</button></td>`;
           }).join('')}
         </tr>`).join('')}
     </table>`;
@@ -1578,10 +1597,10 @@ function renderDash(){
   const typeSel = t => dashType===t ? 'outline:3px solid var(--primary);outline-offset:-4px;' : '';
   const todaySel = (dashType==='' && dashPeriod==='day') ? 'outline:3px solid var(--primary);outline-offset:-4px;' : '';
   document.getElementById('statSplit').innerHTML = `
-    <div class="stat" style="cursor:pointer;${typeSel('installation')}" onclick="setDashType('installation')"><div><div class="l">Installations</div><div class="tmeta">${inst.filter(t=>t.status==='completed').length} done / ${inst.length} total</div></div><div class="n" style="color:#1d4ed8">${inst.filter(t=>t.status!=='completed').length}</div></div>
-    <div class="stat" style="cursor:pointer;${typeSel('repair')}" onclick="setDashType('repair')"><div><div class="l">Repairs</div><div class="tmeta">${rep.filter(t=>t.status==='completed').length} done / ${rep.length} total</div></div><div class="n" style="color:#b45309">${rep.filter(t=>t.status!=='completed').length}</div></div>
-    <div class="stat" style="cursor:pointer;${typeSel('nap_install')}" onclick="setDashType('nap_install')"><div><div class="l">NAP Installs</div><div class="tmeta">${nap.filter(t=>t.status==='completed').length} done / ${nap.length} total</div></div><div class="n" style="color:#7e22ce">${nap.filter(t=>t.status!=='completed').length}</div></div>
-    <div class="stat" style="cursor:pointer;${todaySel}" onclick="dashTodayClick()"><div class="l">Completed today</div><div class="n" style="color:#15803d">${doneToday}</div></div>`;
+    <div class="stat stat-installation" style="cursor:pointer;${typeSel('installation')}" onclick="setDashType('installation')"><div><div class="l">Installations</div><div class="tmeta">${inst.filter(t=>t.status==='completed').length} done / ${inst.length} total</div></div><div class="n" style="color:#1d4ed8">${inst.filter(t=>t.status!=='completed').length}</div></div>
+    <div class="stat stat-repair" style="cursor:pointer;${typeSel('repair')}" onclick="setDashType('repair')"><div><div class="l">Repairs</div><div class="tmeta">${rep.filter(t=>t.status==='completed').length} done / ${rep.length} total</div></div><div class="n" style="color:#b45309">${rep.filter(t=>t.status!=='completed').length}</div></div>
+    <div class="stat stat-nap_install" style="cursor:pointer;${typeSel('nap_install')}" onclick="setDashType('nap_install')"><div><div class="l">NAP Installs</div><div class="tmeta">${nap.filter(t=>t.status==='completed').length} done / ${nap.length} total</div></div><div class="n" style="color:#7e22ce">${nap.filter(t=>t.status!=='completed').length}</div></div>
+    <div class="stat stat-today" style="cursor:pointer;${todaySel}" onclick="dashTodayClick()"><div class="l">Completed today</div><div class="n" style="color:#15803d">${doneToday}</div></div>`;
   renderTypeTabs('dashTypeTabs', dashType, 'setDashType');
 
   /* KPIs */
