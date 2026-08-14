@@ -160,6 +160,38 @@
   @keyframes spin{to{transform:rotate(360deg)}}
   @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
 
+  /* completed-tickets breakdown grid (type x period) */
+  .cbd-table{width:100%;border-collapse:separate;border-spacing:5px;font-size:12px;margin-top:6px}
+  .cbd-table th{font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;padding:2px 4px;text-align:center}
+  .cbd-table th:first-child{text-align:left}
+  .cbd-row-label{font-size:12px;font-weight:800;display:flex;align-items:center;gap:6px;white-space:nowrap;padding-right:6px}
+  .cbd-dot{width:9px;height:9px;border-radius:3px;display:inline-block;flex-shrink:0}
+  .cbd-dot.installation{background:#1d4ed8}.cbd-dot.repair{background:#d97706}.cbd-dot.nap_install{background:#7e22ce}
+  .cbd-cell{display:block;width:100%;border:none;background:#f1f5f9;border-radius:9px;padding:9px 4px;text-align:center;cursor:pointer;font-weight:800;font-size:15px;color:var(--text)}
+  .cbd-cell:active{transform:scale(.96)}
+  .cbd-cell.active{outline:2px solid var(--primary);outline-offset:-2px;background:#e0e7ff}
+
+  /* small vertical trend bar chart */
+  .vbar-chart{display:flex;align-items:flex-end;gap:8px;margin-top:10px}
+  .vbar-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;min-width:0}
+  .vbar-bar{width:100%;max-width:22px;min-height:4px;background:var(--primary);border:none;border-radius:4px 4px 0 0;cursor:pointer;padding:0}
+  .vbar-bar.zero{background:var(--border)}
+  .vbar-bar.active{background:var(--gold)}
+  .vbar-val{font-size:11px;font-weight:800;color:var(--text)}
+  .vbar-lbl{font-size:9.5px;color:var(--muted);font-weight:700;white-space:nowrap}
+
+  /* horizontal bar chart (technician performance / priority mix) */
+  .hbar-row{display:flex;align-items:center;gap:8px;margin:7px 0}
+  .hbar-label{width:38%;font-size:12px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0}
+  .hbar-track{flex:1;position:relative;background:#f1f5f9;border-radius:99px;height:20px;display:flex;align-items:center;min-width:0}
+  .hbar-fill{height:14px;margin-left:3px;background:var(--primary);border:none;border-radius:0 4px 4px 0;cursor:pointer;min-width:8px;padding:0}
+  .hbar-fill.active{background:var(--gold)}
+  .hbar-value{margin-left:8px;font-size:12px;font-weight:800;color:var(--text);flex-shrink:0}
+  .kpi-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+  .kpi{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:12px;text-align:center}
+  .kpi .n{font-size:22px;font-weight:800;color:var(--primary)}
+  .kpi .l{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+
   @media print{
     header,.tabs,.no-print,.steps-nav,.wizard-btns,.filter-row,.stats,.split{display:none!important}
     body{background:#fff;padding:0}
@@ -192,6 +224,7 @@
   <button class="tab active" id="tabDash" onclick="adminGo('dash')">📊 Dashboard</button>
   <button class="tab" id="tabNew" onclick="adminGo('new')">＋ New Ticket</button>
   <button class="tab" id="tabReq" onclick="adminGo('requests')">📦 Requests</button>
+  <button class="tab" id="tabUsage" onclick="adminGo('usage')">🧵 Material Usage</button>
   <button class="tab" id="tabTechs" onclick="adminGo('techs')">👷 Technicians</button>
 </div>
 
@@ -216,10 +249,12 @@
 <div class="wrap hidden" id="viewTechList">
   <div class="step-title" style="font-size:15px;margin-bottom:8px">✅ Completed Tickets</div>
   <div class="stats" id="techStats"></div>
+  <div class="card" id="cbdPanelTech"></div>
+  <div class="card" id="trendPanelTech"></div>
   <div class="card" id="techStockPanel" onclick="showTechReq()" style="cursor:pointer"></div>
   <div class="type-tabs no-print" id="techTypeTabs"></div>
   <div class="filter-row no-print">
-    <select id="fStatus" onchange="techPeriod=null;renderTechList()">
+    <select id="fStatus" onchange="techPeriod=null;techTrendDay=null;renderTechList()">
       <option value="active">Active jobs</option>
       <option value="">All</option>
       <option value="open">Open</option>
@@ -292,17 +327,35 @@
 <div class="wrap hidden" id="viewDash">
   <div class="stats" id="statCards"></div>
   <div class="split" id="statSplit"></div>
+  <div class="kpi-row" id="kpiRow"></div>
+  <div class="card" id="cbdPanelAdmin"></div>
+  <div class="card" id="trendPanelAdmin"></div>
+  <div class="card" id="techPerfPanel"></div>
+  <div class="card" id="prioPanel"></div>
   <div class="card" id="invPanel"></div>
-  <div class="card" id="usagePanel"></div>
   <div class="type-tabs no-print" id="dashTypeTabs"></div>
   <div class="filter-row no-print">
-    <select id="dStatus" onchange="renderDash()">
+    <select id="dStatus" onchange="dashPeriod=null;dashTrendDay=null;renderDash()">
       <option value="">All statuses</option><option value="open">Open</option><option value="in_progress">In Progress</option><option value="completed">Completed</option>
     </select>
     <select id="dTech" onchange="renderDash()"><option value="">All technicians</option></select>
     <button class="btn btn-ghost btn-sm" style="margin-top:0" onclick="refreshTickets(true)">↻ Refresh</button>
   </div>
   <div id="dashList"></div>
+</div>
+
+<!-- ============ ADMIN: MATERIAL USAGE ============ -->
+<div class="wrap hidden" id="viewUsage">
+  <div class="card">
+    <div class="step-title" style="font-size:15px">🧵 Material Usage — by Job Type</div>
+    <div class="step-desc">Cable meters and FIC connectors consumed, split out by job type. Tap a row's numbers to filter the ticket table below.</div>
+    <div id="usageSplit"></div>
+  </div>
+  <div class="card">
+    <div class="type-tabs no-print" id="usageTypeTabs"></div>
+    <div class="step-title" style="font-size:15px">Material Usage by Ticket</div>
+    <div id="usagePanel"></div>
+  </div>
 </div>
 
 <!-- ============ ADMIN: NEW TICKET ============ -->
@@ -483,10 +536,11 @@ const WORKFLOWS = {
         {k:'house_photo', type:'photo', label:'House Photo', req:true}
       ]},
     { key:'cable_start', title:'3. Fiber Cable — Starting Meter',
-      desc:'Select which cable from your stock you will use for this installation, then check the meter marking on the reel and record how many meters are LEFT before lining.',
+      desc:'Select which cable from your stock you will use for this installation, then check the meter marking on the reel, record how many meters are LEFT before lining, and take a photo of the actual cable showing that meter mark.',
       fields:[
         {k:'cable_reel', type:'reel_select', label:'Cable Type Used (from your stock)', req:true},
-        {k:'cable_start', type:'number', label:'Cable Meters Left on Reel — BEFORE Lining (m)', req:true, placeholder:'e.g. 850', step:'0.1'}
+        {k:'cable_start', type:'number', label:'Cable Meters Left on Reel — BEFORE Lining (m)', req:true, placeholder:'e.g. 850', step:'0.1'},
+        {k:'cable_start_photo', type:'photo', label:'Photo of Actual Cable Showing Meter Mark (Before)', req:true, autogps:true}
       ]},
     { key:'nap', title:'4. NAP Box &amp; Port Details',
       desc:'Record the NAP box the subscriber is connected to and the exact port used, then take a photo of the NAP box cassette. Time and GPS location are stamped on the photo automatically.',
@@ -516,9 +570,10 @@ const WORKFLOWS = {
         {k:'location', type:'gps', label:'GPS Coordinates', req:true}
       ]},
     { key:'materials', title:'8. Materials Used',
-      desc:'Check the meter marking on the reel again now that lining is done. The system automatically computes the cable used and deducts it from the cable you selected in Step 3, along with connectors, when the job is completed.',
+      desc:'Check the meter marking on the reel again now that lining is done, and take a photo of the actual cable showing the number of meters left. The system automatically computes the cable used and deducts it from the cable you selected in Step 3, along with connectors, when the job is completed.',
       fields:[
         {k:'cable_end', type:'number', label:'Cable Meters Left on Reel — AFTER Lining (m)', req:true, placeholder:'e.g. 700', step:'0.1', cableCalc:true},
+        {k:'cable_end_photo', type:'photo', label:'Photo of Actual Cable Showing Meter Mark (After)', req:true, autogps:true},
         {k:'connectors', type:'select', label:'Connectors Used (pcs)', req:true, options:['1','2','3','4','5','6']},
         {k:'other_materials', type:'textarea', label:'Other Materials (clamps, hooks, patch cord…)'}
       ]},
@@ -702,7 +757,7 @@ async function loadUsers(){
 }
 
 /* =================== NAVIGATION =================== */
-const ALL_VIEWS = ['viewLogin','viewTechList','viewTicket','viewDash','viewNew','viewReport','viewTechs','viewTechReq','viewRequests'];
+const ALL_VIEWS = ['viewLogin','viewTechList','viewTicket','viewDash','viewNew','viewReport','viewTechs','viewTechReq','viewRequests','viewUsage'];
 function show(view){
   ALL_VIEWS.forEach(v=>document.getElementById(v).classList.add('hidden'));
   document.getElementById(view).classList.remove('hidden');
@@ -715,11 +770,12 @@ function goBack(){
   else { currentId=null; show('viewTechList'); renderTechList(); }
 }
 function adminGo(tab){
-  ['tabDash','tabNew','tabTechs','tabReq'].forEach(t=>document.getElementById(t).classList.remove('active'));
+  ['tabDash','tabNew','tabTechs','tabReq','tabUsage'].forEach(t=>document.getElementById(t).classList.remove('active'));
   if(tab==='dash'){ document.getElementById('tabDash').classList.add('active'); show('viewDash'); renderDash(); }
   if(tab==='new'){ document.getElementById('tabNew').classList.add('active'); show('viewNew'); }
   if(tab==='techs'){ document.getElementById('tabTechs').classList.add('active'); show('viewTechs'); renderUsers(); renderPlans(); }
   if(tab==='requests'){ document.getElementById('tabReq').classList.add('active'); show('viewRequests'); loadRequests().then(renderRequests); loadWarehouse().then(renderWarehouse); }
+  if(tab==='usage'){ document.getElementById('tabUsage').classList.add('active'); show('viewUsage'); renderUsage(); }
   if(tab!=='report') adminBack = tab;
 }
 
@@ -744,23 +800,26 @@ function sortTickets(list){
 }
 /* colored type tabs */
 let techType='', dashType='';
+let dashPeriod = null, dashTrendDay = null, dashPriority = '';
 function renderTypeTabs(containerId, current, setter){
   const types=[['','All'],['installation','Installation'],['repair','Repair'],['nap_install','NAP Install']];
   document.getElementById(containerId).innerHTML = types.map(([v,l])=>
     `<button class="ttab ${current===v?('on-'+(v||'all')):''}" onclick="${setter}('${v}')">${l}</button>`).join('');
 }
-function setTechType(v){ techType=v; renderTechList(); }
+function setTechType(v){ techType = (techType===v && v!=='') ? '' : v; techTrendDay=null; renderTechList(); }
 let techPeriod = null;
 function filterCompleted(p){
+  techTrendDay = null;
   techPeriod = techPeriod===p ? null : p;  // tap again to clear
   if(techPeriod) document.getElementById('fStatus').value='completed';
   else document.getElementById('fStatus').value='active';
   renderTechList();
 }
-function setDashType(v){ dashType=v; renderDash(); }
+function setDashType(v){ dashType = (dashType===v && v!=='') ? '' : v; renderDash(); }
 function setDashStatus(s){
   const sel = document.getElementById('dStatus');
   if(!sel) return;
+  dashPeriod = null; dashTrendDay = null;
   sel.value = (sel.value===s) ? '' : s;  // tap again to clear
   renderDash();
 }
@@ -777,20 +836,92 @@ function progress(t){
   return Math.round(steps.filter(s=>stepComplete(t,s)).length/steps.length*100);
 }
 
-/* =================== TECH: LIST =================== */
-function renderTechList(){
-  /* completed today / this week / this month */
+/* =================== SHARED: completed-tickets breakdown & charts =================== */
+function periodStarts(){
   const now = new Date();
   const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const wd = (now.getDay()+6)%7; // Monday = start of week
   const weekStart = dayStart - wd*86400000;
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  return { dayStart, weekStart, monthStart };
+}
+function completedSince(list, type, sinceTs){
+  return list.filter(t=>t.status==='completed' && t.completed && t.completed>=sinceTs && (!type||t.type===type)).length;
+}
+const CBD_TYPES = [['installation','Installation'],['repair','Repair'],['nap_install','NAP Install']];
+const CBD_PERIODS = [['day','Today'],['week','This Week'],['month','This Month']];
+/* renders the Installation / Repair / NAP Install x Today / Week / Month grid */
+function renderCompletedGrid(list, activeType, activePeriod, clickFn){
+  const { dayStart, weekStart, monthStart } = periodStarts();
+  const sinceMap = { day: dayStart, week: weekStart, month: monthStart };
+  return `
+    <div class="step-title" style="font-size:14px">✅ Completed Tickets — by Job Type</div>
+    <div class="step-desc">Tap any number to filter the list below.</div>
+    <table class="cbd-table">
+      <tr><th></th>${CBD_PERIODS.map(p=>`<th>${p[1]}</th>`).join('')}</tr>
+      ${CBD_TYPES.map(([type,label])=>`
+        <tr>
+          <td class="cbd-row-label"><span class="cbd-dot ${type}"></span>${label}</td>
+          ${CBD_PERIODS.map(([pkey])=>{
+            const n = completedSince(list, type, sinceMap[pkey]);
+            const active = activeType===type && activePeriod===pkey;
+            return `<td><button class="cbd-cell${active?' active':''}" onclick="${clickFn}('${type}','${pkey}')">${n}</button></td>`;
+          }).join('')}
+        </tr>`).join('')}
+    </table>`;
+}
+/* renders a simple 7-day vertical bar trend of completed tickets */
+function renderTrendChart(list, title, activeDayTs, clickFn){
+  const days = [];
+  const base = new Date(); base.setHours(0,0,0,0);
+  for(let i=6;i>=0;i--){
+    const ts = base.getTime() - i*86400000;
+    const count = list.filter(t=>t.status==='completed' && t.completed && t.completed>=ts && t.completed<ts+86400000).length;
+    days.push({ ts, count, label: new Date(ts).toLocaleDateString(undefined,{weekday:'short'}) });
+  }
+  const max = Math.max(1, ...days.map(d=>d.count));
+  return `
+    <div class="step-title" style="font-size:14px">${title}</div>
+    <div class="vbar-chart">
+      ${days.map(d=>{
+        const h = d.count ? Math.max(6, Math.round(d.count/max*70)) : 3;
+        const active = activeDayTs===d.ts;
+        return `<div class="vbar-col">
+          <div class="vbar-val">${d.count}</div>
+          <button class="vbar-bar${d.count?'':' zero'}${active?' active':''}" style="height:${h}px" onclick="${clickFn}(${d.ts})" title="${esc(d.label)}: ${d.count} completed"></button>
+          <div class="vbar-lbl">${esc(d.label)}</div>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+/* =================== TECH: LIST =================== */
+let techTrendDay = null;
+function gridClickTech(type, period){
+  techTrendDay = null;
+  if(techType===type && techPeriod===period){ techType=''; techPeriod=null; }
+  else { techType=type; techPeriod=period; }
+  document.getElementById('fStatus').value = techPeriod ? 'completed' : 'active';
+  renderTechList();
+}
+function trendClickTech(ts){
+  techPeriod = null;
+  techTrendDay = techTrendDay===ts ? null : ts;
+  document.getElementById('fStatus').value = techTrendDay!=null ? 'completed' : 'active';
+  renderTechList();
+}
+function renderTechList(){
+  /* completed today / this week / this month */
+  const { dayStart, weekStart, monthStart } = periodStarts();
   const doneSince = ts => tickets.filter(t=>t.status==='completed' && t.completed && t.completed>=ts).length;
   const sel = p => techPeriod===p ? 'outline:3px solid #fff;outline-offset:-6px;' : '';
   document.getElementById('techStats').innerHTML = `
     <div class="tstat tstat-week" style="cursor:pointer;${sel('week')}" onclick="filterCompleted('week')"><div class="n">${doneSince(weekStart)}</div><div class="l">This Week</div></div>
     <div class="tstat tstat-today" style="cursor:pointer;${sel('day')}" onclick="filterCompleted('day')"><div class="n">${doneSince(dayStart)}</div><div class="l">✔ Today</div></div>
     <div class="tstat tstat-month" style="cursor:pointer;${sel('month')}" onclick="filterCompleted('month')"><div class="n">${doneSince(monthStart)}</div><div class="l">This Month</div></div>`;
+
+  document.getElementById('cbdPanelTech').innerHTML = renderCompletedGrid(tickets, techType, techPeriod, 'gridClickTech');
+  document.getElementById('trendPanelTech').innerHTML = renderTrendChart(tickets, '📈 My Completed — Last 7 Days', techTrendDay, 'trendClickTech');
 
   /* current stock on hand */
   const inv = (USER&&USER.inv)||{connectors:0,cables:[],items:[]};
@@ -811,7 +942,10 @@ function renderTechList(){
   const f = document.getElementById('fStatus').value;
   let list = sortTickets(tickets);
   if(techType) list = list.filter(t=>t.type===techType);
-  if(techPeriod){
+  if(techTrendDay!=null){
+    list = list.filter(t=>t.status==='completed' && t.completed && t.completed>=techTrendDay && t.completed<techTrendDay+86400000);
+  }
+  else if(techPeriod){
     const startMap = {day:dayStart, week:weekStart, month:monthStart};
     list = list.filter(t=>t.status==='completed' && t.completed && t.completed>=startMap[techPeriod]);
   }
@@ -1400,30 +1534,100 @@ async function reqAction(id, action){
 }
 
 /* =================== ADMIN: DASHBOARD =================== */
+function gridClickAdmin(type, period){
+  dashTrendDay = null;
+  if(dashType===type && dashPeriod===period){ dashType=''; dashPeriod=null; }
+  else { dashType=type; dashPeriod=period; }
+  document.getElementById('dStatus').value = dashPeriod ? 'completed' : '';
+  renderDash();
+}
+function trendClickAdmin(ts){
+  dashPeriod = null;
+  dashTrendDay = dashTrendDay===ts ? null : ts;
+  document.getElementById('dStatus').value = dashTrendDay!=null ? 'completed' : '';
+  renderDash();
+}
+function onTechBarClick(id){
+  const sel = document.getElementById('dTech');
+  sel.value = sel.value===id ? '' : id;
+  renderDash();
+}
+function onPrioBarClick(p){
+  dashPriority = dashPriority===p ? '' : p;
+  renderDash();
+}
+function dashTodayClick(){ gridClickAdmin('', 'day'); }
+
 function renderDash(){
+  const { dayStart, weekStart, monthStart } = periodStarts();
   const open = tickets.filter(t=>t.status==='open').length;
   const prog = tickets.filter(t=>t.status==='in_progress').length;
   const done = tickets.filter(t=>t.status==='completed').length;
-  const today = new Date(); today.setHours(0,0,0,0);
-  const doneToday = tickets.filter(t=>t.completed && t.completed>=today.getTime()).length;
+  const doneToday = completedSince(tickets, '', dayStart);
   const inst = tickets.filter(t=>t.type==='installation');
   const rep = tickets.filter(t=>t.type==='repair');
   const nap = tickets.filter(t=>t.type==='nap_install');
 
   const curDashStatus = (document.getElementById('dStatus')||{}).value || '';
-  const dsSel = s => curDashStatus===s ? 'outline:3px solid var(--primary);outline-offset:-4px;' : '';
+  const dsSel = s => (curDashStatus===s && !dashPeriod) ? 'outline:3px solid var(--primary);outline-offset:-4px;' : '';
   document.getElementById('statCards').innerHTML = `
     <div class="stat s-open" style="cursor:pointer;${dsSel('open')}" onclick="setDashStatus('open')"><div class="n">${open}</div><div class="l">Open</div></div>
     <div class="stat s-prog" style="cursor:pointer;${dsSel('in_progress')}" onclick="setDashStatus('in_progress')"><div class="n">${prog}</div><div class="l">In Progress</div></div>
     <div class="stat s-done" style="cursor:pointer;${dsSel('completed')}" onclick="setDashStatus('completed')"><div class="n">${done}</div><div class="l">Completed</div></div>`;
+
+  const typeSel = t => dashType===t ? 'outline:3px solid var(--primary);outline-offset:-4px;' : '';
+  const todaySel = (dashType==='' && dashPeriod==='day') ? 'outline:3px solid var(--primary);outline-offset:-4px;' : '';
   document.getElementById('statSplit').innerHTML = `
-    <div class="stat"><div><div class="l">Installations</div><div class="tmeta">${inst.filter(t=>t.status==='completed').length} done / ${inst.length} total</div></div><div class="n" style="color:#1d4ed8">${inst.filter(t=>t.status!=='completed').length}</div></div>
-    <div class="stat"><div><div class="l">Repairs</div><div class="tmeta">${rep.filter(t=>t.status==='completed').length} done / ${rep.length} total</div></div><div class="n" style="color:#b45309">${rep.filter(t=>t.status!=='completed').length}</div></div>
-    <div class="stat"><div><div class="l">NAP Installs</div><div class="tmeta">${nap.filter(t=>t.status==='completed').length} done / ${nap.length} total</div></div><div class="n" style="color:#7e22ce">${nap.filter(t=>t.status!=='completed').length}</div></div>
-    <div class="stat"><div class="l">Completed today</div><div class="n" style="color:#15803d">${doneToday}</div></div>`;
+    <div class="stat" style="cursor:pointer;${typeSel('installation')}" onclick="setDashType('installation')"><div><div class="l">Installations</div><div class="tmeta">${inst.filter(t=>t.status==='completed').length} done / ${inst.length} total</div></div><div class="n" style="color:#1d4ed8">${inst.filter(t=>t.status!=='completed').length}</div></div>
+    <div class="stat" style="cursor:pointer;${typeSel('repair')}" onclick="setDashType('repair')"><div><div class="l">Repairs</div><div class="tmeta">${rep.filter(t=>t.status==='completed').length} done / ${rep.length} total</div></div><div class="n" style="color:#b45309">${rep.filter(t=>t.status!=='completed').length}</div></div>
+    <div class="stat" style="cursor:pointer;${typeSel('nap_install')}" onclick="setDashType('nap_install')"><div><div class="l">NAP Installs</div><div class="tmeta">${nap.filter(t=>t.status==='completed').length} done / ${nap.length} total</div></div><div class="n" style="color:#7e22ce">${nap.filter(t=>t.status!=='completed').length}</div></div>
+    <div class="stat" style="cursor:pointer;${todaySel}" onclick="dashTodayClick()"><div class="l">Completed today</div><div class="n" style="color:#15803d">${doneToday}</div></div>`;
   renderTypeTabs('dashTypeTabs', dashType, 'setDashType');
 
+  /* KPIs */
+  const completedList = tickets.filter(t=>t.status==='completed' && t.completed);
+  let avgTxt = '—';
+  if(completedList.length){
+    const avgMs = completedList.reduce((s,t)=>s+(t.completed-t.created),0)/completedList.length;
+    const hrs = avgMs/3600000;
+    avgTxt = hrs<48 ? hrs.toFixed(1)+' hrs' : (hrs/24).toFixed(1)+' days';
+  }
+  document.getElementById('kpiRow').innerHTML = `
+    <div class="kpi"><div class="n">${avgTxt}</div><div class="l">Avg. Completion Time</div></div>
+    <div class="kpi"><div class="n">${completedSince(tickets,'',monthStart)}</div><div class="l">Completed This Month</div></div>`;
+
+  document.getElementById('cbdPanelAdmin').innerHTML = renderCompletedGrid(tickets, dashType, dashPeriod, 'gridClickAdmin');
+  document.getElementById('trendPanelAdmin').innerHTML = renderTrendChart(tickets, '📈 Completed Tickets — Last 7 Days', dashTrendDay, 'trendClickAdmin');
+
+  /* technician performance — completed this month, clickable */
   const techsInv = users.filter(u=>u.role==='tech');
+  const perf = techsInv.map(u=>({ id:u.id, name:u.name, n: tickets.filter(t=>t.assignedTo===u.id && t.status==='completed' && t.completed && t.completed>=monthStart).length }))
+                        .sort((a,b)=>b.n-a.n);
+  const perfMax = Math.max(1, ...perf.map(p=>p.n));
+  const curTech = (document.getElementById('dTech')||{}).value || '';
+  document.getElementById('techPerfPanel').innerHTML = `
+    <div class="step-title" style="font-size:14px">👷 Technician Performance — Completed This Month</div>
+    ${perf.length ? perf.map(p=>`
+      <div class="hbar-row">
+        <div class="hbar-label">${esc(p.name)}</div>
+        <div class="hbar-track"><button class="hbar-fill${curTech===p.id?' active':''}" style="width:${Math.max(4,Math.round(p.n/perfMax*100))}%" onclick="onTechBarClick('${p.id}')" title="${esc(p.name)}: ${p.n} completed"></button></div>
+        <div class="hbar-value">${p.n}</div>
+      </div>`).join('') : '<div class="tmeta">No technicians yet.</div>'}`;
+
+  /* priority mix — open + in-progress tickets, clickable */
+  const activeTix = tickets.filter(t=>t.status!=='completed');
+  const prioMeta = [[1,'P1 — Urgent','#dc2626'],[2,'P2 — High','#f97316'],[3,'P3 — Normal','#16a34a']];
+  const prioCounts = prioMeta.map(([p])=>activeTix.filter(t=>(t.priority||3)===p).length);
+  const prioMax = Math.max(1, ...prioCounts);
+  document.getElementById('prioPanel').innerHTML = `
+    <div class="step-title" style="font-size:14px">⚡ Priority Mix — Open &amp; In Progress</div>
+    ${prioMeta.map(([p,label,color],i)=>`
+      <div class="hbar-row">
+        <div class="hbar-label">${label}</div>
+        <div class="hbar-track"><button class="hbar-fill${dashPriority===p?' active':''}" style="width:${Math.max(4,Math.round(prioCounts[i]/prioMax*100))}%;${dashPriority===p?'':'background:'+color+';'}" onclick="onPrioBarClick(${p})" title="${label}: ${prioCounts[i]}"></button></div>
+        <div class="hbar-value">${prioCounts[i]}</div>
+      </div>`).join('')}`;
+
   document.getElementById('invPanel').innerHTML = `
     <div class="step-title" style="font-size:15px">Technician Inventory (remaining stock)</div>
     ${techsInv.length ? `<table class="summary-table">
@@ -1445,24 +1649,16 @@ function renderDash(){
     <div class="tmeta" style="margin-top:6px">Stock is added by releasing technician requests (📦 Requests tab) or directly in the Technicians tab. Materials are deducted automatically when a job is completed. Red = running low.</div>`
     : '<div class="tmeta">No technicians yet.</div>'}`;
 
-  /* material usage per ticket */
-  const used = tickets.filter(t=>t.invApplied && ((t.data&&t.data.cable_used)||(t.data&&parseInt(t.data.connectors))))
-                      .sort((a,b)=>(b.completed||0)-(a.completed||0)).slice(0,25);
-  document.getElementById('usagePanel').innerHTML = `
-    <div class="step-title" style="font-size:15px">Material Usage by Ticket</div>
-    ${used.length ? `<table class="summary-table">
-      <tr><td style="width:24%">Ticket</td><td>Technician</td><td>Cable</td><td>Meters</td><td>FIC</td></tr>
-      ${used.map(t=>`<tr>
-        <td style="color:var(--primary);font-weight:700;cursor:pointer" onclick="openReport('${t.id}')">${esc(t.number)}</td>
-        <td>${esc(t.assignedName||'—')}</td>
-        <td>${esc(t.data.cable_reel_name || (t.data.cable_reel?'(reel)':'—'))}</td>
-        <td>${t.data.cable_used!==undefined?t.data.cable_used+' m':'—'}</td>
-        <td>${parseInt(t.data.connectors)||0} pcs</td>
-      </tr>`).join('')}
-    </table>` : '<div class="tmeta">No completed jobs with materials yet.</div>'}`;
-
-  const fs=document.getElementById('dStatus').value, fu=document.getElementById('dTech').value;
-  const list = sortTickets(tickets.filter(t=>(!dashType||t.type===dashType)&&(!fs||t.status===fs)&&(!fu||t.assignedTo===fu)));
+  const fs = dashPeriod ? 'completed' : document.getElementById('dStatus').value;
+  const fu = document.getElementById('dTech').value;
+  let list = tickets.filter(t=>(!dashType||t.type===dashType)&&(!fs||t.status===fs)&&(!fu||t.assignedTo===fu)&&(!dashPriority||(t.priority||3)===dashPriority));
+  if(dashTrendDay!=null){
+    list = list.filter(t=>t.status==='completed' && t.completed && t.completed>=dashTrendDay && t.completed<dashTrendDay+86400000);
+  } else if(dashPeriod){
+    const startMap = {day:dayStart, week:weekStart, month:monthStart};
+    list = list.filter(t=>t.completed && t.completed>=startMap[dashPeriod]);
+  }
+  list = sortTickets(list);
   const el = document.getElementById('dashList');
   if(!list.length){ el.innerHTML='<div class="empty"><div class="big">📋</div>No tickets match. Create one in the New Ticket tab.</div>'; return; }
   el.innerHTML = list.map(t=>`
@@ -1477,6 +1673,41 @@ function renderDash(){
       <div class="progressbar"><div style="width:${progress(t)}%"></div></div>
       <div class="tmeta" style="margin-top:4px">${progress(t)}% of workflow done</div>
     </div>`).join('');
+}
+
+/* =================== ADMIN: MATERIAL USAGE (separate tab) =================== */
+let usageType = '';
+function setUsageType(v){ usageType = (usageType===v && v!=='') ? '' : v; renderUsage(); }
+function renderUsage(){
+  const used = tickets.filter(t=>t.invApplied && ((t.data&&t.data.cable_used)||(t.data&&parseInt(t.data.connectors))));
+  const splitRows = CBD_TYPES.map(([type,label])=>{
+    const list = used.filter(t=>t.type===type);
+    const meters = Math.round(list.reduce((s,t)=>s+(parseFloat(t.data.cable_used)||0),0)*100)/100;
+    const conn = list.reduce((s,t)=>s+(parseInt(t.data.connectors)||0),0);
+    return { type, label, meters, conn, jobs: list.length };
+  });
+  document.getElementById('usageSplit').innerHTML = `
+    <table class="summary-table">
+      <tr><td style="width:34%">Job Type</td><td>Jobs w/ Materials</td><td>Cable Used</td><td>FIC Connectors</td></tr>
+      ${splitRows.map(r=>`<tr style="cursor:pointer${usageType===r.type?';background:#e0e7ff':''}" onclick="setUsageType('${r.type}')">
+        <td><span class="cbd-dot ${r.type}" style="margin-right:6px"></span>${r.label}</td>
+        <td>${r.jobs}</td><td>${r.meters} m</td><td>${r.conn} pcs</td>
+      </tr>`).join('')}
+    </table>`;
+  renderTypeTabs('usageTypeTabs', usageType, 'setUsageType');
+  const list = (usageType ? used.filter(t=>t.type===usageType) : used).slice().sort((a,b)=>(b.completed||0)-(a.completed||0));
+  document.getElementById('usagePanel').innerHTML = `
+    ${list.length ? `<table class="summary-table">
+      <tr><td style="width:20%">Ticket</td><td>Type</td><td>Technician</td><td>Cable</td><td>Meters</td><td>FIC</td></tr>
+      ${list.map(t=>`<tr>
+        <td style="color:var(--primary);font-weight:700;cursor:pointer" onclick="openReport('${t.id}')">${esc(t.number)}</td>
+        <td>${typeBadge(t.type)}</td>
+        <td>${esc(t.assignedName||'—')}</td>
+        <td>${esc(t.data.cable_reel_name || (t.data.cable_reel?'(reel)':'—'))}</td>
+        <td>${t.data.cable_used!==undefined?t.data.cable_used+' m':'—'}</td>
+        <td>${parseInt(t.data.connectors)||0} pcs</td>
+      </tr>`).join('')}
+    </table>` : '<div class="tmeta">No completed jobs with materials yet.</div>'}`;
 }
 
 /* =================== ADMIN: NEW TICKET =================== */
