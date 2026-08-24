@@ -6,10 +6,14 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const zlib = require('zlib');
 
 const PORT = process.env.PORT || 3000;
 const DB_FILE = process.env.DB_FILE || path.join(__dirname, 'db.json');
 const PUBLIC = path.join(__dirname, 'public');
+/* photos live next to the database (on the mounted volume), NOT inside db.json */
+const PHOTO_DIR = process.env.PHOTO_DIR || path.join(path.dirname(DB_FILE), 'photos');
+try { fs.mkdirSync(PHOTO_DIR, { recursive: true }); } catch (e) { console.error('Cannot create photo dir:', e.message); }
 
 /* ---------------- database (JSON file) ---------------- */
 let db = { users: [], tickets: [], sessions: {} };
@@ -48,6 +52,75 @@ function flushDB() {
 process.on('SIGINT', () => { flushDB(); process.exit(0); });
 process.on('SIGTERM', () => { flushDB(); process.exit(0); });
 
+/* ---------------- photo storage (FIX 3) ----------------
+ * Photos used to be kept as base64 data: URLs inside ticket.data, which meant
+ * every copy of a ticket carried its images. They are now written once to
+ * PHOTO_DIR, named by content hash, and referenced by a short "/photos/<hash>.jpg"
+ * URL that the browser can cache forever.
+ */
+const IMG_EXT = { 'image/jpeg': '.jpg', 'image/jpg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' };
+const DATA_URL_RE = /^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]+)$/;
+
+function storeDataUrl(dataUrl) {
+  const m = DATA_URL_RE.exec(dataUrl);
+  if (!m) return null;
+  let buf;
+  try { buf = Buffer.from(m[2].replace(/\s/g, ''), 'base64'); } catch (e) { return null; }
+  if (!buf.length) return null;
+  const file = crypto.createHash('sha1').update(buf).digest('hex') + (IMG_EXT[m[1].toLowerCase()] || '.bin');
+  const full = path.join(PHOTO_DIR, file);
+  try { if (!fs.existsSync(full)) fs.writeFileSync(full, buf); }
+  catch (e) { console.error('Photo write failed:', e.message); return null; }
+  return '/photos/' + file;
+}
+
+/* Walk an object and replace every inline data:image/... string with a /photos/ URL.
+   Returns true if anything was moved out. */
+function externalizePhotos(node, depth) {
+  depth = depth || 0;
+  if (!node || typeof node !== 'object' || depth > 6) return false;
+  let changed = false;
+  for (const k of Object.keys(node)) {
+    const v = node[k];
+    if (typeof v === 'string') {
+      if (v.startsWith('data:image/')) {
+        const url = storeDataUrl(v);
+        if (url) { node[k] = url; changed = true; }
+      }
+    } else if (v && typeof v === 'object') {
+      if (externalizePhotos(v, depth + 1)) changed = true;
+    }
+  }
+  return changed;
+}
+
+/* One-time migration: pull every base64 image already sitting in db.json out to disk.
+   A full copy of the original database is written next to it first, so this is
+   reversible: stop the service, restore the .bak over db.json, redeploy the old build. */
+(function migratePhotos() {
+  const needsMigration = db.tickets.some(t => t.data && JSON.stringify(t.data).includes('data:image/'));
+  if (!needsMigration) return;
+
+  const backup = DB_FILE + '.pre-photo-migration.bak';
+  try {
+    if (!fs.existsSync(backup)) {
+      fs.copyFileSync(DB_FILE, backup);
+      console.log(`Backed up original database -> ${backup} (${(fs.statSync(backup).size / 1048576).toFixed(2)} MB)`);
+    }
+  } catch (e) {
+    console.error('ABORTING MIGRATION — could not write backup:', e.message);
+    return;   // never rewrite the database without a safety copy
+  }
+
+  let n = 0;
+  db.tickets.forEach(t => { if (t.data && externalizePhotos(t.data)) n++; });
+  if (n) {
+    flushDB();
+    console.log(`Moved inline photos out of ${n} ticket(s) -> ${PHOTO_DIR}`);
+    try { console.log(`db.json is now ${(fs.statSync(DB_FILE).size / 1048576).toFixed(2)} MB`); } catch (e) {}
+  }
+})();
+
 /* ---------------- password helpers ---------------- */
 function hashPassword(pw) {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -76,10 +149,42 @@ if (!db.users.length) {
 }
 
 /* ---------------- http helpers ---------------- */
-function json(res, code, obj) {
-  const body = JSON.stringify(obj);
-  res.writeHead(code, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) });
+/* Already-compressed payloads: gzipping them just burns CPU. */
+const NO_GZIP = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/x-icon']);
+
+/* Central writer: gzips when the client asked for it and it actually helps (FIX 4). */
+function sendBody(req, res, code, body, type, extra) {
+  const headers = Object.assign({ 'Content-Type': type }, extra || {});
+  if (!Buffer.isBuffer(body)) body = Buffer.from(body);
+  if (body.length > 1024 && !NO_GZIP.has(type) && /\bgzip\b/.test(String(req.headers['accept-encoding'] || ''))) {
+    let gz = null;
+    try { gz = zlib.gzipSync(body, { level: 6 }); } catch (e) {}
+    if (gz && gz.length < body.length) {
+      body = gz;
+      headers['Content-Encoding'] = 'gzip';
+      headers['Vary'] = headers['Vary'] ? headers['Vary'] + ', Accept-Encoding' : 'Accept-Encoding';
+    }
+  }
+  headers['Content-Length'] = body.length;
+  res.writeHead(code, headers);
+  if (req.method === 'HEAD') return res.end();
   res.end(body);
+}
+
+function json(res, code, obj) {
+  return sendBody(res.req, res, code, Buffer.from(JSON.stringify(obj)), 'application/json');
+}
+
+/* Same as json(), but tags the payload so an unchanged poll costs a 304 with no
+   body instead of the whole list (FIX 2). */
+function jsonCached(req, res, obj) {
+  const body = Buffer.from(JSON.stringify(obj));
+  const etag = '"' + crypto.createHash('sha1').update(body).digest('base64') + '"';
+  if (req.headers['if-none-match'] === etag) {
+    res.writeHead(304, { 'ETag': etag, 'Cache-Control': 'no-cache' });
+    return res.end();
+  }
+  return sendBody(req, res, 200, body, 'application/json', { 'ETag': etag, 'Cache-Control': 'no-cache' });
 }
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -104,6 +209,37 @@ function auth(req) {
   return user ? { user, token } : null;
 }
 function publicUser(u) { return { id: u.id, username: u.username, name: u.name, role: u.role, inv: u.inv || { connectors: 0, cables: [], items: [] } }; }
+
+/* ---------------- ticket list shaping (FIX 1) ----------------
+ * The list endpoint must never carry image payloads. Every other field is kept
+ * so the dashboard, tech list and usage report still render from the list alone;
+ * only inline data: blobs are dropped. Post-migration the images are short
+ * /photos/ URLs, so nothing is stripped and _partial is false.
+ */
+function isInlineBlob(v) { return typeof v === 'string' && v.startsWith('data:'); }
+
+function lightData(data) {
+  if (!data || typeof data !== 'object') return { data: data, stripped: false };
+  let stripped = false;
+  const out = Array.isArray(data) ? [] : {};
+  for (const k of Object.keys(data)) {
+    const v = data[k];
+    if (isInlineBlob(v)) { stripped = true; continue; }
+    if (v && typeof v === 'object') {
+      const inner = lightData(v);
+      if (inner.stripped) stripped = true;
+      out[k] = inner.data;
+    } else out[k] = v;
+  }
+  return { data: out, stripped };
+}
+
+function ticketSummary(t) {
+  const light = lightData(t.data);
+  const s = Object.assign({}, t, { data: light.data });
+  if (light.stripped) s._partial = true;   // client re-fetches the full ticket when opened
+  return s;
+}
 function addItemTo(u, name, qty) {
   u.inv = u.inv || { connectors: 0, cables: [], items: [] };
   u.inv.items = u.inv.items || [];
@@ -132,8 +268,23 @@ function serveStatic(req, res, urlPath) {
   if (!file.startsWith(PUBLIC)) { res.writeHead(403); res.end(); return; }
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); res.end('Not found'); return; }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
-    res.end(data);
+    sendBody(req, res, 200, data, MIME[path.extname(file)] || 'application/octet-stream');
+  });
+}
+
+/* Stored photos: content-addressed, so they can be cached forever (FIX 3).
+   The 40-hex-character name is the capability — these URLs are unguessable but
+   not session-checked, because <img src> cannot send the Bearer token. */
+function servePhoto(req, res, urlPath) {
+  const name = path.basename(urlPath);
+  if (!/^[A-Za-z0-9._-]+$/.test(name) || name.startsWith('.')) { res.writeHead(404); return res.end('Not found'); }
+  const file = path.join(PHOTO_DIR, name);
+  if (!file.startsWith(PHOTO_DIR)) { res.writeHead(403); return res.end(); }
+  fs.readFile(file, (err, data) => {
+    if (err) { res.writeHead(404); res.end('Not found'); return; }
+    sendBody(req, res, 200, data, MIME[path.extname(file)] || 'application/octet-stream', {
+      'Cache-Control': 'public, max-age=31536000, immutable'
+    });
   });
 }
 
@@ -143,6 +294,7 @@ const server = http.createServer(async (req, res) => {
   const p = url.pathname;
 
   try {
+    if (p.startsWith('/photos/')) return servePhoto(req, res, p);
     if (!p.startsWith('/api/')) return serveStatic(req, res, p);
 
     /* ---- login ---- */
@@ -364,7 +516,8 @@ const server = http.createServer(async (req, res) => {
     /* ---- tickets ---- */
     if (p === '/api/tickets' && req.method === 'GET') {
       const list = isAdmin ? db.tickets : db.tickets.filter(t => t.assignedTo === me.id);
-      return json(res, 200, { tickets: list });
+      /* summaries only, and a 304 when nothing has changed since the last poll */
+      return jsonCached(req, res, { tickets: list.map(ticketSummary) });
     }
     if (p === '/api/tickets' && req.method === 'POST') {
       if (!isAdmin) return json(res, 403, { error: 'Only the admin can create tickets' });
@@ -413,7 +566,18 @@ const server = http.createServer(async (req, res) => {
           }
           if (b.priority !== undefined && [1, 2, 3].includes(parseInt(b.priority))) t.priority = parseInt(b.priority);
         }
-        if (b.data !== undefined) t.data = b.data;
+        if (b.data !== undefined) {
+          /* a client that is still holding a summary must not be able to blank out
+             photos it never received */
+          const incoming = b.data && typeof b.data === 'object' ? b.data : {};
+          externalizePhotos(incoming);                       // base64 -> /photos/ URL (FIX 3)
+          const prev = t.data || {};
+          Object.keys(prev).forEach(k => {
+            const pv = prev[k], nv = incoming[k];
+            if (pv && typeof pv === 'object' && pv.img && nv && typeof nv === 'object' && nv.img === undefined) nv.img = pv.img;
+          });
+          t.data = incoming;
+        }
         if (b.step !== undefined) t.step = b.step;
         if (b.status !== undefined && ['open', 'in_progress', 'completed'].includes(b.status)) {
           t.status = b.status;
