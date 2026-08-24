@@ -497,22 +497,49 @@ let currentId = null;
 let currentView = 'viewLogin';
 let adminBack = 'dash';
 
-async function api(path, method='GET', body){
+async function api(path, method='GET', body, opts){
+  opts = opts || {};
   const r = await fetch(path, {
     method,
-    headers: Object.assign({'Content-Type':'application/json'}, TOKEN?{Authorization:'Bearer '+TOKEN}:{}),
+    cache: opts.etag ? 'no-store' : undefined,
+    headers: Object.assign(
+      {'Content-Type':'application/json'},
+      TOKEN?{Authorization:'Bearer '+TOKEN}:{},
+      opts.etag ? {'If-None-Match': opts.etag} : {}
+    ),
     body: body!==undefined ? JSON.stringify(body) : undefined
   });
+  if(r.status===401 && path!=='/api/login'){ doLogout(true); throw new Error('Session expired — please log in again'); }
+  if(r.status===304) return {__notModified:true};   // unchanged — server sent no body
   let j = {};
   try { j = await r.json(); } catch(e){}
-  if(r.status===401 && path!=='/api/login'){ doLogout(true); throw new Error('Session expired — please log in again'); }
   if(!r.ok) throw new Error(j.error || 'Request failed');
+  j.__etag = r.headers.get('ETag') || null;
   return j;
 }
 function esc(s){ return String(s??'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fmt(ts){ return ts ? new Date(ts).toLocaleString() : ''; }
 function byId(id){ return tickets.find(t=>t.id===id); }
-function cacheTickets(){ try{ localStorage.setItem('sl_cache', JSON.stringify(tickets)); }catch(e){} }
+/* Never park inline base64 images in localStorage — only unsaved (offline) ones,
+   which still need to survive a reload so they can be flushed later. */
+function slimForCache(t){
+  const out = {};
+  for(const k of Object.keys(t)){
+    const v = t[k];
+    if(k==='data' && v && typeof v==='object' && !t._dirty){
+      const d = {};
+      for(const dk of Object.keys(v)){
+        const dv = v[dk];
+        if(dv && typeof dv==='object' && typeof dv.img==='string' && dv.img.startsWith('data:')) d[dk] = Object.assign({}, dv, {img:undefined});
+        else if(typeof dv==='string' && dv.startsWith('data:')) continue;
+        else d[dk] = dv;
+      }
+      out[k] = d;
+    } else out[k] = v;
+  }
+  return out;
+}
+function cacheTickets(){ try{ localStorage.setItem('sl_cache', JSON.stringify(tickets.map(slimForCache))); }catch(e){} }
 
 /* =================== OFFLINE SYNC =================== */
 function setOffline(off){ document.getElementById('offlineBanner').classList.toggle('hidden', !off); }
@@ -520,8 +547,10 @@ async function flushDirty(){
   const dirty = tickets.filter(t=>t._dirty);
   for(const t of dirty){
     try{
-      await api('/api/tickets/'+t.id, 'PUT', {data:t.data, step:t.step, status:t.status, completed:t.completed});
+      const r = await api('/api/tickets/'+t.id, 'PUT', {data:t.data, step:t.step, status:t.status, completed:t.completed});
+      if(r && r.ticket && r.ticket.data){ t.data = r.ticket.data; t.updated = r.ticket.updated; }
       delete t._dirty;
+      ticketsEtag = null;
     }catch(e){ return; } // still offline
   }
   if(!tickets.some(t=>t._dirty)) setOffline(false);
@@ -529,8 +558,12 @@ async function flushDirty(){
 }
 async function persist(t){
   try{
-    await api('/api/tickets/'+t.id, 'PUT', {data:t.data, step:t.step, status:t.status, completed:t.completed});
+    const r = await api('/api/tickets/'+t.id, 'PUT', {data:t.data, step:t.step, status:t.status, completed:t.completed});
+    /* adopt the server's copy: photos come back as short /photos/ URLs, which
+       releases the base64 this tab was holding in memory */
+    if(r && r.ticket && r.ticket.data){ t.data = r.ticket.data; t.updated = r.ticket.updated; }
     delete t._dirty; setOffline(false);
+    ticketsEtag = null;   // our own write changed the list
   }catch(e){
     if(e.message.includes('Session expired')) return;
     t._dirty = true; setOffline(true);
@@ -737,18 +770,45 @@ async function enterApp(){
 }
 
 /* =================== DATA LOADING =================== */
+let ticketsEtag = null;
+
+/* Pull the full ticket (with photos) the first time one is opened. The list
+   endpoint only ships summaries now. */
+async function ensureFull(id){
+  const t = byId(id);
+  if(!t || !t._partial || t._dirty) return t;
+  try{
+    const full = (await api('/api/tickets/'+id)).ticket;
+    if(!full) return t;
+    const i = tickets.findIndex(x=>x.id===id);
+    if(i>=0) tickets[i] = full; else tickets.push(full);
+    return full;
+  }catch(e){ return t; }   // offline: fall back to what we have
+}
+
 async function refreshTickets(manual){
   try{
-    const r = await api('/api/tickets');
+    const r = await api('/api/tickets','GET',undefined,{etag: manual ? null : ticketsEtag});
+    if(r.__notModified){ setOffline(false); return; }   // nothing changed, nothing rendered
+    ticketsEtag = r.__etag;
     // keep local dirty edits over server copies
     const dirtyMap = {};
     tickets.filter(t=>t._dirty).forEach(t=>dirtyMap[t.id]=t);
-    tickets = r.tickets.map(t => dirtyMap[t.id] || t);
+    const prev = {}; tickets.forEach(t=>prev[t.id]=t);
+    tickets = r.tickets.map(s => {
+      if(dirtyMap[s.id]) return dirtyMap[s.id];
+      const old = prev[s.id];
+      // already have the full ticket and it hasn't changed? keep its photos
+      if(old && !old._partial && (old.updated||0)===(s.updated||0) && s._partial)
+        return Object.assign({}, s, {data: old.data, _partial:false});
+      return s;
+    });
     setOffline(false); cacheTickets();
     if(USER && USER.role==='admin') await loadUsers(); // keep inventory display fresh
     if(USER && USER.role==='tech'){ try{ USER = (await api('/api/me')).user; }catch(e){} } // fresh reel stock
   }catch(e){
     if(e.message.includes('Session expired')) return;
+    ticketsEtag = null;   // force a full fetch once we're back online
     try{ tickets = JSON.parse(localStorage.getItem('sl_cache'))||[]; }catch(_){ tickets=[]; }
     setOffline(true);
     if(manual) alert('Cannot reach the server. Showing jobs saved on this phone.');
@@ -990,10 +1050,12 @@ function renderTechList(){
 }
 
 /* =================== TECH: WIZARD =================== */
-function openTicket(id){
+async function openTicket(id){
   currentId = id;
-  renderTicket();
+  renderTicket();          // instant paint from the summary
   show('viewTicket');
+  await ensureFull(id);    // then fill in the photos
+  if(currentId===id && currentView==='viewTicket') renderTicket();
 }
 function renderTicket(){
   const t = byId(currentId);
@@ -1267,19 +1329,21 @@ function fallbackCameraInput(key, autogps){
 }
 function savePhoto(key, img, autogps){
   const t = byId(currentId);
-  const data = { img, time: Date.now() };
-  t.data[key] = data;
+  t.data[key] = { img, time: Date.now() };
   persist(t); renderTicket();
+  /* Look the entry up by key each time: persist() swaps t.data for the server's
+     copy (base64 -> /photos/ URL), so a captured object reference would go stale. */
+  const stampGps = pn => {
+    const cur = byId(t.id);
+    const d = cur && cur.data && cur.data[key];
+    if(!d) return;
+    d.lat = pn.coords.latitude; d.lng = pn.coords.longitude;
+    persist(cur); renderTicket();
+  };
   if(autogps && navigator.geolocation){
-    navigator.geolocation.getCurrentPosition(pn=>{
-      data.lat=pn.coords.latitude; data.lng=pn.coords.longitude;
-      persist(t); renderTicket();
-    }, ()=>{
+    navigator.geolocation.getCurrentPosition(stampGps, ()=>{
       /* first attempt failed — retry once with relaxed accuracy so the photo still gets GPS */
-      navigator.geolocation.getCurrentPosition(pn=>{
-        data.lat=pn.coords.latitude; data.lng=pn.coords.longitude;
-        persist(t); renderTicket();
-      }, ()=>{}, {enableHighAccuracy:false, timeout:15000, maximumAge:60000});
+      navigator.geolocation.getCurrentPosition(stampGps, ()=>{}, {enableHighAccuracy:false, timeout:15000, maximumAge:60000});
     }, {enableHighAccuracy:true, timeout:10000});
   }
 }
@@ -1753,9 +1817,11 @@ async function createTicket(){
 }
 
 /* =================== ADMIN: TICKET REPORT =================== */
-function openReport(id){
+async function openReport(id){
   currentId = id;
+  await ensureFull(id);          // photos are not in the list payload any more
   const t = byId(id);
+  if(!t) return;
   document.getElementById('repHead').innerHTML = `
     <div class="ticket-top">
       <span class="tnum">${esc(t.number)}</span>
@@ -2004,10 +2070,13 @@ function renderSummary(t, targetId){
 }
 
 /* =================== AUTO REFRESH =================== */
-setInterval(()=>{
-  if(!USER) return;
-  if(currentView==='viewTechList' || currentView==='viewDash') refreshTickets();
-}, 30000);
+/* Only poll a list view that is actually on screen. A backgrounded tab used to
+   keep downloading the whole ticket archive every 30s. */
+function shouldPoll(){
+  return !!USER && !document.hidden && (currentView==='viewTechList' || currentView==='viewDash');
+}
+setInterval(()=>{ if(shouldPoll()) refreshTickets(); }, 30000);
+document.addEventListener('visibilitychange', ()=>{ if(shouldPoll()) refreshTickets(); });
 
 /* =================== INIT =================== */
 function hideSplash(){
