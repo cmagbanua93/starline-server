@@ -11,7 +11,7 @@
     --ok:#16a34a; --danger:#dc2626; --border:#e2e8f0; --radius:14px;
   }
   *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
-  body{background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:60px}
+  body{background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:calc(84px + env(safe-area-inset-bottom))}
   header{background:linear-gradient(135deg,#12406e,var(--primary-dark));color:#fff;padding:12px 16px;position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:10px;box-shadow:0 2px 8px rgba(0,0,0,.15);border-bottom:3px solid var(--gold)}
   header .logo{width:38px;height:38px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
   header .logo svg{width:38px;height:38px}
@@ -211,8 +211,74 @@
   .kpi .n{font-size:22px;font-weight:800;color:var(--primary)}
   .kpi .l{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
 
+  /* ---------- app shell: bottom navigation ---------- */
+  .bottomnav{position:fixed;left:0;right:0;bottom:0;z-index:60;display:flex;background:#fff;border-top:1px solid var(--border);box-shadow:0 -2px 14px rgba(15,23,42,.10);padding-bottom:env(safe-area-inset-bottom)}
+  .navbtn{flex:1;border:none;background:none;padding:9px 2px 8px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;color:var(--muted);font-size:10.5px;font-weight:700;min-height:58px;position:relative;-webkit-tap-highlight-color:transparent}
+  .navbtn .ico{font-size:19px;line-height:1}
+  .navbtn.on{color:var(--primary)}
+  .navbtn.on::before{content:'';position:absolute;top:0;left:24%;right:24%;height:3px;border-radius:0 0 4px 4px;background:var(--primary)}
+  .navbtn .nbadge{position:absolute;top:4px;left:50%;margin-left:4px;background:var(--danger);color:#fff;font-size:9.5px;font-weight:800;border-radius:99px;padding:1px 5px;min-width:16px;text-align:center}
+
+  /* ---------- page furniture ---------- */
+  .page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin:2px 0 12px}
+  .page-title{font-size:20px;font-weight:800;letter-spacing:-.01em}
+  .page-sub{font-size:12.5px;color:var(--muted);font-weight:600;margin-top:1px}
+  .icon-btn{width:40px;height:40px;flex-shrink:0;border-radius:12px;border:1px solid var(--border);background:#fff;color:var(--primary);font-size:17px;font-weight:700;cursor:pointer}
+  .sec-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+  .sec-title{font-size:14.5px;font-weight:800}
+  .card.compact{padding:11px 12px}
+  .search-box{margin-bottom:10px;font-size:14px}
+  .filter-note{background:#eef2ff;border:1px solid #c7d2fe;color:#3730a3;font-size:12px;font-weight:700;border-radius:10px;padding:8px 10px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .filter-note button{border:none;background:#3730a3;color:#fff;border-radius:8px;padding:4px 10px;font-size:11.5px;font-weight:700;cursor:pointer}
+
+  /* segmented control */
+  .seg{display:flex;background:#e2e8f0;border-radius:12px;padding:3px;gap:3px;margin-bottom:12px}
+  .seg button{flex:1;border:none;background:none;padding:9px 6px;border-radius:9px;font-size:12.5px;font-weight:700;color:var(--muted);cursor:pointer;min-height:38px}
+  .seg button.on{background:#fff;color:var(--primary);box-shadow:0 1px 3px rgba(15,23,42,.14)}
+
+  /* status pills */
+  .pills{display:flex;gap:6px;overflow-x:auto;margin-bottom:10px;padding-bottom:2px;-webkit-overflow-scrolling:touch}
+  .pill{border:1.5px solid var(--border);background:#fff;color:var(--muted);padding:8px 13px;border-radius:99px;font-size:12.5px;font-weight:700;white-space:nowrap;cursor:pointer;flex-shrink:0}
+  .pill.on{background:var(--primary);color:#fff;border-color:var(--primary)}
+  .pill .cnt{opacity:.65;font-weight:800;margin-left:3px}
+
+  /* mini stat strip */
+  .ministats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+  .ministat{border-radius:12px;padding:10px 8px;text-align:center;color:#fff;cursor:pointer;border:none}
+  .ministat .n{font-size:22px;font-weight:800;line-height:1.15}
+  .ministat .l{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;opacity:.92}
+  .ministat.on{outline:3px solid rgba(255,255,255,.65);outline-offset:-4px}
+  .ms-today{background:linear-gradient(135deg,#16a34a,#15803d)}
+  .ms-week{background:linear-gradient(135deg,#12406e,#0e2f55)}
+  .ms-month{background:linear-gradient(135deg,#f2c230,#d99f0b);color:#0e2f55}
+
+  /* chips */
+  .chip{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;padding:3px 8px;border-radius:99px;background:#f1f5f9;color:var(--muted);white-space:nowrap}
+  .chip-live{background:#fef9c3;color:#a16207}
+  .chip-done{background:#dcfce7;color:#15803d}
+  .chip-idle{background:#f1f5f9;color:#64748b}
+  .chip-issue{background:#e0e7ff;color:#3730a3;max-width:100%;overflow:hidden;text-overflow:ellipsis;display:inline-block}
+  .auto-remark{background:#eef2ff;border:1px solid #c7d2fe;color:#3730a3;font-size:12.5px;font-weight:700;border-radius:10px;padding:9px 11px;margin-bottom:10px}
+  .alert-row{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:9px 11px;margin-bottom:6px}
+  .alert-row:last-child{margin-bottom:0}
+
+  /* items used picker */
+  .items-used{border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .item-row{display:flex;align-items:center;gap:10px;padding:9px 11px;border-bottom:1px solid var(--border);background:#fff}
+  .item-row:last-child{border-bottom:none}
+  .item-name{flex:1;font-size:13px;font-weight:700;min-width:0}
+  .item-have{display:block;font-size:11px;font-weight:600;color:var(--muted)}
+  .item-qty{width:80px;flex-shrink:0;padding:9px 6px;text-align:center;font-weight:700}
+
+  /* wider screens: give the app a centred column and roomier cards */
+  @media (min-width:820px){
+    .wrap{max-width:880px;padding:18px 20px 8px}
+    .bottomnav{justify-content:center;gap:8px}
+    .navbtn{flex:0 0 150px}
+  }
+
   @media print{
-    header,.tabs,.no-print,.steps-nav,.wizard-btns,.filter-row,.stats,.split{display:none!important}
+    header,.tabs,.no-print,.bottomnav,.steps-nav,.wizard-btns,.filter-row,.stats,.split,.seg,.pills,.page-head{display:none!important}
     body{background:#fff;padding:0}
     .card{box-shadow:none;border:1px solid #ccc}
   }
@@ -239,14 +305,6 @@
   <button class="hbtn" onclick="doLogout()">Logout</button>
 </header>
 
-<div class="tabs hidden no-print" id="adminTabs">
-  <button class="tab active" id="tabDash" onclick="adminGo('dash')">📊 Dashboard</button>
-  <button class="tab" id="tabNew" onclick="adminGo('new')">＋ New Ticket</button>
-  <button class="tab" id="tabReq" onclick="adminGo('requests')">📦 Requests</button>
-  <button class="tab" id="tabUsage" onclick="adminGo('usage')">🧵 Material Usage</button>
-  <button class="tab" id="tabTechs" onclick="adminGo('techs')">👷 Technicians</button>
-</div>
-
 <div class="offline-banner hidden" id="offlineBanner">⚠ Offline — changes are saved on this phone and will sync when back online</div>
 
 <!-- ============ LOGIN ============ -->
@@ -264,75 +322,129 @@
   </div>
 </div>
 
-<!-- ============ TECH: TICKET LIST ============ -->
+<!-- ============ TECH: JOBS ============ -->
 <div class="wrap hidden" id="viewTechList">
-  <div class="step-title" style="font-size:15px;margin-bottom:8px">✅ Completed Tickets</div>
+  <div class="page-head">
+    <div>
+      <div class="page-title">My Jobs</div>
+      <div class="page-sub" id="techJobsSub"></div>
+    </div>
+    <button class="icon-btn no-print" onclick="refreshTickets(true)" title="Refresh">↻</button>
+  </div>
+  <div class="ministats" id="techMiniStats"></div>
+  <div class="card compact" id="techStockPanel" onclick="go('materials')" style="cursor:pointer"></div>
+  <div class="pills no-print" id="techStatusPills"></div>
+  <div class="type-tabs no-print" id="techTypeTabs"></div>
+  <div id="techList"></div>
+</div>
+
+<!-- ============ TECH: STATS ============ -->
+<div class="wrap hidden" id="viewStats">
+  <div class="page-head"><div><div class="page-title">My Performance</div><div class="page-sub">Completed work at a glance</div></div></div>
+  <div class="kpi-row" id="techKpiRow"></div>
   <div class="stats" id="techStats"></div>
   <div class="card" id="cbdPanelTech"></div>
   <div class="card" id="trendPanelTech"></div>
-  <div class="card" id="techStockPanel" onclick="showTechReq()" style="cursor:pointer"></div>
-  <div class="type-tabs no-print" id="techTypeTabs"></div>
-  <div class="filter-row no-print">
-    <select id="fStatus" onchange="techPeriod=null;techTrendDay=null;renderTechList()">
-      <option value="active">Active jobs</option>
-      <option value="">All</option>
-      <option value="open">Open</option>
-      <option value="in_progress">In Progress</option>
-      <option value="completed">Completed</option>
-    </select>
-    <button class="btn btn-ghost btn-sm" style="margin-top:0" onclick="refreshTickets(true)">↻ Refresh</button>
-    <button class="btn btn-primary btn-sm" style="margin-top:0" onclick="showTechReq()">📦 Materials</button>
-  </div>
-  <div id="techList"></div>
 </div>
 
 <!-- ============ TECH: MATERIALS & REQUESTS ============ -->
 <div class="wrap hidden" id="viewTechReq">
-  <div class="card">
-    <div class="step-title" style="font-size:15px">My Stock</div>
-    <div id="myStock"></div>
+  <div class="page-head"><div><div class="page-title">Materials</div><div class="page-sub">Your stock, requests and what you have used</div></div></div>
+  <div class="seg no-print" id="techMatSeg"></div>
+
+  <div id="techMatStock">
+    <div class="card">
+      <div class="sec-head"><div class="sec-title">📦 My Stock on Hand</div></div>
+      <div id="myStock"></div>
+    </div>
+    <div class="card">
+      <div class="sec-head"><div class="sec-title">Request Materials</div></div>
+      <div class="step-desc">Pick an item, enter the quantity and send. Once the admin releases it, the item lands in your stock and can be booked out on a job.</div>
+      <label>Item</label>
+      <select id="rqItem" onchange="rqCalc()"><option value="">— select item —</option></select>
+      <label id="rqQtyLabel">Quantity</label>
+      <input id="rqQty" type="number" inputmode="numeric" step="1" min="1" placeholder="e.g. 2" oninput="rqCalc()">
+      <div class="gps-out hidden" id="rqCalcOut"></div>
+      <label>Note (optional)</label>
+      <input id="rqNote" placeholder="e.g. for Brgy 2 installations this week">
+      <button class="btn btn-primary" onclick="submitRequest()">Send Request</button>
+    </div>
+    <div class="card">
+      <div class="sec-head"><div class="sec-title">My Requests</div></div>
+      <div id="myRequests"></div>
+    </div>
   </div>
-  <div class="card">
-    <div class="step-title" style="font-size:15px">Request Materials</div>
-    <div class="step-desc">Select an item, enter the quantity, and send. Once approved and released by the admin, the items appear in your stock.</div>
-    <label>Item</label>
-    <select id="rqItem" onchange="rqCalc()"><option value="">— select item —</option></select>
-    <label id="rqQtyLabel">Quantity</label>
-    <input id="rqQty" type="number" step="1" min="1" placeholder="e.g. 2" oninput="rqCalc()">
-    <div class="gps-out hidden" id="rqCalcOut"></div>
-    <label>Note (optional)</label>
-    <input id="rqNote" placeholder="e.g. for Brgy 2 installations this week">
-    <button class="btn btn-primary" onclick="submitRequest()">Send Request</button>
-  </div>
-  <div class="card">
-    <div class="step-title" style="font-size:15px">My Requests</div>
-    <div id="myRequests"></div>
+
+  <div id="techMatUsage" class="hidden">
+    <div class="card">
+      <div class="sec-head"><div class="sec-title">Released to me vs used</div></div>
+      <div class="step-desc">Everything the office has issued you, against what your completed jobs consumed.</div>
+      <div id="techUsageRecon"></div>
+    </div>
+    <div class="card">
+      <div class="sec-head"><div class="sec-title">Usage log</div></div>
+      <div class="step-desc">Each completed job and what it consumed.</div>
+      <div id="techUsageLog"></div>
+    </div>
   </div>
 </div>
 
-<!-- ============ ADMIN: REQUESTS ============ -->
-<div class="wrap hidden" id="viewRequests">
-  <div class="card">
-    <div class="step-title" style="font-size:15px">🏢 Warehouse Inventory</div>
-    <div class="step-desc">Stock in the office/warehouse. Releasing a technician's request takes items from here and moves them to the technician's profile.</div>
-    <div id="whList"></div>
-    <div class="row2">
-      <div><label>Cable Type</label><input id="whName" placeholder="e.g. 1 core"></div>
-      <div><label>Meters per Reel</label><input id="whMeters" type="number" step="1" placeholder="e.g. 1000"></div>
-    </div>
-    <label>Quantity (pcs)</label>
-    <input id="whQty" type="number" step="1" placeholder="e.g. 6">
-    <button class="btn btn-primary btn-sm" onclick="whAddCable()">＋ Add Cable Stock</button>
-    <label>Add FIC Connectors (pcs)</label>
-    <input id="whConn" type="number" step="1" placeholder="e.g. 100">
-    <button class="btn btn-ghost btn-sm" onclick="whAddConnectors()">＋ Add Connectors</button>
-    <div class="row2" style="margin-top:8px">
-      <div><label>Other Item Name</label><input id="whItemName" placeholder="e.g. Modem EG8145V5, S-clamp"></div>
-      <div><label>Quantity (pcs)</label><input id="whItemQty" type="number" step="1" placeholder="e.g. 10"></div>
-    </div>
-    <button class="btn btn-ghost btn-sm" onclick="whAddItem()">＋ Add Other Item</button>
+<!-- ============ ADMIN: MATERIALS (requests · usage · stock) ============ -->
+<div class="wrap hidden" id="viewMaterials">
+  <div class="page-head"><div><div class="page-title">Materials</div><div class="page-sub">Requests, what was used, and warehouse stock</div></div></div>
+  <div class="seg no-print" id="matSeg"></div>
+
+  <!-- requests -->
+  <div id="matRequests">
+    <div id="reqList"></div>
   </div>
-  <div id="reqList"></div>
+
+  <!-- usage: released vs used -->
+  <div id="matUsage" class="hidden">
+    <div class="card">
+      <div class="sec-head"><div class="sec-title">Released vs used</div></div>
+      <div class="step-desc">Every item issued to a technician, how much of it completed jobs consumed, and what is still on their hands.</div>
+      <div id="usageRecon"></div>
+    </div>
+    <div class="card">
+      <div class="sec-head"><div class="sec-title">Usage by job type</div></div>
+      <div id="usageSplit"></div>
+    </div>
+    <div class="card">
+      <div class="type-tabs no-print" id="usageTypeTabs"></div>
+      <div class="sec-head"><div class="sec-title">Usage log — what each job consumed</div></div>
+      <div id="usagePanel"></div>
+    </div>
+    <div class="card">
+      <div class="sec-head"><div class="sec-title">Release log — what left the warehouse</div></div>
+      <div id="releaseLog"></div>
+    </div>
+  </div>
+
+  <!-- warehouse + technician stock -->
+  <div id="matStock" class="hidden">
+    <div class="card">
+      <div class="sec-head"><div class="sec-title">🏢 Warehouse Inventory</div></div>
+      <div class="step-desc">Stock in the office. Releasing a technician's request moves items from here to that technician.</div>
+      <div id="whList"></div>
+      <div class="row2">
+        <div><label>Cable Type</label><input id="whName" placeholder="e.g. 1 core"></div>
+        <div><label>Meters per Reel</label><input id="whMeters" type="number" inputmode="numeric" step="1" placeholder="e.g. 1000"></div>
+      </div>
+      <label>Quantity (pcs)</label>
+      <input id="whQty" type="number" inputmode="numeric" step="1" placeholder="e.g. 6">
+      <button class="btn btn-primary btn-sm" onclick="whAddCable()">＋ Add Cable Stock</button>
+      <label>Add FIC Connectors (pcs)</label>
+      <input id="whConn" type="number" inputmode="numeric" step="1" placeholder="e.g. 100">
+      <button class="btn btn-ghost btn-sm" onclick="whAddConnectors()">＋ Add Connectors</button>
+      <div class="row2" style="margin-top:8px">
+        <div><label>Other Item Name</label><input id="whItemName" placeholder="e.g. Modem EG8145V5, S-clamp"></div>
+        <div><label>Quantity (pcs)</label><input id="whItemQty" type="number" inputmode="numeric" step="1" placeholder="e.g. 10"></div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="whAddItem()">＋ Add Other Item</button>
+    </div>
+    <div class="card" id="invPanel"></div>
+  </div>
 </div>
 
 <!-- ============ TECH: TICKET WIZARD ============ -->
@@ -342,54 +454,61 @@
   <div id="summaryArea"></div>
 </div>
 
-<!-- ============ ADMIN: DASHBOARD ============ -->
+<!-- ============ ADMIN: OVERVIEW ============ -->
 <div class="wrap hidden" id="viewDash">
+  <div class="page-head">
+    <div><div class="page-title">Overview</div><div class="page-sub" id="dashSub"></div></div>
+    <button class="icon-btn no-print" onclick="refreshTickets(true)" title="Refresh">↻</button>
+  </div>
   <div class="stats" id="statCards"></div>
-  <div class="split" id="statSplit"></div>
   <div class="kpi-row" id="kpiRow"></div>
+  <div class="card" id="alertPanel"></div>
+  <div class="split" id="statSplit"></div>
   <div class="card" id="cbdPanelAdmin"></div>
   <div class="card" id="trendPanelAdmin"></div>
   <div class="card" id="techPerfPanel"></div>
   <div class="card" id="prioPanel"></div>
-  <div class="card" id="invPanel"></div>
+</div>
+
+<!-- ============ ADMIN: TICKETS ============ -->
+<div class="wrap hidden" id="viewTickets">
+  <div class="page-head">
+    <div><div class="page-title">Tickets</div><div class="page-sub" id="ticketsSub"></div></div>
+    <button class="icon-btn no-print" onclick="refreshTickets(true)" title="Refresh">↻</button>
+  </div>
+  <input class="search-box no-print" id="dSearch" placeholder="🔍 Search number, customer, technician or address" oninput="renderTickets()">
+  <div class="pills no-print" id="dashStatusPills"></div>
   <div class="type-tabs no-print" id="dashTypeTabs"></div>
   <div class="filter-row no-print">
-    <select id="dStatus" onchange="dashPeriod=null;dashTrendDay=null;renderDash()">
-      <option value="">All statuses</option><option value="open">Open</option><option value="in_progress">In Progress</option><option value="completed">Completed</option>
+    <select id="dTech" onchange="renderTickets()"><option value="">All technicians</option></select>
+    <select id="dSort" onchange="renderTickets()">
+      <option value="priority">Sort: priority</option>
+      <option value="newest">Sort: newest first</option>
+      <option value="oldest">Sort: oldest first</option>
+      <option value="longest">Sort: longest running</option>
     </select>
-    <select id="dTech" onchange="renderDash()"><option value="">All technicians</option></select>
-    <button class="btn btn-ghost btn-sm" style="margin-top:0" onclick="refreshTickets(true)">↻ Refresh</button>
   </div>
+  <div class="filter-note no-print hidden" id="dFilterNote"></div>
   <div id="dashList"></div>
 </div>
 
-<!-- ============ ADMIN: MATERIAL USAGE ============ -->
-<div class="wrap hidden" id="viewUsage">
-  <div class="card">
-    <div class="step-title" style="font-size:15px">🧵 Material Usage — by Job Type</div>
-    <div class="step-desc">Cable meters and FIC connectors consumed, split out by job type. Tap a row's numbers to filter the ticket table below.</div>
-    <div id="usageSplit"></div>
-  </div>
-  <div class="card">
-    <div class="type-tabs no-print" id="usageTypeTabs"></div>
-    <div class="step-title" style="font-size:15px">Material Usage by Ticket</div>
-    <div id="usagePanel"></div>
-  </div>
-</div>
-
-<!-- ============ ADMIN: NEW TICKET ============ -->
+<!-- ============ NEW TICKET (admin + technician) ============ -->
 <div class="wrap hidden" id="viewNew">
+  <div class="page-head"><div><div class="page-title">New Ticket</div><div class="page-sub" id="newSub"></div></div></div>
   <div class="card">
-    <div class="step-title">Create Ticket</div>
-    <div class="step-desc">The assigned technician will see this job on their phone the next time their list refreshes.</div>
-    <label>Ticket Number</label>
-    <input id="nTicket" placeholder="Leave blank to auto-generate">
     <label>Job Type <span class="req">*</span></label>
-    <select id="nType">
+    <select id="nType" onchange="onNewTypeChange()">
       <option value="installation">Installation (new FTTH subscriber)</option>
       <option value="repair">Repair / Maintenance</option>
       <option value="nap_install">NAP Installation (new NAP box on a post)</option>
     </select>
+
+    <div id="nIssueWrap" class="hidden">
+      <label>Reported Issue <span class="req">*</span></label>
+      <select id="nIssue"></select>
+      <div class="tmeta" id="nIssueHint" style="margin-top:5px"></div>
+    </div>
+
     <label>Priority <span class="req">*</span></label>
     <select id="nPriority">
       <option value="3">Priority 3 — Normal (Green)</option>
@@ -398,17 +517,21 @@
     </select>
     <label>Subject <span class="req">*</span></label>
     <input id="nSubject" placeholder="e.g. New fiber installation — 100 Mbps plan">
-    <label>Assign to Technician <span class="req">*</span></label>
-    <select id="nAssign"></select>
+    <div id="nAssignWrap">
+      <label>Assign to Technician <span class="req">*</span></label>
+      <select id="nAssign"></select>
+    </div>
     <label>Customer / Site Name <span class="req">*</span></label>
     <input id="nCustomer" placeholder="Subscriber name, or site name for NAP installation">
     <label>Contact Number</label>
-    <input id="nPhone">
+    <input id="nPhone" inputmode="tel">
     <label>Address</label>
     <input id="nAddress" placeholder="Installation / service address">
     <label>Message / Job Notes</label>
-    <textarea id="nMessage" placeholder="Instructions for the technician"></textarea>
-    <button class="btn btn-primary" onclick="createTicket()">Create &amp; Assign Ticket</button>
+    <textarea id="nMessage" placeholder="Details for the job"></textarea>
+    <label>Ticket Number</label>
+    <input id="nTicket" placeholder="Leave blank to auto-generate">
+    <button class="btn btn-primary" onclick="createTicket()">Create Ticket</button>
   </div>
 </div>
 
@@ -419,18 +542,14 @@
   <div id="repSummary"></div>
 </div>
 
-<!-- ============ ADMIN: TECHNICIANS ============ -->
+<!-- ============ ADMIN: TEAM & SETTINGS ============ -->
 <div class="wrap hidden" id="viewTechs">
+  <div class="page-head"><div><div class="page-title">Team &amp; Settings</div><div class="page-sub">Technicians, plans and repair issue types</div></div></div>
+  <div class="seg no-print" id="teamSeg"></div>
+
+  <div id="teamAccounts">
   <div class="card">
-    <div class="step-title">Subscribed Plans</div>
-    <div class="step-desc">These appear as the plan dropdown in the technician's Customer Details step.</div>
-    <div id="planList"></div>
-    <label>New Plan</label>
-    <input id="planInput" placeholder="e.g. 100 Mbps — ₱1,299/mo">
-    <button class="btn btn-primary btn-sm" onclick="addPlan()">Add Plan</button>
-  </div>
-  <div class="card">
-    <div class="step-title">Add Technician</div>
+    <div class="sec-head"><div class="sec-title">Add Technician</div></div>
     <label>Full Name <span class="req">*</span></label>
     <input id="uName">
     <label>Username <span class="req">*</span></label>
@@ -440,18 +559,50 @@
     <button class="btn btn-primary" onclick="addUser()">Add Technician</button>
   </div>
   <div class="card">
-    <div class="step-title">Accounts</div>
+    <div class="sec-head"><div class="sec-title">Accounts</div></div>
     <div id="userList"></div>
   </div>
   <div class="card">
-    <div class="step-title">Change My Password</div>
+    <div class="sec-head"><div class="sec-title">Change My Password</div></div>
     <label>Current Password</label>
     <input id="pOld" type="password">
     <label>New Password (min 6 characters)</label>
     <input id="pNew" type="password">
     <button class="btn btn-ghost" onclick="changePassword()">Change Password</button>
   </div>
+  </div>
+
+  <div id="teamSettings" class="hidden">
+    <div class="card">
+      <div class="sec-head"><div class="sec-title">🔧 Repair Issue Types</div></div>
+      <div class="step-desc">These are the choices the office picks from when logging a repair. Each issue runs its own set of steps on the technician's phone.</div>
+      <div id="issueList"></div>
+      <label>New Issue Description</label>
+      <input id="issueInput" placeholder="e.g. Drop wire detached from the house">
+      <label>Steps the Technician Follows</label>
+      <select id="issueFlow">
+        <option value="generic">Standard repair — diagnose, repair, verify, close</option>
+        <option value="modem">Modem / ONU — check unit, repair or replace, speed test</option>
+        <option value="connector">Defective connector — locate, re-terminate, verify</option>
+        <option value="nap_reading">High reading — inspect NAP port, correct, re-read both ends</option>
+        <option value="fiber_cut">Fiber cut — locate cut, re-run cable with meter photos, verify</option>
+        <option value="main_nap">Main NAP — inspect main NAP, corrective action, verify</option>
+      </select>
+      <button class="btn btn-primary btn-sm" onclick="addIssue()">Add Issue Type</button>
+    </div>
+    <div class="card">
+      <div class="sec-head"><div class="sec-title">Subscribed Plans</div></div>
+      <div class="step-desc">These appear as the plan dropdown in the technician's Customer Details step.</div>
+      <div id="planList"></div>
+      <label>New Plan</label>
+      <input id="planInput" placeholder="e.g. 100 Mbps — ₱1,299/mo">
+      <button class="btn btn-primary btn-sm" onclick="addPlan()">Add Plan</button>
+    </div>
+  </div>
 </div>
+
+<!-- ============ BOTTOM NAVIGATION ============ -->
+<nav class="bottomnav hidden no-print" id="bottomNav"></nav>
 
 <!-- ============ SIGNATURE MODAL ============ -->
 <div id="sigOverlay" class="hidden">
@@ -547,8 +698,8 @@ async function flushDirty(){
   const dirty = tickets.filter(t=>t._dirty);
   for(const t of dirty){
     try{
-      const r = await api('/api/tickets/'+t.id, 'PUT', {data:t.data, step:t.step, status:t.status, completed:t.completed});
-      if(r && r.ticket && r.ticket.data){ t.data = r.ticket.data; t.updated = r.ticket.updated; }
+      const r = await api('/api/tickets/'+t.id, 'PUT', {data:t.data, step:t.step, status:t.status, completed:t.completed, started:t.started||undefined});
+      if(r && r.ticket && r.ticket.data){ t.data = r.ticket.data; t.updated = r.ticket.updated; t.started = r.ticket.started; }
       delete t._dirty;
       ticketsEtag = null;
     }catch(e){ return; } // still offline
@@ -557,11 +708,22 @@ async function flushDirty(){
   cacheTickets();
 }
 async function persist(t){
+  /* The job clock starts the first time the technician actually touches the job —
+     a photo, a field, a step — not merely opening it, and not only via "Next". */
+  if(t.status==='open' && USER && USER.role==='tech'){
+    t.status = 'in_progress';
+    if(!t.started) t.started = Date.now();   // stamped here so an offline start keeps its real time
+  }
   try{
-    const r = await api('/api/tickets/'+t.id, 'PUT', {data:t.data, step:t.step, status:t.status, completed:t.completed});
+    const r = await api('/api/tickets/'+t.id, 'PUT', {data:t.data, step:t.step, status:t.status, completed:t.completed, started:t.started||undefined});
     /* adopt the server's copy: photos come back as short /photos/ URLs, which
        releases the base64 this tab was holding in memory */
-    if(r && r.ticket && r.ticket.data){ t.data = r.ticket.data; t.updated = r.ticket.updated; }
+    if(r && r.ticket){
+      const s = r.ticket;
+      if(s.data) t.data = s.data;
+      t.updated = s.updated; t.status = s.status; t.started = s.started; t.completed = s.completed;
+      t.durationMs = s.durationMs; t.durationText = s.durationText;   // the server owns the closing figures
+    }
     delete t._dirty; setOffline(false);
     ticketsEtag = null;   // our own write changed the list
   }catch(e){
@@ -720,11 +882,259 @@ const WORKFLOWS = {
     { key:'complete', title:'5. Completion',
       desc:'Close the job with final notes and the customer\'s signature confirming service is restored.',
       fields:[
+        {k:'items_used', type:'items_used', label:'Other Issued Items Used'},
         {k:'final_notes', type:'textarea', label:'Completion Notes'},
         {k:'signature', type:'signature', label:'Customer Signature', req:true}
       ]}
   ]
 };
+
+/* =================== REPAIR WORKFLOWS BY REPORTED ISSUE ===================
+ * A repair ticket carries the issue the office logged; each issue runs the steps
+ * that actually apply to it, so the technician is never walked through a modem
+ * swap for a fiber cut. `generic` is the fallback for issue types the admin adds
+ * without picking a template.
+ */
+const REPAIR_FLOWS = {
+  generic: WORKFLOWS.repair,
+
+  modem: [
+    { key:'arrival', title:'1. Arrival at Subscriber',
+      desc:'Take a photo on arrival. Time and GPS are stamped automatically as proof of visit.',
+      fields:[
+        {k:'arrival_photo', type:'photo', label:'Arrival Photo', req:true, autogps:true},
+        {k:'issue_found', type:'textarea', label:'Fault Confirmed with the Subscriber', req:true, placeholder:'e.g. No internet, LOS light red, modem keeps restarting'}
+      ]},
+    { key:'oldmodem', title:'2. Check the Existing Modem / ONU',
+      desc:'Photograph the installed unit, record its serial, and take the optical reading at the modem before doing any work.',
+      fields:[
+        {k:'modem_old_serial', type:'text', label:'Existing Modem Serial Number', req:true, placeholder:'e.g. HWTC12345678'},
+        {k:'modem_old_photo', type:'photo', label:'Photo of the Existing Modem', req:true},
+        {k:'los_status', type:'select', label:'LOS / Status Light', req:true, options:['Green — normal','Red — LOS (no light)','Blinking red','Off — no power','Other']},
+        {k:'reading_before', type:'number', label:'Optical Reading Before Repair (dBm)', step:'0.1', placeholder:'Leave blank if no signal'}
+      ]},
+    { key:'work', title:'3. Repair or Replacement',
+      desc:'Record exactly what you did to the unit. If you swapped it, fill in the details of the replacement modem.',
+      fields:[
+        {k:'modem_action', type:'select', label:'Action Taken', req:true, options:['Reset / reconfigured','Firmware or settings fix','Power adapter replaced','Modem replaced with a new unit','Patch cord replaced']},
+        {k:'modem_serial', type:'text', label:'New Modem Serial Number (if replaced)', placeholder:'Leave blank if the same unit was kept'},
+        {k:'modem_model', type:'text', label:'Modem Model', placeholder:'e.g. Huawei EG8145V5'},
+        {k:'modem_mac', type:'text', label:'MAC Address (optional)'},
+        {k:'modem_photo', type:'photo', label:'Photo of the Working Modem', req:true}
+      ]},
+    { key:'materials', title:'4. Materials Used',
+      desc:'Record everything consumed on this job. Issued items are deducted from your stock when the job is completed.',
+      fields:[
+        {k:'items_used', type:'items_used', label:'Issued Items Used (modem, patch cord, adapter…)'},
+        {k:'connectors', type:'number', label:'FIC Connectors Used (pcs)', step:'1', placeholder:'0 if none'},
+        {k:'other_materials', type:'textarea', label:'Other Materials'}
+      ]},
+    { key:'verify', title:'5. Verification',
+      desc:'Prove the service is back: take the optical reading and run a speed test with the subscriber.',
+      fields:[
+        {k:'reading_after', type:'number', label:'Optical Reading After Repair (dBm)', req:true, step:'0.1'},
+        {k:'speedtest_photo', type:'photo', label:'Photo of Speed Test Result', req:true, autogps:true}
+      ]},
+    { key:'complete', title:'6. Completion',
+      desc:'Close the job with the subscriber\'s signature confirming service is restored.',
+      fields:[
+        {k:'final_notes', type:'textarea', label:'Completion Notes'},
+        {k:'customer_remarks', type:'textarea', label:'Remarks from the Customer (optional)'},
+        {k:'signature', type:'signature', label:'Customer Signature', req:true}
+      ]}
+  ],
+
+  connector: [
+    { key:'arrival', title:'1. Arrival at Site',
+      desc:'Take a photo on arrival. Time and GPS are stamped automatically.',
+      fields:[
+        {k:'arrival_photo', type:'photo', label:'Arrival Photo', req:true, autogps:true}
+      ]},
+    { key:'diagnosis', title:'2. Locate the Defective Connector',
+      desc:'Find the faulty termination, photograph it, and take the reading before you cut it off.',
+      fields:[
+        {k:'fault_location', type:'select', label:'Where is the Defective Connector?', req:true, options:['At the modem / ONU','At the NAP box port','At the subscriber drop clamp','Mid-span joint','Other']},
+        {k:'fault_photo', type:'photo', label:'Photo of the Defective Connector', req:true, autogps:true},
+        {k:'reading_before', type:'number', label:'Reading Before Repair (dBm)', step:'0.1', placeholder:'Leave blank if no signal'}
+      ]},
+    { key:'work', title:'3. Re-terminate the Connector',
+      desc:'Fit the new fast connector and photograph the finished termination.',
+      fields:[
+        {k:'connectors', type:'number', label:'FIC Connectors Used (pcs)', req:true, step:'1', placeholder:'e.g. 1'},
+        {k:'new_connector_photo', type:'photo', label:'Photo of the New Termination', req:true},
+        {k:'cable_reel', type:'reel_select', label:'Cable Used (only if cable was also replaced)'},
+        {k:'cable_length', type:'number', label:'Cable Used (meters)', step:'1', placeholder:'0 if none'}
+      ]},
+    { key:'materials', title:'4. Materials Used',
+      desc:'Record any issued items consumed. They are deducted from your stock when the job is completed.',
+      fields:[
+        {k:'items_used', type:'items_used', label:'Issued Items Used'},
+        {k:'other_materials', type:'textarea', label:'Other Materials (clamps, hooks, patch cord…)'}
+      ]},
+    { key:'verify', title:'5. Verification',
+      desc:'Take the reading after re-termination to prove the loss is back within range.',
+      fields:[
+        {k:'reading_after', type:'number', label:'Reading After Repair (dBm)', req:true, step:'0.1'},
+        {k:'verify_photo', type:'photo', label:'Photo of the Reading After Repair', req:true, autogps:true}
+      ]},
+    { key:'complete', title:'6. Completion',
+      desc:'Close the job with the subscriber\'s signature.',
+      fields:[
+        {k:'final_notes', type:'textarea', label:'Completion Notes'},
+        {k:'signature', type:'signature', label:'Customer Signature', req:true}
+      ]}
+  ],
+
+  nap_reading: [
+    { key:'arrival', title:'1. Reading at the Subscriber',
+      desc:'Start at the subscriber end: photograph your arrival and record the reading you are chasing.',
+      fields:[
+        {k:'arrival_photo', type:'photo', label:'Arrival Photo', req:true, autogps:true},
+        {k:'reading_before', type:'number', label:'Reading at the Subscriber Before Work (dBm)', req:true, step:'0.1', placeholder:'e.g. -28.5'}
+      ]},
+    { key:'napcheck', title:'2. NAP Box Inspection',
+      desc:'Open the NAP box the subscriber is fed from, take the reading at the port, and photograph the cassette.',
+      fields:[
+        {k:'nap_id', type:'text', label:'NAP Box ID / Name', req:true, placeholder:'e.g. NAP-BRGY1-014'},
+        {k:'nap_port', type:'text', label:'Port Number in Use', req:true, placeholder:'e.g. Port 5 of 8'},
+        {k:'nap_reading', type:'number', label:'Reading at the NAP Port (dBm)', req:true, step:'0.1'},
+        {k:'nap_photo', type:'photo', label:'Photo of the NAP Box Cassette', req:true, autogps:true},
+        {k:'nap_condition', type:'select', label:'What You Found', req:true, options:['Dirty / dusty connector','Loose or unseated patch cord','Bent or pinched fiber','Water inside the box','Faulty port','Splitter problem','Nothing obvious — reading normal at NAP']}
+      ]},
+    { key:'work', title:'3. Corrective Action',
+      desc:'Fix what you found, then photograph the corrected port.',
+      fields:[
+        {k:'action_taken', type:'select', label:'Action Taken', req:true, options:['Cleaned the connector','Re-seated the patch cord','Re-terminated the connector','Moved to a spare port','Replaced the patch cord','Re-spliced the pigtail','Escalated — main NAP / backbone fault']},
+        {k:'new_port', type:'text', label:'New Port (if moved)', placeholder:'e.g. Port 7 of 8'},
+        {k:'action_photo', type:'photo', label:'Photo After the Correction', req:true, autogps:true}
+      ]},
+    { key:'materials', title:'4. Materials Used',
+      desc:'Record everything consumed. Issued items are deducted from your stock when the job is completed.',
+      fields:[
+        {k:'connectors', type:'number', label:'FIC Connectors Used (pcs)', step:'1', placeholder:'0 if none'},
+        {k:'items_used', type:'items_used', label:'Issued Items Used (patch cord, pigtail…)'},
+        {k:'other_materials', type:'textarea', label:'Other Materials'}
+      ]},
+    { key:'verify', title:'5. Verification',
+      desc:'Prove the loss is corrected at both ends.',
+      fields:[
+        {k:'nap_reading_after', type:'number', label:'Reading at the NAP After Work (dBm)', req:true, step:'0.1'},
+        {k:'reading_after', type:'number', label:'Reading at the Subscriber After Work (dBm)', req:true, step:'0.1'},
+        {k:'verify_photo', type:'photo', label:'Photo of the Final Reading', req:true, autogps:true}
+      ]},
+    { key:'complete', title:'6. Completion',
+      desc:'Close the job with the subscriber\'s signature.',
+      fields:[
+        {k:'final_notes', type:'textarea', label:'Completion Notes'},
+        {k:'signature', type:'signature', label:'Customer Signature', req:true}
+      ]}
+  ],
+
+  fiber_cut: [
+    { key:'arrival', title:'1. Arrival at Site',
+      desc:'Take a photo on arrival. Time and GPS are stamped automatically.',
+      fields:[
+        {k:'arrival_photo', type:'photo', label:'Arrival Photo', req:true, autogps:true},
+        {k:'reading_before', type:'number', label:'Reading Before Repair (dBm)', step:'0.1', placeholder:'Leave blank if no signal'}
+      ]},
+    { key:'locate', title:'2. Locate the Cut',
+      desc:'Photograph the cut itself and capture its coordinates so the office can map repeat trouble spots.',
+      fields:[
+        {k:'cut_photo', type:'photo', label:'Photo of the Cut Fiber', req:true, autogps:true},
+        {k:'cut_cause', type:'select', label:'Cause of the Cut', req:true, options:['Fallen tree or branch','Vehicle / truck hit the line','Rodent or animal damage','Construction work','Storm or strong wind','Vandalism','Unknown']},
+        {k:'cut_location', type:'gps', label:'GPS of the Cut Point', req:true}
+      ]},
+    { key:'cable_start', title:'3. Fiber Cable — Starting Meter',
+      desc:'Select the cable you will pull from, record the meters left on the reel, and photograph the actual meter mark.',
+      fields:[
+        {k:'cable_reel', type:'reel_select', label:'Cable Type Used (from your stock)', req:true},
+        {k:'cable_start', type:'number', label:'Cable Meters Left on Reel — BEFORE (m)', req:true, step:'0.1', placeholder:'e.g. 850'},
+        {k:'cable_start_photo', type:'photo', label:'Photo of Cable Showing Meter Mark (Before)', req:true, autogps:true}
+      ]},
+    { key:'splice', title:'4. Re-run &amp; Terminate',
+      desc:'Pull the replacement span, terminate both ends, then read the reel again and photograph the meter mark.',
+      fields:[
+        {k:'connectors', type:'number', label:'FIC Connectors Used (pcs)', req:true, step:'1', placeholder:'e.g. 2'},
+        {k:'splice_photo', type:'photo', label:'Photo of the New Termination / Splice', req:true},
+        {k:'cable_end', type:'number', label:'Cable Meters Left on Reel — AFTER (m)', req:true, step:'0.1', cableCalc:true},
+        {k:'cable_end_photo', type:'photo', label:'Photo of Cable Showing Meter Mark (After)', req:true, autogps:true}
+      ]},
+    { key:'materials', title:'5. Materials Used',
+      desc:'Record any issued items consumed. They are deducted from your stock when the job is completed.',
+      fields:[
+        {k:'items_used', type:'items_used', label:'Issued Items Used (clamps, hooks, sleeves…)'},
+        {k:'other_materials', type:'textarea', label:'Other Materials'}
+      ]},
+    { key:'verify', title:'6. Verification',
+      desc:'Prove service is restored end to end.',
+      fields:[
+        {k:'reading_after', type:'number', label:'Reading After Repair (dBm)', req:true, step:'0.1'},
+        {k:'speedtest_photo', type:'photo', label:'Photo of Speed Test or Final Reading', req:true, autogps:true}
+      ]},
+    { key:'complete', title:'7. Completion',
+      desc:'Close the job with the subscriber\'s signature.',
+      fields:[
+        {k:'final_notes', type:'textarea', label:'Completion Notes'},
+        {k:'customer_remarks', type:'textarea', label:'Remarks from the Customer (optional)'},
+        {k:'signature', type:'signature', label:'Customer Signature', req:true}
+      ]}
+  ],
+
+  main_nap: [
+    { key:'arrival', title:'1. Arrival at the Main NAP',
+      desc:'Photograph your arrival at the main NAP location. Time and GPS are stamped automatically.',
+      fields:[
+        {k:'arrival_photo', type:'photo', label:'Arrival Photo', req:true, autogps:true},
+        {k:'main_nap', type:'text', label:'Main NAP ID / Location', req:true, placeholder:'e.g. MAIN-NAP-02, corner post Brgy 1'},
+        {k:'affected_scope', type:'text', label:'Who is Affected', placeholder:'e.g. NAP-BRGY1-012 to 015, about 20 subscribers'}
+      ]},
+    { key:'inspect', title:'2. Main NAP Inspection',
+      desc:'Take the reading coming into the main NAP and photograph the enclosure, then record what is wrong.',
+      fields:[
+        {k:'main_nap_reading', type:'number', label:'Reading at the Main NAP (dBm)', req:true, step:'0.1'},
+        {k:'main_nap_photo', type:'photo', label:'Photo of the Main NAP', req:true, autogps:true},
+        {k:'main_nap_issue', type:'select', label:'Problem Found', req:true, options:['No light from the OLT / backbone','Backbone fiber cut','Broken or faulty splitter','Damaged cassette or enclosure','Water inside the enclosure','Faulty port','Loose or dirty connectors','Other']},
+        {k:'main_nap_port', type:'text', label:'Port / Splitter Involved', placeholder:'e.g. Splitter 2, Port 3 of 8'}
+      ]},
+    { key:'work', title:'3. Corrective Action',
+      desc:'Describe the repair, note the fiber colour worked on, and photograph the result.',
+      fields:[
+        {k:'action_taken', type:'textarea', label:'Work Done', req:true, placeholder:'e.g. Replaced 1:8 splitter, re-spliced backbone pigtail'},
+        {k:'fiber_color', type:'select', label:'Fiber Colour Worked On', options:['No Color','Blue','Orange','Green','Brown','Slate','White','Red','Black','Yellow','Violet','Rose','Aqua']},
+        {k:'action_photo', type:'photo', label:'Photo After the Repair', req:true, autogps:true},
+        {k:'location', type:'gps', label:'GPS of the Main NAP', req:true}
+      ]},
+    { key:'materials', title:'4. Materials Used',
+      desc:'Record everything consumed. Cable and issued items are deducted from your stock when the job is completed.',
+      fields:[
+        {k:'cable_reel', type:'reel_select', label:'Cable Used (if any was pulled)'},
+        {k:'cable_length', type:'number', label:'Cable Used (meters)', step:'1', placeholder:'0 if none'},
+        {k:'connectors', type:'number', label:'FIC Connectors Used (pcs)', step:'1', placeholder:'0 if none'},
+        {k:'items_used', type:'items_used', label:'Issued Items Used (splitter, pigtail, enclosure…)'},
+        {k:'other_materials', type:'textarea', label:'Other Materials'}
+      ]},
+    { key:'verify', title:'5. Verification',
+      desc:'Confirm the level is back to normal and, where possible, that a downstream subscriber is online again.',
+      fields:[
+        {k:'reading_after', type:'number', label:'Reading at the Main NAP After Repair (dBm)', req:true, step:'0.1'},
+        {k:'verify_photo', type:'photo', label:'Photo of the Reading After Repair', req:true, autogps:true},
+        {k:'downstream_check', type:'text', label:'Downstream Check', placeholder:'e.g. NAP-BRGY1-013 reading -19.2 dBm, subscriber online'}
+      ]},
+    { key:'complete', title:'6. Completion',
+      desc:'Close the job with your report. A customer signature is not required for main NAP work.',
+      fields:[
+        {k:'final_notes', type:'textarea', label:'Completion Notes', req:true},
+        {k:'signature', type:'signature', label:'Signature (optional — if a subscriber witnessed the fix)'}
+      ]}
+  ]
+};
+
+/* The step list a ticket actually runs. */
+function getWorkflow(t){
+  if(!t) return [];
+  if(t.type==='repair') return REPAIR_FLOWS[t.issueFlow] || REPAIR_FLOWS.generic;
+  return WORKFLOWS[t.type] || [];
+}
 
 /* =================== AUTH =================== */
 async function doLogin(){
@@ -750,22 +1160,23 @@ function doLogout(silent){
   TOKEN = null; USER = null; tickets = []; currentId = null;
   localStorage.removeItem('sl_token');
   document.getElementById('hdr').classList.add('hidden');
-  document.getElementById('adminTabs').classList.add('hidden');
+  document.getElementById('bottomNav').classList.add('hidden');
   show('viewLogin');
 }
 async function enterApp(){
   document.getElementById('hdr').classList.remove('hidden');
   document.getElementById('hdrTitle').innerHTML = '<span class="brand-star">Star</span>Line Internet';
   document.getElementById('hdrSub').textContent = (USER.role==='admin'?'Admin':'Technician')+' — '+USER.name;
+  document.getElementById('bottomNav').classList.remove('hidden');
   await loadSettings();
   await refreshTickets();
+  fillIssueSelect();
   if(USER.role==='admin'){
-    document.getElementById('adminTabs').classList.remove('hidden');
     await loadUsers();
     await loadRequests();
-    adminGo('dash');
+    go('dash');
   }else{
-    show('viewTechList'); renderTechList();
+    go('jobs');
   }
 }
 
@@ -814,7 +1225,9 @@ async function refreshTickets(manual){
     if(manual) alert('Cannot reach the server. Showing jobs saved on this phone.');
   }
   if(currentView==='viewTechList') renderTechList();
+  if(currentView==='viewStats') renderTechStats();
   if(currentView==='viewDash') renderDash();
+  if(currentView==='viewTickets') renderTickets();
 }
 async function loadSettings(){
   try{
@@ -828,34 +1241,79 @@ async function loadUsers(){
   try{ users = (await api('/api/users')).users; }catch(e){ users = []; }
   const sel = document.getElementById('nAssign');
   const techs = users.filter(u=>u.role==='tech');
-  sel.innerHTML = techs.length
-    ? techs.map(u=>`<option value="${u.id}">${esc(u.name)} (@${esc(u.username)})</option>`).join('')
-    : '<option value="">— no technicians yet, add one first —</option>';
+  if(sel){
+    const keep = sel.value;
+    sel.innerHTML = techs.length
+      ? techs.map(u=>`<option value="${u.id}">${esc(u.name)} (@${esc(u.username)})</option>`).join('')
+      : '<option value="">— no technicians yet, add one first —</option>';
+    if(keep) sel.value = keep;
+  }
   const dsel = document.getElementById('dTech');
+  if(!dsel) return;
+  const keepTech = dsel.value;
   dsel.innerHTML = '<option value="">All technicians</option>'+techs.map(u=>`<option value="${u.id}">${esc(u.name)}</option>`).join('');
+  if(keepTech) dsel.value = keepTech;
 }
 
 /* =================== NAVIGATION =================== */
-const ALL_VIEWS = ['viewLogin','viewTechList','viewTicket','viewDash','viewNew','viewReport','viewTechs','viewTechReq','viewRequests','viewUsage'];
+const ALL_VIEWS = ['viewLogin','viewTechList','viewStats','viewTicket','viewDash','viewTickets','viewNew','viewReport','viewTechs','viewTechReq','viewMaterials'];
 function show(view){
-  ALL_VIEWS.forEach(v=>document.getElementById(v).classList.add('hidden'));
-  document.getElementById(view).classList.remove('hidden');
+  ALL_VIEWS.forEach(v=>{ const el=document.getElementById(v); if(el) el.classList.add('hidden'); });
+  const el = document.getElementById(view);
+  if(el) el.classList.remove('hidden');
   currentView = view;
-  document.getElementById('backBtn').style.display = (view==='viewTicket'||view==='viewReport'||view==='viewTechReq')?'block':'none';
+  /* a ticket opened from a list is the only place that needs a back arrow —
+     everything else is one tap away on the bottom bar */
+  document.getElementById('backBtn').style.display = (view==='viewTicket'||view==='viewReport')?'block':'none';
   window.scrollTo(0,0);
 }
-function goBack(){
-  if(USER && USER.role==='admin'){ adminGo(adminBack); }
-  else { currentId=null; show('viewTechList'); renderTechList(); }
+
+/* the bottom bar: the whole app is these five (admin) / four (tech) places */
+const NAV = {
+  admin: [
+    {tab:'dash',      ico:'📊', label:'Overview'},
+    {tab:'tickets',   ico:'🎫', label:'Tickets'},
+    {tab:'new',       ico:'➕', label:'New'},
+    {tab:'materials', ico:'📦', label:'Materials'},
+    {tab:'team',      ico:'👷', label:'Team'}
+  ],
+  tech: [
+    {tab:'jobs',      ico:'🧰', label:'My Jobs'},
+    {tab:'new',       ico:'➕', label:'New'},
+    {tab:'materials', ico:'📦', label:'Materials'},
+    {tab:'stats',     ico:'📊', label:'Stats'}
+  ]
+};
+let currentTab = 'dash';
+function renderNav(){
+  if(!USER) return;
+  const items = NAV[USER.role==='admin'?'admin':'tech'];
+  const pending = USER.role==='admin' ? REQUESTS.filter(r=>r.status==='pending').length : 0;
+  document.getElementById('bottomNav').innerHTML = items.map(n=>{
+    const badge = (n.tab==='materials' && pending) ? `<span class="nbadge">${pending}</span>` : '';
+    return `<button class="navbtn ${currentTab===n.tab?'on':''}" onclick="go('${n.tab}')">
+      <span class="ico">${n.ico}</span>${n.label}${badge}</button>`;
+  }).join('');
 }
-function adminGo(tab){
-  ['tabDash','tabNew','tabTechs','tabReq','tabUsage'].forEach(t=>document.getElementById(t).classList.remove('active'));
-  if(tab==='dash'){ document.getElementById('tabDash').classList.add('active'); show('viewDash'); renderDash(); }
-  if(tab==='new'){ document.getElementById('tabNew').classList.add('active'); show('viewNew'); }
-  if(tab==='techs'){ document.getElementById('tabTechs').classList.add('active'); show('viewTechs'); renderUsers(); renderPlans(); }
-  if(tab==='requests'){ document.getElementById('tabReq').classList.add('active'); show('viewRequests'); loadRequests().then(renderRequests); loadWarehouse().then(renderWarehouse); }
-  if(tab==='usage'){ document.getElementById('tabUsage').classList.add('active'); show('viewUsage'); renderUsage(); }
-  if(tab!=='report') adminBack = tab;
+function go(tab){
+  currentTab = tab;
+  if(tab==='dash'){ show('viewDash'); renderDash(); }
+  else if(tab==='tickets'){ show('viewTickets'); renderTickets(); }
+  else if(tab==='jobs'){ show('viewTechList'); renderTechList(); }
+  else if(tab==='stats'){ show('viewStats'); renderTechStats(); }
+  else if(tab==='new'){ show('viewNew'); prepareNewTicket(); }
+  else if(tab==='materials'){
+    if(USER && USER.role==='admin'){ show('viewMaterials'); openMaterials(); }
+    else { show('viewTechReq'); openTechMaterials(); }
+  }
+  else if(tab==='team'){ show('viewTechs'); renderTeam(); }
+  renderNav();
+}
+/* older call sites still say adminGo(...) */
+function adminGo(tab){ go(tab==='requests'?'materials':tab==='techs'?'team':tab==='usage'?'materials':tab); }
+function goBack(){
+  currentId = null;
+  go(USER && USER.role==='admin' ? (currentTab==='dash'?'dash':'tickets') : 'jobs');
 }
 
 /* =================== BADGES / PROGRESS =================== */
@@ -887,20 +1345,19 @@ function renderTypeTabs(containerId, current, setter){
 }
 function setTechType(v){ techType = (techType===v && v!=='') ? '' : v; techTrendDay=null; renderTechList(); }
 let techPeriod = null;
+/* tapping a period tile jumps to the job list already filtered to it */
 function filterCompleted(p){
   techTrendDay = null;
   techPeriod = techPeriod===p ? null : p;  // tap again to clear
-  if(techPeriod) document.getElementById('fStatus').value='completed';
-  else document.getElementById('fStatus').value='active';
-  renderTechList();
+  techStatus = techPeriod ? 'completed' : 'active';
+  go('jobs');
 }
-function setDashType(v){ dashType = (dashType===v && v!=='') ? '' : v; renderDash(); }
+/* from the Overview: pick a type or status, then show that list */
+function setDashType(v){ dashType = (dashType===v && v!=='') ? '' : v; go('tickets'); }
 function setDashStatus(s){
-  const sel = document.getElementById('dStatus');
-  if(!sel) return;
   dashPeriod = null; dashTrendDay = null;
-  sel.value = (sel.value===s) ? '' : s;  // tap again to clear
-  renderDash();
+  dashStatus = (dashStatus===s) ? '' : s;   // tap again to clear
+  go('tickets');
 }
 function stepComplete(t, step){ return step.fields.every(f => !f.req || hasValue(t, f)); }
 function hasValue(t, f){
@@ -908,11 +1365,44 @@ function hasValue(t, f){
   if(v==null || v==='') return false;
   if(f.type==='photo') return !!(v && v.img);
   if(f.type==='gps') return !!(v && v.lat!=null && v.lng!=null);
+  if(f.type==='items_used') return Array.isArray(v) && v.length>0;
   return true;
 }
 function progress(t){
-  const steps = WORKFLOWS[t.type];
+  const steps = getWorkflow(t);
+  if(!steps.length) return 0;
   return Math.round(steps.filter(s=>stepComplete(t,s)).length/steps.length*100);
+}
+/* plain text — callers escape it themselves where it lands in HTML */
+function itemsUsedText(v){
+  if(!Array.isArray(v) || !v.length) return '';
+  return v.map(i=>i.name+' × '+i.qty).join(', ');
+}
+
+/* =================== JOB CLOCK =================== */
+function humanDur(ms){
+  if(!(ms>0)) return 'less than a minute';
+  const mins = Math.floor(ms/60000);
+  if(mins<1) return 'less than a minute';
+  if(mins<60) return mins+(mins===1?' min':' mins');
+  const hrs = Math.floor(mins/60), rm = mins%60;
+  if(hrs<48) return hrs+(hrs===1?' hr':' hrs')+(rm?' '+rm+(rm===1?' min':' mins'):'');
+  const days = Math.floor(hrs/24), rh = hrs%24;
+  return days+(days===1?' day':' days')+(rh?' '+rh+(rh===1?' hr':' hrs'):'');
+}
+/* elapsed working time: finished jobs are fixed, live jobs tick up from the start */
+function jobElapsed(t){
+  if(!t) return null;
+  const start = t.started || (t.status!=='open' ? t.created : null);
+  if(!start) return null;
+  const end = t.status==='completed' ? (t.completed || t.updated || Date.now()) : Date.now();
+  return Math.max(0, end-start);
+}
+function timerChip(t){
+  const ms = jobElapsed(t);
+  if(ms==null) return '<span class="chip chip-idle">⏱ Not started</span>';
+  if(t.status==='completed') return `<span class="chip chip-done">⏱ ${esc(t.durationText || humanDur(t.durationMs!=null?t.durationMs:ms))}</span>`;
+  return `<span class="chip chip-live">⏱ ${esc(humanDur(ms))} running</span>`;
 }
 
 /* =================== SHARED: completed-tickets breakdown & charts =================== */
@@ -974,79 +1464,130 @@ function renderTrendChart(list, title, activeDayTs, clickFn){
     </div>`;
 }
 
-/* =================== TECH: LIST =================== */
+/* =================== TICKET CARD (shared) =================== */
+function ticketCard(t, onclick, opts){
+  opts = opts || {};
+  const pct = progress(t);
+  return `
+    <div class="card ticket-card acc-${t.type}" onclick="${onclick}('${t.id}')">
+      <div class="ticket-top">
+        <span class="tnum">${esc(t.number)}</span>
+        <span>${prioBadge(t)} ${statusBadge(t.status)}</span>
+      </div>
+      <div class="tsub">${esc(t.subject)}</div>
+      <div class="ticket-top" style="margin:6px 0 4px">
+        <span>${typeBadge(t.type)}${t.type==='repair'&&t.issue?` <span class="chip chip-issue">🔧 ${esc(t.issue)}</span>`:''}</span>
+        ${timerChip(t)}
+      </div>
+      <div class="tmeta">👤 ${esc(t.customer||'—')}${opts.showTech?' · 👷 '+esc(t.assignedName||'Unassigned'):''}${t.phone&&!opts.showTech?' · 📞 '+esc(t.phone):''}</div>
+      ${t.address?`<div class="tmeta">📍 ${esc(t.address)}</div>`:''}
+      ${opts.showTech?`<div class="tmeta">Created ${fmt(t.created)}${t.createdByRole==='tech'?' · raised by technician':''}</div>`:''}
+      ${!opts.showTech&&t.message?`<div class="tmeta">💬 ${esc(t.message)}</div>`:''}
+      <div class="progressbar"><div style="width:${pct}%"></div></div>
+      <div class="tmeta" style="margin-top:4px">${pct}% of the workflow done</div>
+    </div>`;
+}
+
+/* =================== TECH: JOBS =================== */
 let techTrendDay = null;
+let techStatus = 'active';
+function setTechStatus(s){ techStatus = s; techPeriod = null; techTrendDay = null; renderTechList(); }
 function gridClickTech(type, period){
   techTrendDay = null;
   if(techType===type && techPeriod===period){ techType=''; techPeriod=null; }
   else { techType=type; techPeriod=period; }
-  document.getElementById('fStatus').value = techPeriod ? 'completed' : 'active';
-  renderTechList();
+  techStatus = techPeriod ? 'completed' : 'active';
+  go('jobs');
 }
 function trendClickTech(ts){
   techPeriod = null;
   techTrendDay = techTrendDay===ts ? null : ts;
-  document.getElementById('fStatus').value = techTrendDay!=null ? 'completed' : 'active';
-  renderTechList();
+  techStatus = techTrendDay!=null ? 'completed' : 'active';
+  go('jobs');
+}
+function techFiltered(){
+  const { dayStart, weekStart, monthStart } = periodStarts();
+  let list = sortTickets(tickets);
+  if(techType) list = list.filter(t=>t.type===techType);
+  if(techTrendDay!=null) list = list.filter(t=>t.status==='completed' && t.completed && t.completed>=techTrendDay && t.completed<techTrendDay+86400000);
+  else if(techPeriod){
+    const startMap = {day:dayStart, week:weekStart, month:monthStart};
+    list = list.filter(t=>t.status==='completed' && t.completed && t.completed>=startMap[techPeriod]);
+  }
+  else if(techStatus==='active') list = list.filter(t=>t.status!=='completed');
+  else if(techStatus) list = list.filter(t=>t.status===techStatus);
+  return list;
 }
 function renderTechList(){
-  /* completed today / this week / this month */
   const { dayStart, weekStart, monthStart } = periodStarts();
   const doneSince = ts => tickets.filter(t=>t.status==='completed' && t.completed && t.completed>=ts).length;
-  const sel = p => techPeriod===p ? 'outline:3px solid #fff;outline-offset:-6px;' : '';
-  document.getElementById('techStats').innerHTML = `
-    <div class="tstat tstat-week" style="cursor:pointer;${sel('week')}" onclick="filterCompleted('week')"><div class="n">${doneSince(weekStart)}</div><div class="l">This Week</div></div>
-    <div class="tstat tstat-today" style="cursor:pointer;${sel('day')}" onclick="filterCompleted('day')"><div class="n">${doneSince(dayStart)}</div><div class="l">✔ Today</div></div>
-    <div class="tstat tstat-month" style="cursor:pointer;${sel('month')}" onclick="filterCompleted('month')"><div class="n">${doneSince(monthStart)}</div><div class="l">This Month</div></div>`;
+  const active = tickets.filter(t=>t.status!=='completed').length;
+  const running = tickets.filter(t=>t.status==='in_progress').length;
+  document.getElementById('techJobsSub').textContent =
+    active ? `${active} open job${active===1?'':'s'}${running?` · ${running} in progress`:''}` : 'Nothing outstanding — nice work';
 
-  document.getElementById('cbdPanelTech').innerHTML = renderCompletedGrid(tickets, techType, techPeriod, 'gridClickTech');
-  document.getElementById('trendPanelTech').innerHTML = renderTrendChart(tickets, '📈 My Completed — Last 7 Days', techTrendDay, 'trendClickTech');
+  const on = p => techPeriod===p ? ' on' : '';
+  document.getElementById('techMiniStats').innerHTML = `
+    <button class="ministat ms-today${on('day')}" onclick="filterCompleted('day')"><div class="n">${doneSince(dayStart)}</div><div class="l">✔ Today</div></button>
+    <button class="ministat ms-week${on('week')}" onclick="filterCompleted('week')"><div class="n">${doneSince(weekStart)}</div><div class="l">This Week</div></button>
+    <button class="ministat ms-month${on('month')}" onclick="filterCompleted('month')"><div class="n">${doneSince(monthStart)}</div><div class="l">This Month</div></button>`;
 
   /* current stock on hand */
   const inv = (USER&&USER.inv)||{connectors:0,cables:[],items:[]};
   const reels = (inv.cables||[]).filter(r=>r.meters>0);
   const lowFic = (inv.connectors||0)<5;
   document.getElementById('techStockPanel').innerHTML = `
-    <div class="ticket-top" style="margin-bottom:4px">
-      <span class="step-title" style="font-size:14px">📦 My Stock on Hand</span>
-      <span class="badge b-install">Tap to request ›</span>
+    <div class="sec-head" style="margin-bottom:5px">
+      <span class="sec-title">📦 My Stock on Hand</span>
+      <span class="badge b-install">Request ›</span>
     </div>
     <div class="tmeta" style="font-size:13px${lowFic?';color:var(--danger);font-weight:700':''}">🔌 FIC Connectors: ${inv.connectors||0} pcs${lowFic?' — running low!':''}</div>
     ${reels.length
       ? reels.map(r=>`<div class="tmeta" style="font-size:13px${r.meters<50?';color:var(--danger);font-weight:700':''}">🧵 ${esc(r.name)}: ${r.meters} m left${r.meters<50?' — running low!':''}</div>`).join('')
-      : '<div class="tmeta" style="font-size:13px;color:var(--danger);font-weight:700">🧵 No fiber cable — request from admin!</div>'}
+      : '<div class="tmeta" style="font-size:13px;color:var(--danger);font-weight:700">🧵 No fiber cable — request from the admin</div>'}
     ${(inv.items||[]).map(i=>`<div class="tmeta" style="font-size:13px">📦 ${esc(i.name)}: ${i.qty} pcs</div>`).join('')}`;
 
+  const counts = {
+    active: tickets.filter(t=>t.status!=='completed').length,
+    open: tickets.filter(t=>t.status==='open').length,
+    in_progress: running,
+    completed: tickets.filter(t=>t.status==='completed').length
+  };
+  const pills = [['active','Active',counts.active],['open','Open',counts.open],['in_progress','In Progress',counts.in_progress],['completed','Completed',counts.completed],['','All',tickets.length]];
+  document.getElementById('techStatusPills').innerHTML = pills.map(([v,l,c])=>
+    `<button class="pill ${techStatus===v&&!techPeriod&&techTrendDay==null?'on':''}" onclick="setTechStatus('${v}')">${l}<span class="cnt">${c}</span></button>`).join('');
+
   renderTypeTabs('techTypeTabs', techType, 'setTechType');
-  const f = document.getElementById('fStatus').value;
-  let list = sortTickets(tickets);
-  if(techType) list = list.filter(t=>t.type===techType);
-  if(techTrendDay!=null){
-    list = list.filter(t=>t.status==='completed' && t.completed && t.completed>=techTrendDay && t.completed<techTrendDay+86400000);
-  }
-  else if(techPeriod){
-    const startMap = {day:dayStart, week:weekStart, month:monthStart};
-    list = list.filter(t=>t.status==='completed' && t.completed && t.completed>=startMap[techPeriod]);
-  }
-  else if(f==='active') list = list.filter(t=>t.status!=='completed');
-  else if(f) list = list.filter(t=>t.status===f);
+  const list = techFiltered();
   const el = document.getElementById('techList');
   if(!list.length){
-    el.innerHTML = '<div class="empty"><div class="big">🎉</div>No jobs here. New tickets assigned to you will appear automatically.</div>';
+    el.innerHTML = '<div class="empty"><div class="big">🎉</div>No jobs here. Anything assigned to you shows up automatically.</div>';
     return;
   }
-  el.innerHTML = list.map(t=>`
-    <div class="card ticket-card acc-${t.type}" onclick="openTicket('${t.id}')">
-      <div class="ticket-top">
-        <span class="tnum">${esc(t.number)}</span>
-        <span>${prioBadge(t)} ${typeBadge(t.type)} ${statusBadge(t.status)}</span>
-      </div>
-      <div class="tsub">${esc(t.subject)}</div>
-      <div class="tmeta">👤 ${esc(t.customer||'—')} ${t.phone?'· 📞 '+esc(t.phone):''}</div>
-      <div class="tmeta">📍 ${esc(t.address||'—')}</div>
-      ${t.message?`<div class="tmeta">💬 ${esc(t.message)}</div>`:''}
-      <div class="progressbar"><div style="width:${progress(t)}%"></div></div>
-    </div>`).join('');
+  el.innerHTML = list.map(t=>ticketCard(t,'openTicket')).join('');
+}
+
+/* =================== TECH: STATS =================== */
+function renderTechStats(){
+  const { dayStart, weekStart, monthStart } = periodStarts();
+  const doneSince = ts => tickets.filter(t=>t.status==='completed' && t.completed && t.completed>=ts).length;
+  const done = tickets.filter(t=>t.status==='completed' && t.completed);
+  const withDur = done.filter(t=>t.durationMs!=null || t.started);
+  let avgTxt = '—';
+  if(withDur.length){
+    const avg = withDur.reduce((s,t)=>s+(t.durationMs!=null?t.durationMs:Math.max(0,t.completed-(t.started||t.created))),0)/withDur.length;
+    avgTxt = humanDur(avg);
+  }
+  document.getElementById('techKpiRow').innerHTML = `
+    <div class="kpi"><div class="n">${avgTxt}</div><div class="l">Avg. Time per Job</div></div>
+    <div class="kpi"><div class="n">${done.length}</div><div class="l">Jobs Completed</div></div>`;
+  const sel = p => techPeriod===p ? 'outline:3px solid #fff;outline-offset:-6px;' : '';
+  document.getElementById('techStats').innerHTML = `
+    <div class="tstat tstat-week" style="cursor:pointer;${sel('week')}" onclick="filterCompleted('week')"><div class="n">${doneSince(weekStart)}</div><div class="l">This Week</div></div>
+    <div class="tstat tstat-today" style="cursor:pointer;${sel('day')}" onclick="filterCompleted('day')"><div class="n">${doneSince(dayStart)}</div><div class="l">✔ Today</div></div>
+    <div class="tstat tstat-month" style="cursor:pointer;${sel('month')}" onclick="filterCompleted('month')"><div class="n">${doneSince(monthStart)}</div><div class="l">This Month</div></div>`;
+  document.getElementById('cbdPanelTech').innerHTML = renderCompletedGrid(tickets, techType, techPeriod, 'gridClickTech');
+  document.getElementById('trendPanelTech').innerHTML = renderTrendChart(tickets, '📈 My Completed — Last 7 Days', techTrendDay, 'trendClickTech');
 }
 
 /* =================== TECH: WIZARD =================== */
@@ -1060,7 +1601,7 @@ async function openTicket(id){
 function renderTicket(){
   const t = byId(currentId);
   if(!t){ goBack(); return; }
-  const steps = WORKFLOWS[t.type];
+  const steps = getWorkflow(t);
   const pct = progress(t);
   document.getElementById('ticketHead').innerHTML = `
     <div class="ticket-top">
@@ -1108,7 +1649,7 @@ function gotoStep(i){ const t=byId(currentId); collectStep(); t.step=i; persist(
 function nextStep(){
   const t = byId(currentId);
   collectStep();
-  const s = WORKFLOWS[t.type][t.step];
+  const s = getWorkflow(t)[t.step];
   const missing = s.fields.filter(f=>f.req && !hasValue(t,f)).map(f=>f.label);
   if(missing.length){ alert('Required before continuing:\n• '+missing.join('\n• ')); persist(t); renderTicket(); return; }
   if(s.key==='materials' && t.type==='installation'){
@@ -1124,13 +1665,25 @@ function nextStep(){
 function collectStep(){
   const t = byId(currentId);
   if(!t || t.status==='completed') return;
-  const s = WORKFLOWS[t.type][t.step];
+  const s = getWorkflow(t)[t.step];
   if(!s) return;
   s.fields.forEach(f=>{
     if(f.type==='photo'||f.type==='signature') return;
     if(f.type==='gps'){
       const lat=document.getElementById('f_'+f.k+'_lat'), lng=document.getElementById('f_'+f.k+'_lng');
       if(lat&&lng&&lat.value&&lng.value) t.data[f.k]={lat:parseFloat(lat.value),lng:parseFloat(lng.value)};
+      return;
+    }
+    if(f.type==='items_used'){
+      const rows = document.querySelectorAll('#items_'+f.k+' .item-qty');
+      const arr = [];
+      rows.forEach(r=>{
+        const have = parseInt(r.dataset.have)||0;
+        let q = parseInt(r.value)||0;
+        if(q > have){ q = have; r.value = have; }   // never book out more than was issued
+        if(q > 0) arr.push({name:r.dataset.item, qty:q});
+      });
+      if(rows.length) t.data[f.k] = arr;
       return;
     }
     const el = document.getElementById('f_'+f.k);
@@ -1146,7 +1699,7 @@ function collectStep(){
 function finishTicket(){
   const t = byId(currentId);
   collectStep();
-  const steps = WORKFLOWS[t.type];
+  const steps = getWorkflow(t);
   const missing = [];
   steps.forEach(s=>s.fields.forEach(f=>{ if(f.req&&!hasValue(t,f)) missing.push(s.title.replace(/&amp;/g,'&')+': '+f.label); }));
   if(missing.length){ alert('Still missing:\n• '+missing.join('\n• ')); renderTicket(); return; }
@@ -1175,6 +1728,30 @@ function renderField(t,f){
       </div>
       <button class="btn btn-ghost btn-sm" onclick="getGPS('${f.k}')">📍 Use My GPS Location</button>
       <div class="gps-out hidden" id="f_${f.k}_out"></div>`;
+  }
+  if(f.type==='items_used'){
+    /* only the items the office actually issued to this technician can be booked out */
+    const stock = ((USER&&USER.inv&&USER.inv.items)||[]).filter(i=>i.qty>0);
+    const cur = Array.isArray(v) ? v : [];
+    /* keep anything already recorded even if the stock has since gone to zero */
+    const extra = cur.filter(c=>!stock.some(s=>s.name===c.name)).map(c=>({name:c.name, qty:0}));
+    const rows = stock.concat(extra);
+    if(!rows.length){
+      return `<label>${f.label}${reqMark}</label>
+        <div class="gps-out" style="background:#f8fafc;border-color:var(--border);color:var(--muted)">No issued items in your stock yet. Request them under 📦 Materials — anything released to you appears here to book out.</div>`;
+    }
+    return `<label>${f.label}${reqMark}</label>
+      <div class="items-used" id="items_${f.k}">
+        ${rows.map(i=>{
+          const used = (cur.find(x=>x.name===i.name)||{}).qty || '';
+          return `<div class="item-row">
+            <div class="item-name">📦 ${esc(i.name)}<span class="item-have">${i.qty} on hand</span></div>
+            <input class="item-qty" type="number" inputmode="numeric" min="0" step="1" max="${i.qty}"
+                   data-item="${esc(i.name)}" data-have="${i.qty}" value="${used}" placeholder="0">
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="tmeta" style="margin-top:6px">Leave blank for anything you did not use. These are deducted from your stock when the job is completed.</div>`;
   }
   if(f.type==='signature'){
     const inner = v
@@ -1422,10 +1999,7 @@ function sigSubmit(){
 /* =================== MATERIAL REQUESTS =================== */
 async function loadRequests(){
   try{ REQUESTS = (await api('/api/requests')).requests || []; }catch(e){ REQUESTS = []; }
-  if(USER && USER.role==='admin'){
-    const n = REQUESTS.filter(r=>r.status==='pending').length;
-    document.getElementById('tabReq').textContent = '📦 Requests'+(n?` (${n})`:'');
-  }
+  renderNav();   // the Materials tab carries the pending-request count
 }
 function reqBadge(s){
   const map = {pending:['b-progress','Pending'], approved:['b-install','Approved'], released:['b-done','Released'], rejected:['b-rej','Rejected'], cancelled:['b-cancel','Cancelled']};
@@ -1535,14 +2109,7 @@ async function whRemove(id){
   catch(e){ alert(e.message); }
 }
 /* ---- tech side ---- */
-async function showTechReq(){
-  await loadRequests();
-  await loadWarehouse();
-  try{ USER = (await api('/api/me')).user; }catch(e){}
-  document.getElementById('rqItem').innerHTML = rqOptions();
-  renderTechReq();
-  show('viewTechReq');
-}
+function showTechReq(){ go('materials'); }   // kept: older call sites
 function renderTechReq(){
   const inv = (USER&&USER.inv)||{connectors:0,cables:[]};
   const reels = inv.cables||[];
@@ -1611,35 +2178,45 @@ async function reqAction(id, action){
   if(action==='reject' && !confirm('Reject this request?')) return;
   try{
     await api('/api/requests/'+id,'PUT',{action});
-    await loadRequests(); renderRequests();
-    if(action==='release'){ await loadUsers(); await loadWarehouse(); renderWarehouse(); }
+    await loadRequests();
+    if(action==='release'){ await loadUsers(); await loadWarehouse(); await loadStockLog(); }
+    renderMaterials();
   }catch(e){ alert(e.message); }
 }
 
 /* =================== ADMIN: DASHBOARD =================== */
+/* Overview charts are the filters for the Tickets tab: tapping one sets the
+   filter and takes you straight to the matching list. */
+let dashStatus = '';
 function gridClickAdmin(type, period){
   dashTrendDay = null;
   if(dashType===type && dashPeriod===period){ dashType=''; dashPeriod=null; }
   else { dashType=type; dashPeriod=period; }
-  document.getElementById('dStatus').value = dashPeriod ? 'completed' : '';
-  renderDash();
+  dashStatus = dashPeriod ? 'completed' : '';
+  go('tickets');
 }
 function trendClickAdmin(ts){
   dashPeriod = null;
   dashTrendDay = dashTrendDay===ts ? null : ts;
-  document.getElementById('dStatus').value = dashTrendDay!=null ? 'completed' : '';
-  renderDash();
+  dashStatus = dashTrendDay!=null ? 'completed' : '';
+  go('tickets');
 }
 function onTechBarClick(id){
   const sel = document.getElementById('dTech');
-  sel.value = sel.value===id ? '' : id;
-  renderDash();
+  if(sel) sel.value = sel.value===id ? '' : id;
+  go('tickets');
 }
 function onPrioBarClick(p){
   dashPriority = dashPriority===p ? '' : p;
-  renderDash();
+  go('tickets');
 }
 function dashTodayClick(){ gridClickAdmin('', 'day'); }
+function clearDashFilters(){
+  dashType=''; dashPeriod=null; dashTrendDay=null; dashPriority=''; dashStatus='';
+  const s=document.getElementById('dSearch'); if(s) s.value='';
+  const tsel=document.getElementById('dTech'); if(tsel) tsel.value='';
+  renderTickets();
+}
 
 function renderDash(){
   const { dayStart, weekStart, monthStart } = periodStarts();
@@ -1651,12 +2228,33 @@ function renderDash(){
   const rep = tickets.filter(t=>t.type==='repair');
   const nap = tickets.filter(t=>t.type==='nap_install');
 
-  const curDashStatus = (document.getElementById('dStatus')||{}).value || '';
-  const dsSel = s => (curDashStatus===s && !dashPeriod) ? 'outline:3px solid var(--primary);outline-offset:-4px;' : '';
+  const running = tickets.filter(t=>t.status==='in_progress');
+  document.getElementById('dashSub').textContent =
+    `${open+prog} job${open+prog===1?'':'s'} outstanding · ${doneToday} finished today`;
+  const dsSel = s => (dashStatus===s && !dashPeriod) ? 'outline:3px solid var(--primary);outline-offset:-4px;' : '';
   document.getElementById('statCards').innerHTML = `
     <div class="stat s-open" style="cursor:pointer;${dsSel('open')}" onclick="setDashStatus('open')"><div class="n">${open}</div><div class="l">Open</div></div>
     <div class="stat s-prog" style="cursor:pointer;${dsSel('in_progress')}" onclick="setDashStatus('in_progress')"><div class="n">${prog}</div><div class="l">In Progress</div></div>
     <div class="stat s-done" style="cursor:pointer;${dsSel('completed')}" onclick="setDashStatus('completed')"><div class="n">${done}</div><div class="l">Completed</div></div>`;
+
+  /* things worth chasing today, so the office does not have to hunt for them */
+  const stale = running.filter(t=>jobElapsed(t) > 24*3600000);
+  const unassigned = tickets.filter(t=>!t.assignedTo && t.status!=='completed');
+  const urgent = tickets.filter(t=>(t.priority||3)===1 && t.status!=='completed');
+  const lowStock = users.filter(u=>u.role==='tech' && (((u.inv||{}).connectors||0)<5 || !((u.inv||{}).cables||[]).some(r=>r.meters>50)));
+  const pendingReq = REQUESTS.filter(r=>r.status==='pending').length;
+  const alerts = [];
+  if(urgent.length) alerts.push([`⚡ ${urgent.length} urgent job${urgent.length===1?'':'s'} still open`, `dashPriority=1;go('tickets')`]);
+  if(stale.length) alerts.push([`🕒 ${stale.length} job${stale.length===1?' has':'s have'} been running over 24 hours`, `dashStatus='in_progress';go('tickets')`]);
+  if(unassigned.length) alerts.push([`👤 ${unassigned.length} unassigned job${unassigned.length===1?'':'s'}`, `dashStatus='';go('tickets')`]);
+  if(pendingReq) alerts.push([`📦 ${pendingReq} material request${pendingReq===1?'':'s'} waiting`, `go('materials')`]);
+  if(lowStock.length) alerts.push([`🧵 ${lowStock.length} technician${lowStock.length===1?'':'s'} low on stock`, `go('materials')`]);
+  const alertEl = document.getElementById('alertPanel');
+  alertEl.classList.toggle('hidden', !alerts.length);
+  if(alerts.length){
+    alertEl.innerHTML = `<div class="sec-head"><div class="sec-title">Needs attention</div></div>
+      ${alerts.map(([txt,act])=>`<div class="alert-row" style="cursor:pointer" onclick="${act}">${txt}<span style="margin-left:auto">›</span></div>`).join('')}`;
+  }
 
   const typeSel = t => dashType===t ? 'outline:3px solid var(--primary);outline-offset:-4px;' : '';
   const todaySel = (dashType==='' && dashPeriod==='day') ? 'outline:3px solid var(--primary);outline-offset:-4px;' : '';
@@ -1667,16 +2265,15 @@ function renderDash(){
     <div class="stat stat-today" style="cursor:pointer;${todaySel}" onclick="dashTodayClick()"><div class="l">Completed today</div><div class="n" style="color:#15803d">${doneToday}</div></div>`;
   renderTypeTabs('dashTypeTabs', dashType, 'setDashType');
 
-  /* KPIs */
+  /* KPIs — average is over actual working time, not queue time */
   const completedList = tickets.filter(t=>t.status==='completed' && t.completed);
   let avgTxt = '—';
   if(completedList.length){
-    const avgMs = completedList.reduce((s,t)=>s+(t.completed-t.created),0)/completedList.length;
-    const hrs = avgMs/3600000;
-    avgTxt = hrs<48 ? hrs.toFixed(1)+' hrs' : (hrs/24).toFixed(1)+' days';
+    const avgMs = completedList.reduce((s,t)=>s+(t.durationMs!=null?t.durationMs:Math.max(0,t.completed-(t.started||t.created))),0)/completedList.length;
+    avgTxt = humanDur(avgMs);
   }
   document.getElementById('kpiRow').innerHTML = `
-    <div class="kpi"><div class="n">${avgTxt}</div><div class="l">Avg. Completion Time</div></div>
+    <div class="kpi"><div class="n">${avgTxt}</div><div class="l">Avg. Time per Job</div></div>
     <div class="kpi"><div class="n">${completedSince(tickets,'',monthStart)}</div><div class="l">Completed This Month</div></div>`;
 
   document.getElementById('cbdPanelAdmin').innerHTML = renderCompletedGrid(tickets, dashType, dashPeriod, 'gridClickAdmin');
@@ -1711,10 +2308,71 @@ function renderDash(){
         <div class="hbar-value">${prioCounts[i]}</div>
       </div>`).join('')}`;
 
-  document.getElementById('invPanel').innerHTML = `
-    <div class="step-title" style="font-size:15px">Technician Inventory (remaining stock)</div>
+}
+
+/* =================== ADMIN: TICKETS =================== */
+function setDashStatusPill(s){ dashStatus = s; dashPeriod = null; dashTrendDay = null; renderTickets(); }
+function renderTickets(){
+  const { dayStart, weekStart, monthStart } = periodStarts();
+  renderTypeTabs('dashTypeTabs', dashType, 'setDashTypeList');
+
+  const counts = {
+    '': tickets.length,
+    open: tickets.filter(t=>t.status==='open').length,
+    in_progress: tickets.filter(t=>t.status==='in_progress').length,
+    completed: tickets.filter(t=>t.status==='completed').length
+  };
+  const pills = [['','All',counts['']],['open','Open',counts.open],['in_progress','In Progress',counts.in_progress],['completed','Completed',counts.completed]];
+  document.getElementById('dashStatusPills').innerHTML = pills.map(([v,l,c])=>
+    `<button class="pill ${dashStatus===v&&!dashPeriod&&dashTrendDay==null?'on':''}" onclick="setDashStatusPill('${v}')">${l}<span class="cnt">${c}</span></button>`).join('');
+
+  const fs = dashPeriod ? 'completed' : dashStatus;
+  const fu = (document.getElementById('dTech')||{}).value || '';
+  const q = ((document.getElementById('dSearch')||{}).value || '').trim().toLowerCase();
+  let list = tickets.filter(t=>(!dashType||t.type===dashType)&&(!fs||t.status===fs)&&(!fu||t.assignedTo===fu)&&(!dashPriority||(t.priority||3)===dashPriority));
+  if(dashTrendDay!=null){
+    list = list.filter(t=>t.status==='completed' && t.completed && t.completed>=dashTrendDay && t.completed<dashTrendDay+86400000);
+  } else if(dashPeriod){
+    const startMap = {day:dayStart, week:weekStart, month:monthStart};
+    list = list.filter(t=>t.completed && t.completed>=startMap[dashPeriod]);
+  }
+  if(q){
+    list = list.filter(t=>[t.number,t.customer,t.assignedName,t.address,t.subject,t.issue].some(v=>String(v||'').toLowerCase().includes(q)));
+  }
+  const sort = (document.getElementById('dSort')||{}).value || 'priority';
+  if(sort==='newest') list = list.slice().sort((a,b)=>b.created-a.created);
+  else if(sort==='oldest') list = list.slice().sort((a,b)=>a.created-b.created);
+  else if(sort==='longest') list = list.slice().sort((a,b)=>(jobElapsed(b)||0)-(jobElapsed(a)||0));
+  else list = sortTickets(list);
+
+  /* say out loud which filters are on, so a stray tap on a chart is never a mystery */
+  const active = [];
+  if(dashType) active.push(typeName(dashType));
+  if(dashPeriod) active.push({day:'completed today',week:'completed this week',month:'completed this month'}[dashPeriod]);
+  if(dashTrendDay!=null) active.push('completed '+new Date(dashTrendDay).toLocaleDateString());
+  if(dashPriority) active.push('priority '+dashPriority);
+  if(fu){ const u=users.find(x=>x.id===fu); if(u) active.push(u.name); }
+  if(q) active.push('“'+q+'”');
+  const note = document.getElementById('dFilterNote');
+  note.classList.toggle('hidden', !active.length);
+  if(active.length) note.innerHTML = `<span>Filtered: ${esc(active.join(' · '))}</span><button onclick="clearDashFilters()">Clear</button>`;
+  document.getElementById('ticketsSub').textContent = `${list.length} of ${tickets.length} ticket${tickets.length===1?'':'s'}`;
+
+  const el = document.getElementById('dashList');
+  if(!list.length){ el.innerHTML='<div class="empty"><div class="big">📋</div>No tickets match these filters.</div>'; return; }
+  el.innerHTML = list.map(t=>ticketCard(t,'openReport',{showTech:true})).join('');
+}
+function setDashTypeList(v){ dashType = (dashType===v && v!=='') ? '' : v; renderTickets(); }
+
+/* technician stock table, shown under Materials → Stock */
+function renderInvPanel(){
+  const techsInv = users.filter(u=>u.role==='tech');
+  const el = document.getElementById('invPanel');
+  if(!el) return;
+  el.innerHTML = `
+    <div class="sec-head"><div class="sec-title">Technician stock on hand</div></div>
     ${techsInv.length ? `<table class="summary-table">
-      <tr><td style="width:32%">Technician</td><td><b>Fiber Cable</b></td><td><b>FIC Connectors</b></td></tr>
+      <tr><td style="width:32%">Technician</td><td><b>Fiber Cable</b></td><td><b>Connectors / Items</b></td></tr>
       ${techsInv.map(u=>{
         const inv=u.inv||{connectors:0,cables:[]};
         const reels=(inv.cables||[]).filter(r=>r.meters!==0);
@@ -1726,36 +2384,11 @@ function renderDash(){
           : '<span style="color:var(--danger);font-weight:700">none</span>';
         const lowK = (inv.connectors||0)<5?' style="color:var(--danger);font-weight:700"':'';
         const itemsHtml = (inv.items||[]).map(i=>`<div>📦 ${esc(i.name)}: ${i.qty}</div>`).join('');
-        return `<tr><td>${esc(u.name)}</td><td>${cableHtml}</td><td${lowK}>${inv.connectors||0} pcs${itemsHtml?'<div style="margin-top:4px">'+itemsHtml+'</div>':''}</td></tr>`;
+        return `<tr><td>${esc(u.name)}</td><td>${cableHtml}</td><td${lowK}>${inv.connectors||0} pcs FIC${itemsHtml?'<div style="margin-top:4px">'+itemsHtml+'</div>':''}</td></tr>`;
       }).join('')}
     </table>
-    <div class="tmeta" style="margin-top:6px">Stock is added by releasing technician requests (📦 Requests tab) or directly in the Technicians tab. Materials are deducted automatically when a job is completed. Red = running low.</div>`
+    <div class="tmeta" style="margin-top:6px">Stock arrives here by releasing a request, or directly from the Team tab. It is deducted automatically when a job is completed. Red = running low.</div>`
     : '<div class="tmeta">No technicians yet.</div>'}`;
-
-  const fs = dashPeriod ? 'completed' : document.getElementById('dStatus').value;
-  const fu = document.getElementById('dTech').value;
-  let list = tickets.filter(t=>(!dashType||t.type===dashType)&&(!fs||t.status===fs)&&(!fu||t.assignedTo===fu)&&(!dashPriority||(t.priority||3)===dashPriority));
-  if(dashTrendDay!=null){
-    list = list.filter(t=>t.status==='completed' && t.completed && t.completed>=dashTrendDay && t.completed<dashTrendDay+86400000);
-  } else if(dashPeriod){
-    const startMap = {day:dayStart, week:weekStart, month:monthStart};
-    list = list.filter(t=>t.completed && t.completed>=startMap[dashPeriod]);
-  }
-  list = sortTickets(list);
-  const el = document.getElementById('dashList');
-  if(!list.length){ el.innerHTML='<div class="empty"><div class="big">📋</div>No tickets match. Create one in the New Ticket tab.</div>'; return; }
-  el.innerHTML = list.map(t=>`
-    <div class="card ticket-card acc-${t.type}" onclick="openReport('${t.id}')">
-      <div class="ticket-top">
-        <span class="tnum">${esc(t.number)}</span>
-        <span>${prioBadge(t)} ${typeBadge(t.type)} ${statusBadge(t.status)}</span>
-      </div>
-      <div class="tsub">${esc(t.subject)}</div>
-      <div class="tmeta">👤 ${esc(t.customer)} · 👷 ${esc(t.assignedName||'Unassigned')}</div>
-      <div class="tmeta">Created ${fmt(t.created)}${t.completed?' · Finished '+fmt(t.completed):''}</div>
-      <div class="progressbar"><div style="width:${progress(t)}%"></div></div>
-      <div class="tmeta" style="margin-top:4px">${progress(t)}% of workflow done</div>
-    </div>`).join('');
 }
 
 /* =================== ADMIN: MATERIAL USAGE (separate tab) =================== */
@@ -1793,17 +2426,194 @@ function renderUsage(){
     </table>` : '<div class="tmeta">No completed jobs with materials yet.</div>'}`;
 }
 
-/* =================== ADMIN: NEW TICKET =================== */
+/* =================== MATERIALS: released vs used =================== */
+let STOCKLOG = [];
+async function loadStockLog(){
+  try{ STOCKLOG = (await api('/api/stocklog')).stockLog || []; }catch(e){ STOCKLOG = []; }
+}
+/* Everything a completed job consumed, flattened into one row per material.
+   Cable is measured in metres, everything else in pieces. */
+function usageEvents(list){
+  const out = [];
+  list.filter(t=>t.invApplied || t.status==='completed').forEach(t=>{
+    const when = t.completed || t.updated || t.created;
+    const d = t.data||{};
+    const meters = parseFloat(d.cable_used);
+    if(meters>0) out.push({ts:when, ticket:t, kind:'cable', name:d.cable_reel_name||'Fiber cable', qty:meters, unit:'m'});
+    const conn = parseInt(d.connectors)||0;
+    if(conn>0) out.push({ts:when, ticket:t, kind:'connector', name:'FIC Connector', qty:conn, unit:'pcs'});
+    (Array.isArray(d.items_used)?d.items_used:[]).forEach(i=>{
+      const q = parseInt(i.qty)||0;
+      if(q>0) out.push({ts:when, ticket:t, kind:'item', name:i.name, qty:q, unit:'pcs'});
+    });
+  });
+  return out.sort((a,b)=>(b.ts||0)-(a.ts||0));
+}
+/* Released (from the ledger) against used (from completed jobs), per material. */
+function usageRecon(list, log){
+  const rows = {};
+  const key = (kind,name)=>kind+'|'+String(name||'').toLowerCase();
+  const touch = (kind,name)=>{
+    const k = key(kind,name);
+    if(!rows[k]) rows[k] = {kind, name:name||'', released:0, used:0, unit:kind==='cable'?'m':'pcs', lastUsed:null};
+    return rows[k];
+  };
+  log.forEach(s=>{
+    const r = touch(s.kind, s.name);
+    r.released += s.kind==='cable' ? (parseFloat(s.meters)||0) : (parseFloat(s.qty)||0);
+  });
+  usageEvents(list).forEach(e=>{
+    const r = touch(e.kind, e.kind==='cable' ? e.name : e.name);
+    r.used += e.qty;
+    if(!r.lastUsed || e.ts>r.lastUsed) r.lastUsed = e.ts;
+  });
+  return Object.values(rows).sort((a,b)=>b.used-a.used || a.name.localeCompare(b.name));
+}
+function reconTable(list, log){
+  const rows = usageRecon(list, log);
+  if(!rows.length) return '<div class="tmeta">Nothing has been released or used yet.</div>';
+  const icon = k => k==='cable'?'🧵':k==='connector'?'🔌':'📦';
+  return `<table class="summary-table">
+    <tr><td style="width:34%">Item</td><td>Released</td><td>Used</td><td>Last used</td></tr>
+    ${rows.map(r=>{
+      const left = Math.round((r.released-r.used)*100)/100;
+      return `<tr>
+        <td>${icon(r.kind)} ${esc(r.name||'—')}</td>
+        <td>${Math.round(r.released*100)/100} ${r.unit}</td>
+        <td><b>${Math.round(r.used*100)/100} ${r.unit}</b></td>
+        <td>${r.lastUsed?esc(new Date(r.lastUsed).toLocaleDateString()):'—'}<div class="tmeta">${r.released?left+' '+r.unit+' unused':''}</div></td>
+      </tr>`;
+    }).join('')}
+  </table>
+  <div class="tmeta" style="margin-top:6px">"Released" counts everything issued from the warehouse. "Used" counts what completed jobs consumed.</div>`;
+}
+function usageLogTable(list, opts){
+  opts = opts || {};
+  const ev = usageEvents(list).slice(0,120);
+  if(!ev.length) return '<div class="tmeta">No completed jobs have consumed materials yet.</div>';
+  const icon = k => k==='cable'?'🧵':k==='connector'?'🔌':'📦';
+  return `<table class="summary-table">
+    <tr><td style="width:24%">Used on</td><td>Item</td><td>Qty</td><td>Ticket</td>${opts.showTech?'<td>Technician</td>':''}</tr>
+    ${ev.map(e=>`<tr>
+      <td>${esc(new Date(e.ts).toLocaleDateString())}<div class="tmeta">${esc(new Date(e.ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}))}</div></td>
+      <td>${icon(e.kind)} ${esc(e.name)}</td>
+      <td><b>${Math.round(e.qty*100)/100} ${e.unit}</b></td>
+      <td style="color:var(--primary);font-weight:700;cursor:pointer" onclick="${opts.showTech?'openReport':'openTicket'}('${e.ticket.id}')">${esc(e.ticket.number)}</td>
+      ${opts.showTech?`<td>${esc(e.ticket.assignedName||'—')}</td>`:''}
+    </tr>`).join('')}
+  </table>`;
+}
+
+/* ---- admin Materials page ---- */
+let matTab = 'requests';
+function setMatTab(tab){ matTab = tab; renderMaterials(); }
+async function openMaterials(){
+  await Promise.all([loadRequests(), loadWarehouse(), loadStockLog()]);
+  await loadUsers();
+  renderMaterials();
+  renderNav();
+}
+function renderMaterials(){
+  const pending = REQUESTS.filter(r=>r.status==='pending').length;
+  document.getElementById('matSeg').innerHTML = [
+    ['requests','Requests'+(pending?` (${pending})`:'')],
+    ['usage','Usage'],
+    ['stock','Stock']
+  ].map(([v,l])=>`<button class="${matTab===v?'on':''}" onclick="setMatTab('${v}')">${l}</button>`).join('');
+  document.getElementById('matRequests').classList.toggle('hidden', matTab!=='requests');
+  document.getElementById('matUsage').classList.toggle('hidden', matTab!=='usage');
+  document.getElementById('matStock').classList.toggle('hidden', matTab!=='stock');
+  if(matTab==='requests') renderRequests();
+  if(matTab==='usage'){
+    document.getElementById('usageRecon').innerHTML = reconTable(tickets, STOCKLOG);
+    renderUsage();
+    const log = STOCKLOG.slice().sort((a,b)=>b.ts-a.ts).slice(0,80);
+    document.getElementById('releaseLog').innerHTML = log.length ? `<table class="summary-table">
+      <tr><td style="width:24%">Released</td><td>Item</td><td>Qty</td><td>To</td></tr>
+      ${log.map(s=>`<tr>
+        <td>${esc(new Date(s.ts).toLocaleDateString())}<div class="tmeta">${s.source==='request'?'via request':'issued directly'}</div></td>
+        <td>${s.kind==='cable'?'🧵':s.kind==='connector'?'🔌':'📦'} ${esc(s.name)}</td>
+        <td><b>${s.kind==='cable'?(s.meters||0)+' m':(s.qty+' pcs')}</b></td>
+        <td>${esc(s.techName||'—')}</td>
+      </tr>`).join('')}
+    </table>` : '<div class="tmeta">Nothing has been released yet. Releasing a request records it here.</div>';
+  }
+  if(matTab==='stock'){ renderWarehouse(); renderInvPanel(); }
+}
+
+/* ---- technician Materials page ---- */
+let techMatTab = 'stock';
+function setTechMatTab(tab){ techMatTab = tab; renderTechMaterials(); }
+async function openTechMaterials(){
+  await loadRequests();
+  await loadWarehouse();
+  await loadStockLog();
+  try{ USER = (await api('/api/me')).user; }catch(e){}
+  document.getElementById('rqItem').innerHTML = rqOptions();
+  renderTechMaterials();
+}
+function renderTechMaterials(){
+  document.getElementById('techMatSeg').innerHTML = [
+    ['stock','My Stock & Requests'],
+    ['usage','What I Have Used']
+  ].map(([v,l])=>`<button class="${techMatTab===v?'on':''}" onclick="setTechMatTab('${v}')">${l}</button>`).join('');
+  document.getElementById('techMatStock').classList.toggle('hidden', techMatTab!=='stock');
+  document.getElementById('techMatUsage').classList.toggle('hidden', techMatTab!=='usage');
+  if(techMatTab==='stock') renderTechReq();
+  else{
+    document.getElementById('techUsageRecon').innerHTML = reconTable(tickets, STOCKLOG);
+    document.getElementById('techUsageLog').innerHTML = usageLogTable(tickets, {showTech:false});
+  }
+}
+
+/* =================== NEW TICKET =================== */
+function fillIssueSelect(){
+  const sel = document.getElementById('nIssue');
+  if(!sel) return;
+  const issues = SETTINGS.repairIssues || [];
+  sel.innerHTML = issues.length
+    ? issues.map(i=>`<option value="${esc(i.id)}">${esc(i.label)}</option>`).join('')
+    : '<option value="">— no issue types configured —</option>';
+  onNewTypeChange();
+}
+function onNewTypeChange(){
+  const type = (document.getElementById('nType')||{}).value;
+  const wrap = document.getElementById('nIssueWrap');
+  if(!wrap) return;
+  wrap.classList.toggle('hidden', type!=='repair');
+  const hint = document.getElementById('nIssueHint');
+  const sel = document.getElementById('nIssue');
+  if(type==='repair' && hint && sel){
+    const issue = (SETTINGS.repairIssues||[]).find(i=>i.id===sel.value);
+    const names = {modem:'modem check → repair or replace → speed test',connector:'locate → re-terminate → verify',nap_reading:'NAP inspection → correct → re-read both ends',fiber_cut:'locate cut → re-run cable with meter photos → verify',main_nap:'main NAP inspection → corrective action → verify',generic:'diagnose → repair → verify → close'};
+    hint.textContent = issue ? 'Technician steps: '+(names[issue.flow]||names.generic) : '';
+  }
+}
+function prepareNewTicket(){
+  const isAdmin = USER && USER.role==='admin';
+  document.getElementById('nAssignWrap').classList.toggle('hidden', !isAdmin);
+  document.getElementById('newSub').textContent = isAdmin
+    ? 'The technician sees this job on their phone right away'
+    : 'This job is added to your own list';
+  fillIssueSelect();
+  const sel = document.getElementById('nIssue');
+  if(sel && !sel._wired){ sel.addEventListener('change', onNewTypeChange); sel._wired = true; }
+}
 async function createTicket(){
+  const isAdmin = USER && USER.role==='admin';
   const subject = document.getElementById('nSubject').value.trim();
   const customer = document.getElementById('nCustomer').value.trim();
-  const assignedTo = document.getElementById('nAssign').value;
-  if(!subject || !customer){ alert('Subject and Customer Name are required.'); return; }
-  if(!assignedTo){ alert('Add a technician first (Technicians tab), then assign the job.'); return; }
+  const assignedTo = isAdmin ? document.getElementById('nAssign').value : (USER?USER.id:'');
+  const type = document.getElementById('nType').value;
+  const issueId = document.getElementById('nIssue').value;
+  if(!subject || !customer){ alert('Subject and Customer / Site Name are required.'); return; }
+  if(isAdmin && !assignedTo){ alert('Add a technician first (Team tab), then assign the job.'); return; }
+  if(type==='repair' && !issueId){ alert('Pick the reported issue for this repair.'); return; }
   try{
     await api('/api/tickets','POST',{
       number: document.getElementById('nTicket').value.trim(),
-      type: document.getElementById('nType').value,
+      type,
+      issueId,
       priority: parseInt(document.getElementById('nPriority').value),
       subject, customer, assignedTo,
       phone: document.getElementById('nPhone').value.trim(),
@@ -1811,8 +2621,9 @@ async function createTicket(){
       message: document.getElementById('nMessage').value.trim()
     });
     ['nTicket','nSubject','nCustomer','nPhone','nAddress','nMessage'].forEach(i=>document.getElementById(i).value='');
+    ticketsEtag = null;
     await refreshTickets();
-    adminGo('dash');
+    go(isAdmin ? 'tickets' : 'jobs');
   }catch(e){ alert(e.message); }
 }
 
@@ -1828,10 +2639,14 @@ async function openReport(id){
       <span>${prioBadge(t)} ${typeBadge(t.type)} ${statusBadge(t.status)}</span>
     </div>
     <div class="tsub">${esc(t.subject)}</div>
+    ${t.type==='repair'&&t.issue?`<div class="tmeta" style="margin-top:4px">🔧 ${esc(t.issue)}</div>`:''}
     <div class="tmeta">👤 ${esc(t.customer)} ${t.phone?'· 📞 '+esc(t.phone):''} · 📍 ${esc(t.address||'—')}</div>
-    <div class="tmeta">👷 ${esc(t.assignedName||'Unassigned')} · Created ${fmt(t.created)}${t.completed?' · Finished '+fmt(t.completed):''}</div>
+    <div class="tmeta">👷 ${esc(t.assignedName||'Unassigned')} · Created ${fmt(t.created)}${t.createdByRole==='tech'?' (raised by technician)':''}</div>
+    <div class="tmeta">${t.started?'▶ Started '+fmt(t.started):'▶ Not started yet'}${t.completed?' · 🏁 Finished '+fmt(t.completed):''}</div>
+    <div style="margin-top:6px">${timerChip(t)}</div>
     <div class="progressbar"><div style="width:${progress(t)}%"></div></div>`;
   const techs = users.filter(u=>u.role==='tech');
+  const issues = SETTINGS.repairIssues || [];
   document.getElementById('repActions').innerHTML = `
     <label>Reassign to</label>
     <select id="repAssign">${techs.map(u=>`<option value="${u.id}" ${u.id===t.assignedTo?'selected':''}>${esc(u.name)}</option>`).join('')}</select>
@@ -1841,6 +2656,9 @@ async function openReport(id){
       <option value="2" ${(t.priority||3)===2?'selected':''}>Priority 2 — High (Orange)</option>
       <option value="3" ${(t.priority||3)===3?'selected':''}>Priority 3 — Normal (Green)</option>
     </select>
+    ${t.type==='repair'?`<label>Reported Issue</label>
+    <select id="repIssue">${issues.map(i=>`<option value="${esc(i.id)}" ${i.id===t.issueId?'selected':''}>${esc(i.label)}</option>`).join('')}</select>
+    <div class="tmeta" style="margin-top:4px">Changing this swaps the steps the technician follows${t.status==='completed'?'' : ' and restarts the workflow at step 1'}.</div>`:''}
     <div class="wizard-btns">
       <button class="btn btn-ghost btn-sm" onclick="reassignTicket()">Save Changes</button>
       <button class="btn btn-ghost btn-sm" onclick="window.print()">🖨 Print</button>
@@ -1855,10 +2673,14 @@ async function openReport(id){
 }
 async function reassignTicket(){
   try{
-    await api('/api/tickets/'+currentId,'PUT',{
+    const body = {
       assignedTo: document.getElementById('repAssign').value,
       priority: parseInt(document.getElementById('repPrio').value)
-    });
+    };
+    const issueSel = document.getElementById('repIssue');
+    if(issueSel) body.issueId = issueSel.value;
+    await api('/api/tickets/'+currentId,'PUT',body);
+    ticketsEtag = null;
     await refreshTickets(); openReport(currentId);
   }catch(e){ alert(e.message); }
 }
@@ -1873,7 +2695,8 @@ async function deleteTicket(){
   if(!confirm('Delete this ticket permanently?')) return;
   try{
     await api('/api/tickets/'+currentId,'DELETE');
-    await refreshTickets(); adminGo('dash');
+    ticketsEtag = null;
+    await refreshTickets(); go('tickets');
   }catch(e){ alert(e.message); }
 }
 function exportJSON(){
@@ -2003,6 +2826,61 @@ async function removePlan(i){
   try{ SETTINGS = (await api('/api/settings','PUT',{plans})).settings; renderPlans(); }
   catch(e){ alert(e.message); }
 }
+
+/* =================== ADMIN: TEAM & SETTINGS =================== */
+let teamTab = 'accounts';
+function setTeamTab(tab){ teamTab = tab; renderTeam(); }
+function renderTeam(){
+  document.getElementById('teamSeg').innerHTML = [
+    ['accounts','Technicians'],
+    ['settings','Job Settings']
+  ].map(([v,l])=>`<button class="${teamTab===v?'on':''}" onclick="setTeamTab('${v}')">${l}</button>`).join('');
+  document.getElementById('teamAccounts').classList.toggle('hidden', teamTab!=='accounts');
+  document.getElementById('teamSettings').classList.toggle('hidden', teamTab!=='settings');
+  if(teamTab==='accounts') renderUsers();
+  else { renderPlans(); renderIssues(); }
+}
+const FLOW_NAMES = {
+  generic:'Standard repair steps',
+  modem:'Modem / ONU steps',
+  connector:'Defective connector steps',
+  nap_reading:'High NAP reading steps',
+  fiber_cut:'Fiber cut steps',
+  main_nap:'Main NAP steps'
+};
+function renderIssues(){
+  const el = document.getElementById('issueList');
+  const issues = SETTINGS.repairIssues || [];
+  el.innerHTML = issues.length
+    ? issues.map(i=>`<div class="user-row">
+        <div>
+          <div class="un">${esc(i.label)}</div>
+          <div class="um">${esc(FLOW_NAMES[i.flow]||FLOW_NAMES.generic)}</div>
+        </div>
+        <button class="btn btn-warn btn-sm" style="margin-top:0" onclick="removeIssue('${esc(i.id)}')">✕</button>
+      </div>`).join('')
+    : '<div class="tmeta">No issue types yet — add the faults your technicians are sent out for.</div>';
+}
+async function saveIssues(list){
+  try{
+    SETTINGS = (await api('/api/settings','PUT',{repairIssues:list})).settings;
+    renderIssues(); fillIssueSelect();
+  }catch(e){ alert(e.message); }
+}
+async function addIssue(){
+  const label = document.getElementById('issueInput').value.trim();
+  const flow = document.getElementById('issueFlow').value;
+  if(!label){ alert('Describe the issue first.'); return; }
+  const list = (SETTINGS.repairIssues||[]).concat([{label, flow}]);
+  document.getElementById('issueInput').value='';
+  await saveIssues(list);
+}
+async function removeIssue(id){
+  const issue = (SETTINGS.repairIssues||[]).find(i=>i.id===id);
+  const inUse = tickets.filter(t=>t.issueId===id && t.status!=='completed').length;
+  if(!confirm('Remove "'+(issue?issue.label:'this issue')+'"?'+(inUse?'\n\n'+inUse+' open ticket(s) use it — they keep the steps they already started.':''))) return;
+  await saveIssues((SETTINGS.repairIssues||[]).filter(i=>i.id!==id));
+}
 async function addUser(){
   try{
     await api('/api/users','POST',{
@@ -2037,17 +2915,21 @@ async function changePassword(){
 
 /* =================== SUMMARY / REPORT =================== */
 function renderSummary(t, targetId){
-  const steps = WORKFLOWS[t.type];
+  const steps = getWorkflow(t);
   const rows=[], photos=[];
   const add=(l,v)=>{ if(v!==''&&v!=null) rows.push([l,v]); };
   add('Ticket Number', t.number);
   add('Type', typeName(t.type));
+  if(t.type==='repair' && t.issue) add('Reported Issue', t.issue);
   add('Priority', 'Priority '+(t.priority||3)+((t.priority||3)===1?' — Urgent':(t.priority||3)===2?' — High':' — Normal'));
   add('Status', t.status.replace('_',' '));
   add('Customer', t.customer);
   add('Technician', t.assignedName);
-  add('Created', fmt(t.created));
-  if(t.completed) add('Completed', fmt(t.completed));
+  add('Created', fmt(t.created)+(t.createdBy?' by '+t.createdBy:''));
+  if(t.started) add('Work Started', fmt(t.started));
+  if(t.completed) add('Finished', fmt(t.completed));
+  const elapsed = jobElapsed(t);
+  if(elapsed!=null) add(t.status==='completed'?'Total Working Time':'Running For', t.status==='completed' ? (t.durationText||humanDur(t.durationMs!=null?t.durationMs:elapsed)) : humanDur(elapsed));
   if(t.data.cable_used!==undefined) add('Cable Used (auto-computed)', t.data.cable_used+' m');
   steps.forEach(s=>s.fields.forEach(f=>{
     const v=t.data[f.k];
@@ -2056,12 +2938,15 @@ function renderSummary(t, targetId){
     if(f.type==='gps'){ add(f.label, v.lat.toFixed(6)+', '+v.lng.toFixed(6)); return; }
     if(f.type==='signature'){ return; }
     if(f.type==='reel_select'){ add(f.label, t.data[f.k+'_name']||t.data.cable_reel_name||'(cable reel)'); return; }
+    if(f.type==='items_used'){ const txt=itemsUsedText(v); if(txt) rows.push([f.label, txt]); return; }
     add(f.label, v);
   }));
   const sig = t.data.signature;
+  const remark = t.data.auto_remark || (t.status==='completed' && elapsed!=null ? 'Completed in '+humanDur(elapsed)+' from the time the technician started work.' : '');
   document.getElementById(targetId).innerHTML = `
     <div class="card">
       <div class="step-title" style="font-size:15px">Job Report Summary</div>
+      ${remark?`<div class="auto-remark">⏱ ${esc(remark)}</div>`:''}
       <table class="summary-table">${rows.map(r=>`<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td></tr>`).join('')}</table>
       ${photos.length?`<label style="margin-top:14px">Photos (${photos.length})</label>
         <div class="photos-grid">${photos.map(p=>`<figure><img src="${p.img}" class="zoomable-photo" onclick="openLightbox(this.src)"><figcaption>${esc(p.cap)}${p.gps?'<br>📍 '+p.gps:''}</figcaption></figure>`).join('')}</div>`:''}
@@ -2073,10 +2958,18 @@ function renderSummary(t, targetId){
 /* Only poll a list view that is actually on screen. A backgrounded tab used to
    keep downloading the whole ticket archive every 30s. */
 function shouldPoll(){
-  return !!USER && !document.hidden && (currentView==='viewTechList' || currentView==='viewDash');
+  return !!USER && !document.hidden &&
+    (currentView==='viewTechList' || currentView==='viewDash' || currentView==='viewTickets' || currentView==='viewStats');
 }
 setInterval(()=>{ if(shouldPoll()) refreshTickets(); }, 30000);
 document.addEventListener('visibilitychange', ()=>{ if(shouldPoll()) refreshTickets(); });
+/* keep the running-time chips honest without re-fetching anything */
+setInterval(()=>{
+  if(!USER || document.hidden) return;
+  if(!tickets.some(t=>t.status==='in_progress')) return;
+  if(currentView==='viewTechList') renderTechList();
+  else if(currentView==='viewTickets') renderTickets();
+}, 60000);
 
 /* =================== INIT =================== */
 function hideSplash(){
