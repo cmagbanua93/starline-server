@@ -21,6 +21,45 @@ try { db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); } catch (e) {}
 db.users = db.users || []; db.tickets = db.tickets || []; db.sessions = db.sessions || {};
 db.settings = db.settings || { plans: [] };
 db.requests = db.requests || [];
+/* every movement of stock out of the warehouse to a technician, so "how much was
+   released vs how much was used" can be answered exactly */
+db.stockLog = db.stockLog || [];
+
+/* ---------------- repair issue types ----------------
+ * Each reported repair issue drives a different technician workflow. `flow` picks
+ * the step template the app runs; admins can add their own issues and choose which
+ * template they follow. */
+const REPAIR_FLOWS = ['modem', 'connector', 'nap_reading', 'fiber_cut', 'main_nap', 'generic'];
+const DEFAULT_REPAIR_ISSUES = [
+  { id: 'ri_modem', label: 'Modem / ONU issue — needs repair or replacement', flow: 'modem' },
+  { id: 'ri_connector', label: 'Defective connector', flow: 'connector' },
+  { id: 'ri_reading', label: 'High reading — check the NAP box', flow: 'nap_reading' },
+  { id: 'ri_fibercut', label: 'Fiber cut — NAP box to subscriber', flow: 'fiber_cut' },
+  { id: 'ri_mainnap', label: 'Main NAP problem', flow: 'main_nap' }
+];
+if (!Array.isArray(db.settings.repairIssues) || !db.settings.repairIssues.length) {
+  db.settings.repairIssues = DEFAULT_REPAIR_ISSUES.slice();
+} else {
+  /* tolerate an older plain-string list */
+  db.settings.repairIssues = db.settings.repairIssues.map((x, i) => {
+    if (typeof x === 'string') return { id: 'ri' + i + Date.now().toString(36), label: x, flow: 'generic' };
+    return { id: x.id || 'ri' + i + Date.now().toString(36), label: String(x.label || ''), flow: REPAIR_FLOWS.includes(x.flow) ? x.flow : 'generic' };
+  }).filter(x => x.label);
+}
+
+/* ---------------- elapsed-time helper ----------------
+ * Stored as text as well as milliseconds so every screen (and any export) shows
+ * the same wording without recomputing it. */
+function humanDuration(ms) {
+  if (!(ms > 0)) return 'less than a minute';
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return 'less than a minute';
+  if (mins < 60) return mins + (mins === 1 ? ' minute' : ' minutes');
+  const hrs = Math.floor(mins / 60), rm = mins % 60;
+  if (hrs < 48) return hrs + (hrs === 1 ? ' hour' : ' hours') + (rm ? ' ' + rm + (rm === 1 ? ' minute' : ' minutes') : '');
+  const days = Math.floor(hrs / 24), rh = hrs % 24;
+  return days + (days === 1 ? ' day' : ' days') + (rh ? ' ' + rh + (rh === 1 ? ' hour' : ' hours') : '');
+}
 /* warehouse/office stock: cables are reel types {id, name, meters (per reel), qty (pcs)};
    items are any other stock {id, name, qty} */
 db.warehouse = db.warehouse || { connectors: 0, cables: [], items: [] };
@@ -240,6 +279,23 @@ function ticketSummary(t) {
   if (light.stripped) s._partial = true;   // client re-fetches the full ticket when opened
   return s;
 }
+/* Records stock leaving the warehouse for a technician. `qty` is pieces (reels for
+   cable) and `meters` the cable length that represents, so the usage report can
+   compare metres released against metres consumed. */
+function logStock(tech, kind, name, qty, meters, source, by) {
+  const q = parseFloat(qty) || 0;
+  if (!tech || !q) return;
+  db.stockLog.push({
+    id: 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    ts: Date.now(),
+    techId: tech.id, techName: tech.name,
+    kind, name: String(name || '').trim() || (kind === 'connector' ? 'FIC Connector' : ''),
+    qty: q, meters: parseFloat(meters) || 0,
+    source: source || 'direct', by: by || ''
+  });
+  if (db.stockLog.length > 5000) db.stockLog = db.stockLog.slice(-5000);
+}
+
 function addItemTo(u, name, qty) {
   u.inv = u.inv || { connectors: 0, cables: [], items: [] };
   u.inv.items = u.inv.items || [];
@@ -334,6 +390,13 @@ const server = http.createServer(async (req, res) => {
       if (!isAdmin) return json(res, 403, { error: 'Admin only' });
       const b = await readBody(req);
       if (Array.isArray(b.plans)) db.settings.plans = b.plans.map(x => String(x).trim()).filter(Boolean);
+      if (Array.isArray(b.repairIssues)) {
+        db.settings.repairIssues = b.repairIssues.map((x, i) => ({
+          id: (x && x.id) || 'ri' + i + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+          label: String((x && x.label) || '').trim(),
+          flow: (x && REPAIR_FLOWS.includes(x.flow)) ? x.flow : 'generic'
+        })).filter(x => x.label);
+      }
       saveDB();
       return json(res, 200, { settings: db.settings });
     }
@@ -431,10 +494,12 @@ const server = http.createServer(async (req, res) => {
             wh.qty -= qty;
             if (wh.qty <= 0) db.warehouse.cables = db.warehouse.cables.filter(c => c !== wh);
             for (let i = 0; i < qty; i++) addStockTo(tech, wh.name, wh.meters, 0);
+            logStock(tech, 'cable', wh.name, qty, qty * wh.meters, 'request', me.name);
           } else if (kind === 'connector' && qty > 0) {
             if ((db.warehouse.connectors || 0) < qty) return json(res, 400, { error: 'Not enough FIC connectors in warehouse: requested ' + qty + ', available ' + (db.warehouse.connectors || 0) + '.' });
             db.warehouse.connectors -= qty;
             addStockTo(tech, '', 0, qty);
+            logStock(tech, 'connector', 'FIC Connector', qty, 0, 'request', me.name);
           } else if (kind === 'item' && name && qty > 0) {
             const wh = db.warehouse.items.find(i => i.name.toLowerCase() === name.toLowerCase());
             if (!wh) return json(res, 400, { error: 'No "' + name + '" in warehouse inventory. Add it first.' });
@@ -442,12 +507,14 @@ const server = http.createServer(async (req, res) => {
             wh.qty -= qty;
             if (wh.qty <= 0) db.warehouse.items = db.warehouse.items.filter(i => i !== wh);
             addItemTo(tech, wh.name, qty);
+            logStock(tech, 'item', wh.name, qty, 0, 'request', me.name);
           }
           /* legacy combined requests (cable + connectors in one) */
           if (!r.kind && r.cableName && r.connectors > 0) {
             if ((db.warehouse.connectors || 0) < r.connectors) return json(res, 400, { error: 'Not enough FIC connectors in warehouse.' });
             db.warehouse.connectors -= r.connectors;
             addStockTo(tech, '', 0, r.connectors);
+            logStock(tech, 'connector', 'FIC Connector', r.connectors, 0, 'request', me.name);
           }
           r.status = 'released'; r.released = Date.now();
         } else return json(res, 400, { error: 'Unknown action' });
@@ -456,6 +523,12 @@ const server = http.createServer(async (req, res) => {
       r.updated = Date.now();
       saveDB();
       return json(res, 200, { request: r });
+    }
+
+    /* ---- stock ledger: what was released to whom ---- */
+    if (p === '/api/stocklog' && req.method === 'GET') {
+      const list = isAdmin ? db.stockLog : db.stockLog.filter(s => s.techId === me.id);
+      return json(res, 200, { stockLog: list });
     }
 
     /* ---- users (admin) ---- */
@@ -492,7 +565,15 @@ const server = http.createServer(async (req, res) => {
       const u = db.users.find(x => x.id === m[1]);
       if (!u) return json(res, 404, { error: 'User not found' });
       addStockTo(u, b.cableName, b.cableMeters, b.connectors);
-      if (b.itemName !== undefined && b.itemQty !== undefined) addItemTo(u, b.itemName, b.itemQty);
+      /* stock handed over directly (not through a request) still belongs in the ledger */
+      if (String(b.cableName || '').trim() && (parseFloat(b.cableMeters) || 0) > 0)
+        logStock(u, 'cable', b.cableName, 1, b.cableMeters, 'direct', me.name);
+      if ((parseInt(b.connectors) || 0) > 0)
+        logStock(u, 'connector', 'FIC Connector', parseInt(b.connectors), 0, 'direct', me.name);
+      if (b.itemName !== undefined && b.itemQty !== undefined) {
+        addItemTo(u, b.itemName, b.itemQty);
+        if ((parseInt(b.itemQty) || 0) > 0) logStock(u, 'item', b.itemName, parseInt(b.itemQty), 0, 'direct', me.name);
+      }
       if (b.removeReel) { u.inv.cables = (u.inv.cables || []).filter(r => r.id !== b.removeReel); }
       if (b.setReelId && b.setReelMeters !== undefined) {
         const reel = (u.inv.cables || []).find(r => r.id === b.setReelId);
@@ -520,11 +601,12 @@ const server = http.createServer(async (req, res) => {
       return jsonCached(req, res, { tickets: list.map(ticketSummary) });
     }
     if (p === '/api/tickets' && req.method === 'POST') {
-      if (!isAdmin) return json(res, 403, { error: 'Only the admin can create tickets' });
       const b = await readBody(req);
       if (!b.subject || !b.customer) return json(res, 400, { error: 'Subject and customer are required' });
       const seq = String(db.tickets.length + 1).padStart(4, '0');
-      const assignee = db.users.find(u => u.id === b.assignedTo);
+      /* Technicians may raise their own jobs, but only ever for themselves —
+         they cannot assign work to a colleague, and they cannot delete anything. */
+      const assignee = isAdmin ? db.users.find(u => u.id === b.assignedTo) : me;
       const t = {
         id: 'id' + Date.now() + Math.random().toString(36).slice(2, 6),
         number: String(b.number || '').trim() || `TKT-${new Date().getFullYear()}-${seq}`,
@@ -539,11 +621,20 @@ const server = http.createServer(async (req, res) => {
         assignedName: assignee ? assignee.name : null,
         status: 'open',
         created: Date.now(),
+        started: null,
         completed: null,
         data: {},
         step: 0,
-        createdBy: me.name
+        createdBy: me.name,
+        createdByRole: me.role
       };
+      /* a repair carries the reported issue, which decides the technician's steps */
+      if (t.type === 'repair') {
+        const issue = (db.settings.repairIssues || []).find(x => x.id === b.issueId || x.label === b.issue);
+        t.issueId = issue ? issue.id : null;
+        t.issue = issue ? issue.label : String(b.issue || '').trim();
+        t.issueFlow = issue ? issue.flow : 'generic';
+      }
       if (t.type === 'installation') { t.data.cust_name = t.customer; t.data.cust_address = t.address; t.data.cust_phone = t.phone; }
       db.tickets.push(t); saveDB();
       return json(res, 200, { ticket: t });
@@ -565,6 +656,15 @@ const server = http.createServer(async (req, res) => {
             t.assignedTo = a ? a.id : null; t.assignedName = a ? a.name : null;
           }
           if (b.priority !== undefined && [1, 2, 3].includes(parseInt(b.priority))) t.priority = parseInt(b.priority);
+          /* re-classifying a repair swaps in that issue's step list */
+          if (b.issueId !== undefined && t.type === 'repair') {
+            const issue = (db.settings.repairIssues || []).find(x => x.id === b.issueId);
+            const wasFlow = t.issueFlow;
+            t.issueId = issue ? issue.id : null;
+            t.issue = issue ? issue.label : '';
+            t.issueFlow = issue ? issue.flow : 'generic';
+            if (t.issueFlow !== wasFlow && t.status !== 'completed') t.step = 0;
+          }
         }
         if (b.data !== undefined) {
           /* a client that is still holding a summary must not be able to blank out
@@ -581,7 +681,22 @@ const server = http.createServer(async (req, res) => {
         if (b.step !== undefined) t.step = b.step;
         if (b.status !== undefined && ['open', 'in_progress', 'completed'].includes(b.status)) {
           t.status = b.status;
+          /* ---- job clock ----
+             starts the moment the technician picks the job up, so the closing
+             remark measures actual work time, not how long it sat in the queue */
+          if (b.status !== 'open' && !t.started) t.started = b.started || Date.now();
           t.completed = b.status === 'completed' ? (b.completed || Date.now()) : null;
+          if (b.status === 'completed') {
+            const startTs = t.started || t.created;
+            t.durationMs = Math.max(0, t.completed - startTs);
+            t.durationText = humanDuration(t.durationMs);
+            t.data = t.data || {};
+            t.data.auto_remark = 'Completed in ' + t.durationText + ' from the time the technician started work.';
+          } else {
+            /* reopened — the old closing figures no longer describe this job */
+            delete t.durationMs; delete t.durationText;
+            if (t.data) delete t.data.auto_remark;
+          }
           /* Deduct materials from the technician's inventory once, on first completion */
           if (b.status === 'completed' && !t.invApplied && t.assignedTo) {
             const tech = db.users.find(u => u.id === t.assignedTo);
@@ -607,6 +722,17 @@ const server = http.createServer(async (req, res) => {
               }
               const connUsed = parseInt(t.data && t.data.connectors) || 0;
               tech.inv.connectors = tech.inv.connectors - connUsed;
+              /* issued items (modems, clamps, patch cords, ...) consumed on this job */
+              const usedItems = Array.isArray(t.data && t.data.items_used) ? t.data.items_used : [];
+              const cleanItems = [];
+              usedItems.forEach(it => {
+                const name = String((it && it.name) || '').trim();
+                const q = parseInt(it && it.qty) || 0;
+                if (!name || q <= 0) return;
+                addItemTo(tech, name, -q);
+                cleanItems.push({ name, qty: q });
+              });
+              if (cleanItems.length) t.data.items_used = cleanItems;
               t.invApplied = true;
             }
           }
