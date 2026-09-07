@@ -262,6 +262,44 @@
   .alert-row{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:9px 11px;margin-bottom:6px}
   .alert-row:last-child{margin-bottom:0}
 
+  /* ---------- donut (part-to-whole) ---------- */
+  .donut-wrap{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .donut{width:132px;height:132px;flex-shrink:0}
+  .donut-seg{transition:opacity .15s}
+  .donut-seg:hover{opacity:.82}
+  .donut-center-n{font-size:30px;font-weight:800;fill:var(--text)}
+  .donut-center-l{font-size:9.5px;font-weight:800;fill:var(--muted);letter-spacing:.06em}
+  .donut-legend{flex:1;min-width:158px;display:flex;flex-direction:column;gap:4px}
+  .dleg{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:9px;border:none;background:#f5f8fc;cursor:pointer;width:100%;text-align:left}
+  .dleg:hover{background:#e8eef7}
+  .dleg .dot{width:10px;height:10px;border-radius:3px;flex-shrink:0}
+  .dleg .lbl{flex:1;font-size:12.5px;font-weight:700;color:var(--text);line-height:1.25;min-width:0}
+  .dleg .val{font-size:13.5px;font-weight:800;color:var(--text)}
+  .dleg .pct{font-size:11px;font-weight:700;color:var(--muted);width:36px;text-align:right}
+
+  /* ---------- next job up ---------- */
+  .nextup{background:linear-gradient(135deg,#12406e,#0e2f55);border:none;color:#fff}
+  .nextup .nu-cap{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;opacity:.72}
+  .nextup .nu-num{font-size:15px;font-weight:800;color:var(--gold)}
+  .nextup .nu-sub{font-size:14px;font-weight:700;margin-top:2px}
+  .nextup .nu-meta{font-size:12.5px;opacity:.85;margin-top:3px}
+  .nextup .btn{margin-top:11px;background:var(--gold);color:#0e2f55}
+  .nextup .badge{background:rgba(255,255,255,.16);color:#fff}
+
+  /* ---------- grouped column chart (created vs completed) ---------- */
+  .gbar-chart{display:flex;align-items:flex-end;gap:6px;margin-top:10px}
+  .gbar-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;min-width:0}
+  .gbar-pair{display:flex;align-items:flex-end;gap:2px}
+  .gbar{width:8px;border-radius:3px 3px 0 0;min-height:3px}
+  .chart-legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:9px}
+  .chart-legend span{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;color:var(--muted)}
+  .chart-legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+  /* wide tables scroll inside their own card instead of pushing the page sideways */
+  #usagePanel,#releaseLog,#usageRecon,#techUsageLog,#techUsageRecon,#usageSplit,#whList{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  #usagePanel table,#releaseLog table,#usageRecon table,#techUsageLog table,#techUsageRecon table{min-width:340px}
+  .hbar-stack{margin:9px 0}
+  .hbar-stack-label{font-size:12.5px;font-weight:700;color:var(--text);margin-bottom:4px;line-height:1.3}
+
   /* items used picker */
   .items-used{border:1px solid var(--border);border-radius:12px;overflow:hidden}
   .item-row{display:flex;align-items:center;gap:10px;padding:9px 11px;border-bottom:1px solid var(--border);background:#fff}
@@ -338,13 +376,21 @@
   <div id="techList"></div>
 </div>
 
-<!-- ============ TECH: STATS ============ -->
+<!-- ============ TECH: DASHBOARD ============ -->
 <div class="wrap hidden" id="viewStats">
-  <div class="page-head"><div><div class="page-title">My Performance</div><div class="page-sub">Completed work at a glance</div></div></div>
+  <div class="page-head">
+    <div><div class="page-title">My Dashboard</div><div class="page-sub" id="techDashSub"></div></div>
+    <button class="icon-btn no-print" onclick="refreshTickets(true)" title="Refresh">↻</button>
+  </div>
+  <div class="card" id="techDonut"></div>
+  <div class="card nextup hidden" id="techNextUp"></div>
+  <div class="card hidden" id="techAttention"></div>
   <div class="kpi-row" id="techKpiRow"></div>
   <div class="stats" id="techStats"></div>
   <div class="card" id="cbdPanelTech"></div>
   <div class="card" id="trendPanelTech"></div>
+  <div class="card" id="techTypeMix"></div>
+  <div class="card" id="techMaterialsMonth"></div>
 </div>
 
 <!-- ============ TECH: MATERIALS & REQUESTS ============ -->
@@ -463,9 +509,14 @@
   <div class="stats" id="statCards"></div>
   <div class="kpi-row" id="kpiRow"></div>
   <div class="card" id="alertPanel"></div>
+  <div class="card" id="statusDonutPanel"></div>
   <div class="split" id="statSplit"></div>
+  <div class="card" id="ageingPanel"></div>
+  <div class="card" id="throughputPanel"></div>
   <div class="card" id="cbdPanelAdmin"></div>
   <div class="card" id="trendPanelAdmin"></div>
+  <div class="card" id="issuePanel"></div>
+  <div class="card" id="resolveTypePanel"></div>
   <div class="card" id="techPerfPanel"></div>
   <div class="card" id="prioPanel"></div>
 </div>
@@ -1281,7 +1332,7 @@ const NAV = {
     {tab:'jobs',      ico:'🧰', label:'My Jobs'},
     {tab:'new',       ico:'➕', label:'New'},
     {tab:'materials', ico:'📦', label:'Materials'},
-    {tab:'stats',     ico:'📊', label:'Stats'}
+    {tab:'stats',     ico:'📊', label:'Dashboard'}
   ]
 };
 let currentTab = 'dash';
@@ -1337,7 +1388,7 @@ function sortTickets(list){
 }
 /* colored type tabs */
 let techType='', dashType='';
-let dashPeriod = null, dashTrendDay = null, dashPriority = '';
+let dashPeriod = null, dashTrendDay = null, dashPriority = '', dashAge = '';
 function renderTypeTabs(containerId, current, setter){
   const types=[['','All'],['installation','Installation'],['repair','Repair'],['nap_install','NAP Install']];
   document.getElementById(containerId).innerHTML = types.map(([v,l])=>
@@ -1439,6 +1490,70 @@ function renderCompletedGrid(list, activeType, activePeriod, clickFn){
         </tr>`).join('')}
     </table>`;
 }
+/* ---------- donut: part-to-whole ----------
+ * The legend carries the exact count and share of every slice, so nothing is read
+ * from arc length or colour alone — which keeps it honest on a small phone screen
+ * and for colour-blind readers. */
+const STATUS_COLORS = { open:'#4338ca', in_progress:'#d97706', completed:'#15803d' };
+function donutChart(segs, centerVal, centerLabel, clickFn){
+  const live = segs.filter(s=>s.value>0);
+  const total = live.reduce((s,x)=>s+x.value,0);
+  const R = 54, C = 2*Math.PI*R, GAP = live.length>1 ? 3 : 0;
+  let offset = 0;
+  const arcs = total ? live.map(s=>{
+    const len = (s.value/total)*C;
+    const dash = Math.max(1, len-GAP);
+    const seg = `<circle class="donut-seg" cx="70" cy="70" r="${R}" fill="none" stroke="${s.color}" stroke-width="17"
+      stroke-dasharray="${dash.toFixed(2)} ${(C-dash).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}"
+      ${clickFn?`style="cursor:pointer" onclick="${clickFn}('${s.key}')"`:''}><title>${esc(s.label)}: ${s.value}</title></circle>`;
+    offset += len;
+    return seg;
+  }).join('') : `<circle cx="70" cy="70" r="${R}" fill="none" stroke="#e2e8f0" stroke-width="17"></circle>`;
+  return `
+    <div class="donut-wrap">
+      <svg class="donut" viewBox="0 0 140 140" role="img" aria-label="${esc(centerLabel)}: ${centerVal}">
+        <g transform="rotate(-90 70 70)">${arcs}</g>
+        <text class="donut-center-n" x="70" y="67" text-anchor="middle" dominant-baseline="middle">${centerVal}</text>
+        <text class="donut-center-l" x="70" y="88" text-anchor="middle">${esc(String(centerLabel).toUpperCase())}</text>
+      </svg>
+      <div class="donut-legend">
+        ${segs.map(s=>{
+          const pct = total ? Math.round(s.value/total*100) : 0;
+          return `<button class="dleg" ${clickFn?`onclick="${clickFn}('${s.key}')"`:'disabled style="cursor:default"'}>
+            <span class="dot" style="background:${s.color}"></span>
+            <span class="lbl">${esc(s.label)}</span>
+            <span class="val">${s.value}</span><span class="pct">${pct}%</span>
+          </button>`;
+        }).join('')}
+      </div>
+    </div>`;
+}
+
+/* ---------- reusable horizontal bar list ----------
+ * opts.stack puts the label on its own line above the bar — the right shape when
+ * the category names are long, which is exactly when a side label gets clipped. */
+function hbarList(rows, opts){
+  opts = opts || {};
+  if(!rows.length) return `<div class="tmeta">${esc(opts.empty||'Nothing to show yet.')}</div>`;
+  const max = Math.max(1, ...rows.map(r=>r.value));
+  return rows.map(r=>{
+    const w = Math.max(4, Math.round(r.value/max*100));
+    const style = `width:${w}%${r.color&&!r.active?';background:'+r.color:''}`;
+    const bar = `<div class="hbar-track"><button class="hbar-fill${r.active?' active':''}" style="${style}"
+        ${r.click?`onclick="${r.click}"`:'disabled'} title="${esc(r.label)}: ${esc(String(r.display!=null?r.display:r.value))}"></button></div>`;
+    const val = `<div class="hbar-value">${esc(String(r.display!=null?r.display:r.value))}</div>`;
+    if(opts.stack){
+      return `<div class="hbar-stack">
+        <div class="hbar-stack-label" title="${esc(r.label)}">${esc(r.label)}</div>
+        <div class="hbar-row" style="margin:0;padding:0">${bar}${val}</div>
+      </div>`;
+    }
+    return `<div class="hbar-row">
+      <div class="hbar-label" title="${esc(r.label)}">${esc(r.label)}</div>${bar}${val}
+    </div>`;
+  }).join('');
+}
+
 /* renders a simple 7-day vertical bar trend of completed tickets */
 function renderTrendChart(list, title, activeDayTs, clickFn){
   const days = [];
@@ -1568,19 +1683,91 @@ function renderTechList(){
 }
 
 /* =================== TECH: STATS =================== */
+/* a slice of the workload ring opens that part of the job list */
+function donutClickTech(key){
+  techTrendDay = null;
+  techType = '';
+  if(key==='completed'){ techPeriod = 'day'; techStatus = 'completed'; }
+  else { techPeriod = null; techStatus = key; }
+  go('jobs');
+}
 function renderTechStats(){
   const { dayStart, weekStart, monthStart } = periodStarts();
   const doneSince = ts => tickets.filter(t=>t.status==='completed' && t.completed && t.completed>=ts).length;
+  const open = tickets.filter(t=>t.status==='open');
+  const prog = tickets.filter(t=>t.status==='in_progress');
   const done = tickets.filter(t=>t.status==='completed' && t.completed);
+  const active = open.length + prog.length;
+
+  document.getElementById('techDashSub').textContent =
+    active ? `${active} job${active===1?'':'s'} on your plate · ${doneSince(dayStart)} done today`
+           : `All clear · ${doneSince(dayStart)} done today`;
+
+  /* ---- the workload ring ---- */
+  document.getElementById('techDonut').innerHTML = `
+    <div class="sec-head"><div class="sec-title">My Workload</div><span class="tmeta">tap to open that list</span></div>
+    ${donutChart([
+      {key:'open',        label:'Not started', value:open.length,  color:STATUS_COLORS.open},
+      {key:'in_progress', label:'In progress', value:prog.length,  color:STATUS_COLORS.in_progress},
+      {key:'completed',   label:'Done today',  value:doneSince(dayStart), color:STATUS_COLORS.completed}
+    ], active, 'Active jobs', 'donutClickTech')}`;
+
+  /* ---- what to do next: worst priority first, oldest of those ---- */
+  const queue = open.concat(prog).sort((a,b)=>(a.priority||3)-(b.priority||3) || a.created-b.created);
+  const next = queue[0];
+  const nextEl = document.getElementById('techNextUp');
+  nextEl.classList.toggle('hidden', !next);
+  if(next){
+    const waited = Date.now() - next.created;
+    nextEl.innerHTML = `
+      <div class="nu-cap">Next job up</div>
+      <div class="ticket-top" style="margin:4px 0 2px">
+        <span class="nu-num">${esc(next.number)}</span>
+        <span>${prioBadge(next)} ${next.status==='in_progress'?'<span class="badge">Resume</span>':''}</span>
+      </div>
+      <div class="nu-sub">${esc(next.subject)}</div>
+      <div class="nu-meta">👤 ${esc(next.customer||'—')}${next.address?' · 📍 '+esc(next.address):''}</div>
+      ${next.type==='repair'&&next.issue?`<div class="nu-meta">🔧 ${esc(next.issue)}</div>`:''}
+      <div class="nu-meta">${next.status==='in_progress'?'⏱ running '+humanDur(jobElapsed(next)||0):'🕒 waiting '+humanDur(waited)}${queue.length>1?' · '+(queue.length-1)+' more after this':''}</div>
+      <button class="btn" onclick="openTicket('${next.id}')">${next.status==='in_progress'?'Continue this job':'Start this job'} ›</button>`;
+  }
+
+  /* ---- things that need chasing ---- */
+  const stale = open.filter(t=>Date.now()-t.created > 48*3600000);
+  const longRun = prog.filter(t=>(jobElapsed(t)||0) > 24*3600000);
+  const urgent = open.concat(prog).filter(t=>(t.priority||3)===1);
+  const inv = (USER&&USER.inv)||{connectors:0,cables:[],items:[]};
+  const lowFic = (inv.connectors||0) < 5;
+  const noCable = !((inv.cables||[]).some(r=>r.meters>50));
+  const rows = [];
+  if(urgent.length) rows.push(`⚡ ${urgent.length} urgent job${urgent.length===1?'':'s'} assigned to you`);
+  if(stale.length) rows.push(`🕒 ${stale.length} job${stale.length===1?' has':'s have'} been waiting over 2 days`);
+  if(longRun.length) rows.push(`⏱ ${longRun.length} job${longRun.length===1?'':'s'} still open after a day — close ${longRun.length===1?'it':'them'} if finished`);
+  if(lowFic) rows.push(`🔌 Only ${inv.connectors||0} FIC connectors left — request more`);
+  if(noCable) rows.push('🧵 No usable fiber cable on hand — request a reel');
+  const attEl = document.getElementById('techAttention');
+  attEl.classList.toggle('hidden', !rows.length);
+  if(rows.length){
+    attEl.innerHTML = `<div class="sec-head"><div class="sec-title">Needs attention</div></div>
+      ${rows.map(r=>`<div class="alert-row">${r}</div>`).join('')}`;
+  }
+
+  /* ---- personal numbers ---- */
   const withDur = done.filter(t=>t.durationMs!=null || t.started);
   let avgTxt = '—';
   if(withDur.length){
     const avg = withDur.reduce((s,t)=>s+(t.durationMs!=null?t.durationMs:Math.max(0,t.completed-(t.started||t.created))),0)/withDur.length;
     avgTxt = humanDur(avg);
   }
+  const thisWeek = doneSince(weekStart);
+  const lastWeekStart = weekStart - 7*86400000;
+  const lastWeek = tickets.filter(t=>t.status==='completed' && t.completed>=lastWeekStart && t.completed<weekStart).length;
+  const delta = thisWeek - lastWeek;
+  const deltaTxt = lastWeek||thisWeek ? `${delta>0?'▲ ':delta<0?'▼ ':''}${delta===0?'same as':Math.abs(delta)+' vs'} last week` : 'no history yet';
   document.getElementById('techKpiRow').innerHTML = `
     <div class="kpi"><div class="n">${avgTxt}</div><div class="l">Avg. Time per Job</div></div>
-    <div class="kpi"><div class="n">${done.length}</div><div class="l">Jobs Completed</div></div>`;
+    <div class="kpi"><div class="n">${thisWeek}</div><div class="l">Done This Week</div><div class="tmeta" style="margin-top:2px">${deltaTxt}</div></div>`;
+
   const sel = p => techPeriod===p ? 'outline:3px solid #fff;outline-offset:-6px;' : '';
   document.getElementById('techStats').innerHTML = `
     <div class="tstat tstat-week" style="cursor:pointer;${sel('week')}" onclick="filterCompleted('week')"><div class="n">${doneSince(weekStart)}</div><div class="l">This Week</div></div>
@@ -1588,6 +1775,40 @@ function renderTechStats(){
     <div class="tstat tstat-month" style="cursor:pointer;${sel('month')}" onclick="filterCompleted('month')"><div class="n">${doneSince(monthStart)}</div><div class="l">This Month</div></div>`;
   document.getElementById('cbdPanelTech').innerHTML = renderCompletedGrid(tickets, techType, techPeriod, 'gridClickTech');
   document.getElementById('trendPanelTech').innerHTML = renderTrendChart(tickets, '📈 My Completed — Last 7 Days', techTrendDay, 'trendClickTech');
+
+  /* ---- how long each kind of job takes you ---- */
+  const typeRows = CBD_TYPES.map(([type,label])=>{
+    const list = done.filter(t=>t.type===type);
+    const durs = list.map(t=>t.durationMs!=null?t.durationMs:Math.max(0,t.completed-(t.started||t.created)));
+    const avg = durs.length ? durs.reduce((a,b)=>a+b,0)/durs.length : 0;
+    return { label, value:list.length, display:list.length?`${list.length} · ${humanDur(avg)}`:'0',
+             color:type==='installation'?'#1d4ed8':type==='repair'?'#d97706':'#7e22ce' };
+  });
+  document.getElementById('techTypeMix').innerHTML = `
+    <div class="sec-head"><div class="sec-title">My jobs by type</div><span class="tmeta">count · average time</span></div>
+    ${hbarList(typeRows, {empty:'No completed jobs yet.'})}`;
+
+  /* ---- what this month has cost in materials ---- */
+  const monthDone = done.filter(t=>t.completed>=monthStart);
+  let meters = 0, conn = 0; const itemTally = {};
+  monthDone.forEach(t=>{
+    const d = t.data||{};
+    meters += parseFloat(d.cable_used)||0;
+    conn += parseInt(d.connectors)||0;
+    (Array.isArray(d.items_used)?d.items_used:[]).forEach(i=>{
+      const q = parseInt(i.qty)||0; if(q>0) itemTally[i.name] = (itemTally[i.name]||0)+q;
+    });
+  });
+  const itemLines = Object.keys(itemTally).map(n=>`<tr><td>📦 ${esc(n)}</td><td>${itemTally[n]} pcs</td></tr>`).join('');
+  document.getElementById('techMaterialsMonth').innerHTML = `
+    <div class="sec-head"><div class="sec-title">Materials I used this month</div></div>
+    ${monthDone.length ? `<table class="summary-table">
+      <tr><td>🧵 Fiber cable</td><td>${Math.round(meters*100)/100} m</td></tr>
+      <tr><td>🔌 FIC connectors</td><td>${conn} pcs</td></tr>
+      ${itemLines}
+    </table>
+    <div class="tmeta" style="margin-top:6px">Across ${monthDone.length} completed job${monthDone.length===1?'':'s'}. Tap 📦 Materials for the full history.</div>`
+    : '<div class="tmeta">Nothing completed this month yet.</div>'}`;
 }
 
 /* =================== TECH: WIZARD =================== */
@@ -2211,8 +2432,28 @@ function onPrioBarClick(p){
   go('tickets');
 }
 function dashTodayClick(){ gridClickAdmin('', 'day'); }
+/* a slice of the queue ring opens that part of the ticket list */
+function donutClickAdmin(key){
+  dashTrendDay = null; dashType = ''; dashAge = '';
+  if(key==='completed'){ dashPeriod = 'month'; dashStatus = 'completed'; }
+  else { dashPeriod = null; dashStatus = key; }
+  go('tickets');
+}
+function ageClickAdmin(bucket){
+  dashAge = dashAge===bucket ? '' : bucket;
+  dashPeriod = null; dashTrendDay = null;
+  if(dashAge) dashStatus = '';          // ageing only describes unresolved work
+  go('tickets');
+}
+function issueClickAdmin(label){
+  const s = document.getElementById('dSearch');
+  if(s) s.value = s.value===label ? '' : label;
+  /* one chart tap = one intent: drop the other filters so the list can't come back empty */
+  dashPeriod = null; dashTrendDay = null; dashAge = ''; dashStatus = ''; dashPriority = '';
+  go('tickets');
+}
 function clearDashFilters(){
-  dashType=''; dashPeriod=null; dashTrendDay=null; dashPriority=''; dashStatus='';
+  dashType=''; dashPeriod=null; dashTrendDay=null; dashPriority=''; dashStatus=''; dashAge='';
   const s=document.getElementById('dSearch'); if(s) s.value='';
   const tsel=document.getElementById('dTech'); if(tsel) tsel.value='';
   renderTickets();
@@ -2276,8 +2517,93 @@ function renderDash(){
     <div class="kpi"><div class="n">${avgTxt}</div><div class="l">Avg. Time per Job</div></div>
     <div class="kpi"><div class="n">${completedSince(tickets,'',monthStart)}</div><div class="l">Completed This Month</div></div>`;
 
+  /* ---- queue status ring ---- */
+  document.getElementById('statusDonutPanel').innerHTML = `
+    <div class="sec-head"><div class="sec-title">Queue status</div><span class="tmeta">tap to open that list</span></div>
+    ${donutChart([
+      {key:'open',        label:'Not started',     value:open, color:STATUS_COLORS.open},
+      {key:'in_progress', label:'In progress',     value:prog, color:STATUS_COLORS.in_progress},
+      {key:'completed',   label:'Done this month', value:completedSince(tickets,'',monthStart), color:STATUS_COLORS.completed}
+    ], open+prog, 'Unresolved', 'donutClickAdmin')}`;
+
+  /* ---- how long unresolved work has been sitting ---- */
+  const unresolved = tickets.filter(t=>t.status!=='completed');
+  const AGE_BUCKETS = [
+    {key:'d0', label:'Under 24 hours', min:0,             max:86400000,      color:'#16a34a'},
+    {key:'d1', label:'1 – 3 days',     min:86400000,      max:3*86400000,    color:'#d97706'},
+    {key:'d3', label:'3 – 7 days',     min:3*86400000,    max:7*86400000,    color:'#ea580c'},
+    {key:'d7', label:'Over a week',    min:7*86400000,    max:Infinity,      color:'#dc2626'}
+  ];
+  const ageRows = AGE_BUCKETS.map(b=>{
+    const n = unresolved.filter(t=>{ const age = Date.now()-t.created; return age>=b.min && age<b.max; }).length;
+    return { label:b.label, value:n, color:b.color, active:dashAge===b.key, click:`ageClickAdmin('${b.key}')` };
+  });
+  const oldest = unresolved.slice().sort((a,b)=>a.created-b.created)[0];
+  document.getElementById('ageingPanel').innerHTML = `
+    <div class="sec-head"><div class="sec-title">Ageing — unresolved work</div><span class="tmeta">${unresolved.length} open</span></div>
+    ${hbarList(ageRows, {empty:'Nothing outstanding.'})}
+    ${oldest?`<div class="tmeta" style="margin-top:6px">Oldest: <b>${esc(oldest.number)}</b> — ${esc(oldest.customer||'—')}, waiting ${humanDur(Date.now()-oldest.created)}</div>`:''}`;
+
+  /* ---- created vs completed, so the backlog trend is visible ---- */
+  const DAYS = 14;
+  const base = new Date(); base.setHours(0,0,0,0);
+  const series = [];
+  for(let i=DAYS-1;i>=0;i--){
+    const ts = base.getTime() - i*86400000, end = ts+86400000;
+    series.push({
+      ts,
+      created: tickets.filter(t=>t.created>=ts && t.created<end).length,
+      completed: tickets.filter(t=>t.status==='completed' && t.completed>=ts && t.completed<end).length,
+      label: new Date(ts).getDate()
+    });
+  }
+  const sMax = Math.max(1, ...series.map(d=>Math.max(d.created,d.completed)));
+  const totCreated = series.reduce((s,d)=>s+d.created,0), totDone = series.reduce((s,d)=>s+d.completed,0);
+  const net = totDone - totCreated;
+  document.getElementById('throughputPanel').innerHTML = `
+    <div class="sec-head"><div class="sec-title">Raised vs completed — 14 days</div></div>
+    <div class="tmeta">${totCreated} raised · ${totDone} completed · <b style="color:${net>=0?'#15803d':'#dc2626'}">${net>=0?'backlog down '+net:'backlog up '+Math.abs(net)}</b></div>
+    <div class="gbar-chart">
+      ${series.map(d=>`
+        <div class="gbar-col">
+          <button class="gbar-pair" style="border:none;background:none;padding:0;cursor:pointer"
+                  onclick="trendClickAdmin(${d.ts})" title="${new Date(d.ts).toLocaleDateString()}: ${d.created} raised, ${d.completed} completed">
+            <div class="gbar" style="height:${Math.max(3,Math.round(d.created/sMax*64))}px;background:#94a3b8"></div>
+            <div class="gbar" style="height:${Math.max(3,Math.round(d.completed/sMax*64))}px;background:${STATUS_COLORS.completed}"></div>
+          </button>
+          <div class="vbar-lbl">${d.label}</div>
+        </div>`).join('')}
+    </div>
+    <div class="chart-legend"><span><i style="background:#94a3b8"></i>Raised</span><span><i style="background:${STATUS_COLORS.completed}"></i>Completed</span></div>`;
+
   document.getElementById('cbdPanelAdmin').innerHTML = renderCompletedGrid(tickets, dashType, dashPeriod, 'gridClickAdmin');
   document.getElementById('trendPanelAdmin').innerHTML = renderTrendChart(tickets, '📈 Completed Tickets — Last 7 Days', dashTrendDay, 'trendClickAdmin');
+
+  /* ---- which faults actually come in ---- */
+  const repairs = tickets.filter(t=>t.type==='repair' && t.issue);
+  const issueTally = {};
+  repairs.forEach(t=>{ issueTally[t.issue] = (issueTally[t.issue]||0)+1; });
+  const issueRows = Object.keys(issueTally)
+    .sort((a,b)=>issueTally[b]-issueTally[a]).slice(0,8)
+    .map(label=>({ label, value:issueTally[label], display:`${issueTally[label]} · ${Math.round(issueTally[label]/repairs.length*100)}%`,
+                   click:`issueClickAdmin(${JSON.stringify(label).replace(/"/g,'&quot;')})` }));
+  document.getElementById('issuePanel').innerHTML = `
+    <div class="sec-head"><div class="sec-title">Most reported repair issues</div><span class="tmeta">${repairs.length} repair${repairs.length===1?'':'s'}</span></div>
+    ${hbarList(issueRows, {stack:true, empty:'No repairs logged with an issue type yet.'})}`;
+
+  /* ---- how long each kind of job really takes ---- */
+  const resolveRows = CBD_TYPES.map(([type,label])=>{
+    const list = tickets.filter(t=>t.type===type && t.status==='completed' && t.completed);
+    const durs = list.map(t=>t.durationMs!=null?t.durationMs:Math.max(0,t.completed-(t.started||t.created)));
+    const avg = durs.length ? durs.reduce((a,b)=>a+b,0)/durs.length : 0;
+    return { label, value:Math.round(avg/60000), display:durs.length?humanDur(avg):'—',
+             color:type==='installation'?'#1d4ed8':type==='repair'?'#d97706':'#7e22ce',
+             active:dashType===type, click:`setDashType('${type}')` };
+  });
+  document.getElementById('resolveTypePanel').innerHTML = `
+    <div class="sec-head"><div class="sec-title">Average time on site by job type</div></div>
+    ${hbarList(resolveRows, {empty:'No completed jobs yet.'})}
+    <div class="tmeta" style="margin-top:6px">Measured from when the technician started work to completion.</div>`;
 
   /* technician performance — completed this month, clickable */
   const techsInv = users.filter(u=>u.role==='tech');
@@ -2336,6 +2662,14 @@ function renderTickets(){
     const startMap = {day:dayStart, week:weekStart, month:monthStart};
     list = list.filter(t=>t.completed && t.completed>=startMap[dashPeriod]);
   }
+  if(dashAge){
+    const B = {d0:[0,86400000], d1:[86400000,3*86400000], d3:[3*86400000,7*86400000], d7:[7*86400000,Infinity]}[dashAge];
+    list = list.filter(t=>{
+      if(t.status==='completed') return false;      // ageing is about work still outstanding
+      const age = Date.now()-t.created;
+      return age>=B[0] && age<B[1];
+    });
+  }
   if(q){
     list = list.filter(t=>[t.number,t.customer,t.assignedName,t.address,t.subject,t.issue].some(v=>String(v||'').toLowerCase().includes(q)));
   }
@@ -2351,6 +2685,7 @@ function renderTickets(){
   if(dashPeriod) active.push({day:'completed today',week:'completed this week',month:'completed this month'}[dashPeriod]);
   if(dashTrendDay!=null) active.push('completed '+new Date(dashTrendDay).toLocaleDateString());
   if(dashPriority) active.push('priority '+dashPriority);
+  if(dashAge) active.push({d0:'under 24 hours old', d1:'1–3 days old', d3:'3–7 days old', d7:'over a week old'}[dashAge]);
   if(fu){ const u=users.find(x=>x.id===fu); if(u) active.push(u.name); }
   if(q) active.push('“'+q+'”');
   const note = document.getElementById('dFilterNote');
