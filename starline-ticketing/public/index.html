@@ -292,6 +292,13 @@
   .nap-chosen{background:#dbeafe;border:1px solid #93c5fd;color:#1e3a8a;border-radius:10px;padding:8px 10px;font-size:12px;font-weight:700;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:8px}
   .sync-ok{background:#dcfce7;color:#166534;border:1px solid #bbf7d0;border-radius:8px;padding:7px 9px;font-size:12px;font-weight:700;margin-top:8px}
   .sync-wait{background:#fef9c3;color:#854d0e;border:1px solid #fde047;border-radius:8px;padding:7px 9px;font-size:12px;font-weight:700;margin-top:8px}
+  /* ---- billing catch-up ---- */
+  .catchup .mono{font-family:ui-monospace,Menlo,monospace}
+  .catchup-why{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0 4px}
+  .why{background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:99px;padding:3px 9px;font-size:11px;font-weight:700}
+  .catchup-grid{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin-top:8px;align-items:baseline}
+  .catchup-grid .cl{font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+  .catchup-grid .cv{font-size:13px;color:var(--text);word-break:break-word}
   .auto-remark{background:#eef2ff;border:1px solid #c7d2fe;color:#3730a3;font-size:12.5px;font-weight:700;border-radius:10px;padding:9px 11px;margin-bottom:10px}
   .alert-row{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:9px 11px;margin-bottom:6px}
   .alert-row:last-child{margin-bottom:0}
@@ -470,6 +477,12 @@
 </div>
 
 <!-- ============ ADMIN: MATERIALS (requests · usage · stock) ============ -->
+<!-- ============ ADMIN: BILLING CATCH-UP ============ -->
+<div class="wrap hidden" id="viewBilling">
+  <div class="page-head"><div><div class="page-title">Billing Catch-Up</div><div class="page-sub">Finished installations that TaokiNinam has not caught up with yet</div></div></div>
+  <div id="billingList"><div class="card"><div class="tmeta">Checking…</div></div></div>
+</div>
+
 <div class="wrap hidden" id="viewMaterials">
   <div class="page-head"><div><div class="page-title">Materials</div><div class="page-sub">Requests, what was used, and warehouse stock</div></div></div>
   <div class="seg no-print" id="matSeg"></div>
@@ -884,6 +897,7 @@ const WORKFLOWS = {
     { key:'customer', title:'9. Customer Details',
       desc:'Confirm and record the subscriber\'s account information.',
       fields:[
+        {k:'pppoe_link', type:'pppoe_link', label:'PPPoE Account You Configured'},
         {k:'cust_name', type:'text', label:'Customer Full Name', req:true},
         {k:'cust_account', type:'text', label:'Account Number'},
         {k:'cust_phone', type:'text', label:'Contact Number', req:true},
@@ -1346,7 +1360,7 @@ async function loadUsers(){
 }
 
 /* =================== NAVIGATION =================== */
-const ALL_VIEWS = ['viewLogin','viewTechList','viewStats','viewTicket','viewDash','viewTickets','viewNew','viewReport','viewTechs','viewTechReq','viewMaterials'];
+const ALL_VIEWS = ['viewLogin','viewTechList','viewStats','viewTicket','viewDash','viewTickets','viewNew','viewReport','viewTechs','viewTechReq','viewMaterials','viewBilling'];
 function show(view){
   ALL_VIEWS.forEach(v=>{ const el=document.getElementById(v); if(el) el.classList.add('hidden'); });
   const el = document.getElementById(view);
@@ -1364,6 +1378,7 @@ const NAV = {
     {tab:'dash',      ico:'📊', label:'Overview'},
     {tab:'tickets',   ico:'🎫', label:'Tickets'},
     {tab:'new',       ico:'➕', label:'New'},
+    {tab:'billing',   ico:'🧾', label:'Billing'},
     {tab:'materials', ico:'📦', label:'Materials'},
     {tab:'team',      ico:'👷', label:'Team'}
   ],
@@ -1397,6 +1412,7 @@ function go(tab){
     else { show('viewTechReq'); openTechMaterials(); }
   }
   else if(tab==='team'){ show('viewTechs'); renderTeam(); }
+  else if(tab==='billing'){ show('viewBilling'); renderBillingCatchup(); }
   renderNav();
 }
 /* older call sites still say adminGo(...) */
@@ -1932,7 +1948,7 @@ function collectStep(){
   const s = getWorkflow(t)[t.step];
   if(!s) return;
   s.fields.forEach(f=>{
-    if(f.type==='photo'||f.type==='signature'||f.type==='nap_picker') return;
+    if(f.type==='photo'||f.type==='signature'||f.type==='nap_picker'||f.type==='pppoe_link') return;
     if(f.type==='gps'){
       const lat=document.getElementById('f_'+f.k+'_lat'), lng=document.getElementById('f_'+f.k+'_lng');
       if(lat&&lng&&lat.value&&lng.value) t.data[f.k]={lat:parseFloat(lat.value),lng:parseFloat(lng.value)};
@@ -1967,6 +1983,11 @@ function finishTicket(){
   const missing = [];
   steps.forEach(s=>s.fields.forEach(f=>{ if(f.req&&!hasValue(t,f)) missing.push(s.title.replace(/&amp;/g,'&')+': '+f.label); }));
   if(missing.length){ alert('Still missing:\n• '+missing.join('\n• ')); renderTicket(); return; }
+  /* Not a blocker — sometimes the account genuinely is not ready — but the
+     office should not find this out weeks later. */
+  if(t.type==='installation' && !t.pppoeUsername){
+    if(!confirm('This job is not linked to a PPPoE account.\n\nWithout it the subscriber cannot be matched to billing, and the office will have to find and link it by hand.\n\nComplete anyway?')) return;
+  }
   if(!confirm('Mark this job as COMPLETED? The report will be sent to the office and locked.')) return;
   t.status='completed'; t.completed=Date.now();
   persist(t); renderTicket();
@@ -1976,6 +1997,16 @@ function finishTicket(){
 function renderField(t,f){
   const v = t.data[f.k];
   const reqMark = f.req?' <span class="req">*</span>':'';
+  if(f.type==='pppoe_link'){
+    const linked = t.pppoeUsername
+      ? `<div class="linked-chip"><span>🔗 ${esc(t.pppoeUsername)}${t.accountNo?' · account '+esc(t.accountNo):' · no account number yet'}</span>
+           <button type="button" class="linked-x" title="Unlink" onclick="unlinkPppoe()">✕</button></div>`
+      : `<div class="sync-wait">Not linked yet. Search the PPPoE account you programmed into the modem — without it this job cannot be matched to billing.</div>`;
+    return `<label>${f.label}</label>
+      ${linked}
+      <input id="pppoeSearch" placeholder="e.g. sl132" oninput="searchPppoe()" autocomplete="off">
+      <div id="pppoeOut" class="lookup-out"></div>`;
+  }
   if(f.type==='nap_picker'){
     const chosen = t.data.nap_port_id
       ? `<div class="nap-chosen">🔌 Holding ${esc(t.data.nap_port||'')} on ${esc(t.data.nap_id||'')}
@@ -2074,6 +2105,127 @@ function renderField(t,f){
   return `<label>${f.label}${reqMark}</label>
     <input type="${type}" ${f.step?'step="'+f.step+'"':''} id="f_${f.k}" placeholder="${f.placeholder||''}" value="${esc(v||'')}"${calc}>${calcBox}`;
 }
+/* =================== BILLING CATCH-UP (office, at night) ===================
+   Installations finish during the day; billing is caught up afterwards. This is
+   that worklist — worked out by comparing each finished job with what billing
+   currently holds, so it clears itself as TaokiNinam is updated. */
+function catchupBlock(r){
+  return [
+    'PPPoE: ' + r.username,
+    'Name: ' + r.name,
+    r.phone ? 'Contact: ' + r.phone : '',
+    r.address ? 'Address: ' + r.address : '',
+    r.plan ? 'Plan: ' + r.plan : '',
+    r.nap ? 'NAP: ' + r.nap : '',
+    r.port ? 'Port: ' + r.port : '',
+    r.onu ? 'ONU: ' + r.onu : ''
+  ].filter(Boolean).join('\n');
+}
+
+function copyCatchup(i){
+  const r = (BILLING_ROWS||[])[i];
+  if(!r) return;
+  const btn = document.getElementById('copy_'+i);
+  navigator.clipboard.writeText(catchupBlock(r)).then(()=>{
+    if(btn){ btn.textContent='✓ Copied'; setTimeout(()=>{ btn.textContent='⧉ Copy details'; }, 1600); }
+  }).catch(()=>{ if(btn) btn.textContent='Copy failed'; });
+}
+
+let BILLING_ROWS = [];
+async function renderBillingCatchup(){
+  const box = document.getElementById('billingList');
+  box.innerHTML = '<div class="card"><div class="tmeta">Comparing finished jobs with billing…</div></div>';
+  let d;
+  try{ d = await api('/api/billing-catchup'); }
+  catch(e){ box.innerHTML = `<div class="card"><div class="tmeta">Could not check billing — ${esc(e.message)}</div></div>`; return; }
+  BILLING_ROWS = d.rows || [];
+  if(!BILLING_ROWS.length){
+    box.innerHTML = `<div class="card"><div class="sync-ok">✔ Nothing waiting. All ${d.checked} finished installation${d.checked===1?'':'s'} match billing.</div></div>`;
+    return;
+  }
+  box.innerHTML = `<div class="card"><div class="sync-wait">${BILLING_ROWS.length} installation${BILLING_ROWS.length===1?'':'s'} still to encode in TaokiNinam. Rows disappear on their own once billing matches.</div></div>`
+    + BILLING_ROWS.map((r,i)=>`
+    <div class="card catchup">
+      <div class="ticket-top">
+        <span class="tnum mono">${esc(r.username||'— not linked —')}</span>
+        <span class="tmeta">${esc(r.number)} · ${r.completed?fmt(r.completed):''}</span>
+      </div>
+      <div class="catchup-why">${r.reasons.map(x=>`<span class="why">${esc(x)}</span>`).join('')}</div>
+      <div class="catchup-grid">
+        <span class="cl">Name</span><span class="cv">${esc(r.name||'—')}</span>
+        <span class="cl">Contact</span><span class="cv">${esc(r.phone||'—')}</span>
+        <span class="cl">Address</span><span class="cv">${esc(r.address||'—')}</span>
+        <span class="cl">Plan</span><span class="cv">${esc(r.plan||'—')}</span>
+        <span class="cl">NAP</span><span class="cv">${esc(r.nap||'—')}${r.port?' · '+esc(r.port):''}</span>
+        <span class="cl">ONU</span><span class="cv">${esc(r.onu||'—')}</span>
+        ${r.billing?`<span class="cl">In billing now</span><span class="cv">${esc(r.billing.name||'—')}${r.billing.accountNo?' · '+esc(r.billing.accountNo):''}</span>`:''}
+      </div>
+      <div class="wizard-btns">
+        <button class="btn btn-ghost btn-sm" id="copy_${i}" onclick="copyCatchup(${i})">⧉ Copy details</button>
+        <button class="btn btn-ghost btn-sm" onclick="openReport('${r.ticketId}')">Open ticket ›</button>
+      </div>
+    </div>`).join('');
+}
+
+/* =================== PPPoE ACCOUNT LINK (technician, on site) ===================
+   The office may be asleep when the job happens, and a brand-new account often
+   still carries the PPPoE name in billing. The technician is the one who put the
+   credentials into the modem, so the technician links it. */
+let _pppoeHits = [], _pppoeTimer = null, _pppoeSeq = 0;
+
+function searchPppoe(){
+  clearTimeout(_pppoeTimer);
+  const el = document.getElementById('pppoeSearch');
+  const out = document.getElementById('pppoeOut');
+  if(!el || !out) return;
+  const q = el.value.trim();
+  if(q.length < 2){ out.innerHTML = ''; return; }
+  _pppoeTimer = setTimeout(async ()=>{
+    const seq = ++_pppoeSeq;
+    out.innerHTML = '<div class="tmeta">Searching…</div>';
+    try{
+      const d = await api('/api/lookup/customers?q='+encodeURIComponent(q));
+      if(seq !== _pppoeSeq) return;
+      _pppoeHits = d.customers || [];
+      if(!_pppoeHits.length){ out.innerHTML = '<div class="tmeta">No PPPoE account by that name on the router.</div>'; return; }
+      out.innerHTML = _pppoeHits.map((c,i)=>`
+        <button type="button" class="lookup-row" onclick="pickPppoe(${i})">
+          <span class="lr-name">${esc(c.username)}</span>
+          <span class="tmeta">${esc(c.customerName && c.customerName!==c.username ? c.customerName : 'no name in billing yet')}${c.accountNo?' · '+esc(c.accountNo):' · not activated'}</span>
+        </button>`).join('');
+    }catch(e){
+      if(seq !== _pppoeSeq) return;
+      out.innerHTML = `<div class="tmeta">Lookup unavailable — ${esc(e.message)}</div>`;
+    }
+  }, 300);
+}
+
+async function pickPppoe(i){
+  const c = _pppoeHits[i];
+  const t = byId(currentId);
+  if(!c || !t) return;
+  collectStep();                                   // keep what is already typed on this step
+  try{
+    await api('/api/tickets/'+t.id, 'PUT', { pppoeUsername: c.username, accountNo: c.accountNo || '' });
+  }catch(e){ alert('Could not link that account: '+e.message); return; }
+  t.pppoeUsername = c.username;
+  t.accountNo = c.accountNo || '';
+  if(c.accountNo) t.data.cust_account = c.accountNo;
+  if(!t.data.cust_phone && c.contactNo) t.data.cust_phone = c.contactNo;
+  await persist(t);
+  renderTicket();
+}
+
+async function unlinkPppoe(){
+  const t = byId(currentId);
+  if(!t) return;
+  collectStep();
+  try{ await api('/api/tickets/'+t.id, 'PUT', { pppoeUsername: '', accountNo: '' }); }catch(e){}
+  t.pppoeUsername = ''; t.accountNo = '';
+  await persist(t);
+  renderTicket();
+}
+
 /* =================== NAP / PORT PICKER (from the FTTH map) ===================
    The map is the source of truth for what is free — billing only knows the NAP
    for about one subscriber in five. Picking a port holds it immediately, so two
