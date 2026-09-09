@@ -258,6 +258,19 @@
   .chip-done{background:#dcfce7;color:#15803d}
   .chip-idle{background:#f1f5f9;color:#64748b}
   .chip-issue{background:#e0e7ff;color:#3730a3;max-width:100%;overflow:hidden;text-overflow:ellipsis;display:inline-block}
+  /* ---- billing lookup + live status on tickets ---- */
+  .lookup-out{margin:6px 0 2px}
+  .lookup-row{display:block;width:100%;text-align:left;background:#f8fafc;border:1px solid var(--border);border-radius:10px;padding:8px 10px;margin-bottom:6px;cursor:pointer;font:inherit}
+  .lookup-row:hover{background:#eef2f7}
+  .lr-name{display:block;font-weight:700;font-size:13px;color:var(--text)}
+  .linked-chip{background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;border-radius:10px;padding:8px 10px;font-size:12px;font-weight:700;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .linked-x{border:none;background:transparent;color:#065f46;font-weight:800;cursor:pointer;font-size:15px;line-height:1;padding:0 2px}
+  .ctx-panel{margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:10px;background:#f8fafc}
+  .ctx-title{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+  .st-pill{display:inline-block;font-size:11px;font-weight:800;padding:3px 9px;border-radius:99px;letter-spacing:.04em}
+  .st-on{background:#dcfce7;color:#166534}
+  .st-off{background:#fee2e2;color:#991b1b}
+  .ctx-warn{font-size:12px;font-weight:700;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:7px 9px;margin-top:6px}
   .auto-remark{background:#eef2ff;border:1px solid #c7d2fe;color:#3730a3;font-size:12.5px;font-weight:700;border-radius:10px;padding:9px 11px;margin-bottom:10px}
   .alert-row{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:9px 11px;margin-bottom:6px}
   .alert-row:last-child{margin-bottom:0}
@@ -572,6 +585,10 @@
       <label>Assign to Technician <span class="req">*</span></label>
       <select id="nAssign"></select>
     </div>
+    <label>Find Customer in Billing</label>
+    <input id="nSearch" placeholder="Name, account number, contact number or PPPoE username" oninput="searchCustomers()" autocomplete="off">
+    <div id="nSearchOut" class="lookup-out"></div>
+    <div id="nLinked" class="linked-chip hidden"></div>
     <label>Customer / Site Name <span class="req">*</span></label>
     <input id="nCustomer" placeholder="Subscriber name, or site name for NAP installation">
     <label>Contact Number</label>
@@ -1834,7 +1851,9 @@ function renderTicket(){
     <div class="tmeta">📍 ${esc(t.address||'—')}</div>
     ${t.message?`<div class="tmeta" style="margin-top:6px">💬 ${esc(t.message)}</div>`:''}
     <div class="progressbar"><div style="width:${pct}%"></div></div>
-    <div class="tmeta" style="margin-top:4px">${pct}% complete${t.completed?' · Finished '+fmt(t.completed):''}</div>`;
+    <div class="tmeta" style="margin-top:4px">${pct}% complete${t.completed?' · Finished '+fmt(t.completed):''}</div>
+    <div id="ctxTech"></div>`;
+  loadCustomerContext(t, 'ctxTech');
 
   if(t.status==='completed'){
     document.getElementById('wizardArea').innerHTML = `
@@ -2934,6 +2953,101 @@ function prepareNewTicket(){
   const sel = document.getElementById('nIssue');
   if(sel && !sel._wired){ sel.addEventListener('change', onNewTypeChange); sel._wired = true; }
 }
+/* =================== BILLING LOOKUP =================== */
+/* The customer comes from billing, so a ticket points at a real account instead
+   of a typed name. Lookup is a convenience, never a gate: if the monitoring
+   service is unreachable the name can still be typed and the job goes ahead. */
+let PICKED = null;                 // the billing record this ticket is linked to
+let _lookupTimer = null, _lookupSeq = 0, _lookupHits = [];
+
+function searchCustomers(){
+  clearTimeout(_lookupTimer);
+  const q = document.getElementById('nSearch').value.trim();
+  const out = document.getElementById('nSearchOut');
+  if(q.length < 2){ out.innerHTML = ''; return; }
+  _lookupTimer = setTimeout(async ()=>{
+    const seq = ++_lookupSeq;
+    out.innerHTML = '<div class="tmeta">Searching billing…</div>';
+    try{
+      const d = await api('/api/lookup/customers?q='+encodeURIComponent(q));
+      if(seq !== _lookupSeq) return;          // a later keystroke already answered
+      _lookupHits = d.customers || [];
+      if(!_lookupHits.length){
+        out.innerHTML = '<div class="tmeta">No match in billing. You can still type the name below.</div>';
+        return;
+      }
+      out.innerHTML = _lookupHits.map((c,i)=>`
+        <button type="button" class="lookup-row" onclick="pickCustomer(${i})">
+          <span class="lr-name">${esc(c.customerName||c.username)}</span>
+          <span class="tmeta">${esc(c.accountNo||'no account no')} · ${esc(c.username)}${c.napBox?' · '+esc(c.napBox):''}${c.area?' · '+esc(c.area):''}</span>
+        </button>`).join('')
+        + (d.truncated?`<div class="tmeta">Showing ${_lookupHits.length} of ${d.count} matches — keep typing to narrow it down.</div>`:'');
+    }catch(e){
+      if(seq !== _lookupSeq) return;
+      out.innerHTML = `<div class="tmeta">Billing lookup unavailable — ${esc(e.message)} You can still type the customer name below.</div>`;
+    }
+  }, 300);
+}
+
+function pickCustomer(i){
+  const c = _lookupHits[i];
+  if(!c) return;
+  PICKED = c;
+  document.getElementById('nCustomer').value = c.customerName || c.username;
+  if(c.contactNo) document.getElementById('nPhone').value = c.contactNo;
+  document.getElementById('nSearchOut').innerHTML = '';
+  document.getElementById('nSearch').value = '';
+  const chip = document.getElementById('nLinked');
+  chip.className = 'linked-chip';
+  chip.innerHTML = `<span>🔗 Linked to account ${esc(c.accountNo||'—')} · ${esc(c.username)}</span>
+    <button type="button" class="linked-x" title="Unlink" onclick="clearPicked()">✕</button>`;
+}
+
+function clearPicked(){
+  PICKED = null;
+  const chip = document.getElementById('nLinked');
+  chip.className = 'linked-chip hidden';
+  chip.innerHTML = '';
+}
+
+/* ---- billing + live status panel on an open ticket ---- */
+function customerContextHtml(d){
+  const c = d.customer || {}, nap = d.nap;
+  const online = c.status === 'online';
+  const when = online
+    ? (c.uptime ? 'up '+esc(c.uptime) : '')
+    : (c.lastLogout ? 'since '+fmt(c.lastLogout) : '');
+  let napLine = '';
+  if(nap){
+    napLine = nap.wholeNapDown
+      ? `<div class="ctx-warn">🗄 ${esc(nap.napName)} — all ${nap.total} subscribers on this box are offline. The fault is upstream of the box, not this drop wire.</div>`
+      : `<div class="tmeta" style="margin-top:6px">🗄 ${esc(nap.napName)} — ${nap.offline} of ${nap.total} offline on this box</div>`;
+  }
+  return `<div class="ctx-panel">
+    <div class="ctx-title">Billing &amp; live status</div>
+    <div class="tmeta">🧾 Account ${esc(c.accountNo||'—')} · ${esc(c.customerName||'—')}</div>
+    <div class="tmeta">📞 ${esc(c.contactNo||'—')}${c.area?' · 📍 '+esc(c.area):''}</div>
+    ${c.napBox?`<div class="tmeta">🔌 ${esc(c.napBox)}</div>`:''}
+    <div style="margin-top:7px"><span class="st-pill ${online?'st-on':'st-off'}">${online?'ONLINE':'OFFLINE'}</span> <span class="tmeta">${when}</span></div>
+    ${napLine}
+  </div>`;
+}
+
+async function loadCustomerContext(t, elId){
+  const el = document.getElementById(elId);
+  if(!el) return;
+  if(!t || !t.pppoeUsername){ el.innerHTML = ''; return; }
+  el.innerHTML = '<div class="ctx-panel"><div class="tmeta">Checking billing and live status…</div></div>';
+  try{
+    const d = await api('/api/lookup/customers/'+encodeURIComponent(t.pppoeUsername));
+    if(currentId !== t.id) return;            // the user opened a different ticket
+    el.innerHTML = (d && d.customer) ? customerContextHtml(d) : '';
+  }catch(e){
+    if(currentId !== t.id) return;
+    el.innerHTML = `<div class="ctx-panel"><div class="tmeta">Live status unavailable — ${esc(e.message)}</div></div>`;
+  }
+}
+
 async function createTicket(){
   const isAdmin = USER && USER.role==='admin';
   const subject = document.getElementById('nSubject').value.trim();
@@ -2953,9 +3067,13 @@ async function createTicket(){
       subject, customer, assignedTo,
       phone: document.getElementById('nPhone').value.trim(),
       address: document.getElementById('nAddress').value.trim(),
-      message: document.getElementById('nMessage').value.trim()
+      message: document.getElementById('nMessage').value.trim(),
+      accountNo: PICKED ? (PICKED.accountNo||'') : '',
+      pppoeUsername: PICKED ? (PICKED.username||'') : ''
     });
-    ['nTicket','nSubject','nCustomer','nPhone','nAddress','nMessage'].forEach(i=>document.getElementById(i).value='');
+    ['nTicket','nSubject','nCustomer','nPhone','nAddress','nMessage','nSearch'].forEach(i=>document.getElementById(i).value='');
+    document.getElementById('nSearchOut').innerHTML = '';
+    clearPicked();
     ticketsEtag = null;
     await refreshTickets();
     go(isAdmin ? 'tickets' : 'jobs');
@@ -2979,7 +3097,9 @@ async function openReport(id){
     <div class="tmeta">👷 ${esc(t.assignedName||'Unassigned')} · Created ${fmt(t.created)}${t.createdByRole==='tech'?' (raised by technician)':''}</div>
     <div class="tmeta">${t.started?'▶ Started '+fmt(t.started):'▶ Not started yet'}${t.completed?' · 🏁 Finished '+fmt(t.completed):''}</div>
     <div style="margin-top:6px">${timerChip(t)}</div>
-    <div class="progressbar"><div style="width:${progress(t)}%"></div></div>`;
+    <div class="progressbar"><div style="width:${progress(t)}%"></div></div>
+    <div id="ctxRep" class="no-print"></div>`;
+  loadCustomerContext(t, 'ctxRep');
   const techs = users.filter(u=>u.role==='tech');
   const issues = SETTINGS.repairIssues || [];
   document.getElementById('repActions').innerHTML = `
