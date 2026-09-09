@@ -13,6 +13,9 @@ const DB_FILE = process.env.DB_FILE || path.join(__dirname, 'db.json');
 const PUBLIC = path.join(__dirname, 'public');
 /* photos live next to the database (on the mounted volume), NOT inside db.json */
 const PHOTO_DIR = process.env.PHOTO_DIR || path.join(path.dirname(DB_FILE), 'photos');
+/* Everything here lives in one JSON file on one volume. BACKUP_TOKEN opens a
+   read-only endpoint so a scheduled job elsewhere can keep copies off this disk. */
+const BACKUP_TOKEN = process.env.BACKUP_TOKEN || '';
 try { fs.mkdirSync(PHOTO_DIR, { recursive: true }); } catch (e) { console.error('Cannot create photo dir:', e.message); }
 
 /* ---------------- database (JSON file) ---------------- */
@@ -362,6 +365,32 @@ const server = http.createServer(async (req, res) => {
       const token = crypto.randomBytes(24).toString('hex');
       db.sessions[token] = user.id; saveDB();
       return json(res, 200, { token, user: publicUser(user) });
+    }
+
+    /* ---- backup (machine-to-machine, own token, read-only) ----
+       Returns the whole database plus the list of photo files, so a scheduled
+       job can store a dated copy somewhere other than this volume. */
+    if (p === '/api/backup' && (req.method === 'GET' || req.method === 'HEAD')) {
+      if (!BACKUP_TOKEN) return json(res, 503, { error: 'Backups are disabled: set BACKUP_TOKEN on this service.' });
+      const supplied = Buffer.from(String(req.headers['x-api-key'] || ''));
+      const expected = Buffer.from(BACKUP_TOKEN);
+      const ok = supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
+      if (!ok) return json(res, 401, { error: 'Bad or missing API key' });
+
+      let photos = [];
+      try { photos = fs.readdirSync(PHOTO_DIR).filter(n => !n.startsWith('.')); } catch (e) {}
+      return json(res, 200, {
+        takenAt: new Date().toISOString(),
+        counts: {
+          tickets: db.tickets.length,
+          users: db.users.length,
+          requests: db.requests.length,
+          stockLog: db.stockLog.length,
+          photos: photos.length
+        },
+        photos,
+        db
+      });
     }
 
     /* ---- everything below requires auth ---- */
