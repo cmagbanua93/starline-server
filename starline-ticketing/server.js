@@ -16,6 +16,11 @@ const PHOTO_DIR = process.env.PHOTO_DIR || path.join(path.dirname(DB_FILE), 'pho
 /* Everything here lives in one JSON file on one volume. BACKUP_TOKEN opens a
    read-only endpoint so a scheduled job elsewhere can keep copies off this disk. */
 const BACKUP_TOKEN = process.env.BACKUP_TOKEN || '';
+/* The monitoring service already knows who each PPPoE account belongs to (it
+   joins the billing export to the router every cycle) and whether they are
+   online right now. Tickets ask it rather than keeping a second customer list. */
+const MONITOR_URL = (process.env.MONITOR_URL || '').replace(/\/$/, '');
+const MONITOR_TOKEN = process.env.MONITOR_TOKEN || '';
 try { fs.mkdirSync(PHOTO_DIR, { recursive: true }); } catch (e) { console.error('Cannot create photo dir:', e.message); }
 
 /* ---------------- database (JSON file) ---------------- */
@@ -252,6 +257,45 @@ function auth(req) {
 }
 function publicUser(u) { return { id: u.id, username: u.username, name: u.name, role: u.role, inv: u.inv || { connectors: 0, cables: [], items: [] } }; }
 
+/* ---------------- customer lookup (via the monitoring service) ----------------
+ * The API key stays on this server: the technician's browser never sees it, and
+ * a monitoring outage degrades to "lookup unavailable" rather than blocking the
+ * job — the customer name can always still be typed by hand.
+ */
+function lookupError(message, code) {
+  const e = new Error(message);
+  e.code = code;
+  return e;
+}
+
+async function monitorLookup(pathAndQuery) {
+  if (!MONITOR_URL || !MONITOR_TOKEN) {
+    throw lookupError('Customer lookup is not set up yet (MONITOR_URL / MONITOR_TOKEN).', 503);
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  try {
+    const r = await fetch(MONITOR_URL + pathAndQuery, {
+      headers: { 'x-api-key': MONITOR_TOKEN },
+      signal: controller.signal
+    });
+    let body = {};
+    try { body = JSON.parse(await r.text()); } catch (e) {}
+    if (!r.ok) throw lookupError(body.error || ('Lookup failed (HTTP ' + r.status + ')'), r.status === 404 ? 404 : 502);
+    return body;
+  } catch (err) {
+    if (err.code) throw err;
+    throw lookupError(
+      err.name === 'AbortError'
+        ? 'The monitoring service did not answer in time.'
+        : 'Cannot reach the monitoring service right now.',
+      502
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /* ---------------- ticket list shaping (FIX 1) ----------------
  * The list endpoint must never carry image payloads. Every other field is kept
  * so the dashboard, tech list and usage report still render from the list alone;
@@ -404,6 +448,25 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true });
     }
     if (p === '/api/me' && req.method === 'GET') return json(res, 200, { user: publicUser(me) });
+
+    /* ---- customer lookup for the ticket screens ----
+       Any logged-in user may search; the key never leaves this server. */
+    if (p === '/api/lookup/customers' && req.method === 'GET') {
+      try {
+        const q = url.searchParams.get('q') || '';
+        return json(res, 200, await monitorLookup('/api/customers?limit=15&q=' + encodeURIComponent(q)));
+      } catch (e) {
+        return json(res, e.code || 500, { error: e.message });
+      }
+    }
+    const lookupOne = p.match(/^\/api\/lookup\/customers\/(.+)$/);
+    if (lookupOne && req.method === 'GET') {
+      try {
+        return json(res, 200, await monitorLookup('/api/customers/' + encodeURIComponent(decodeURIComponent(lookupOne[1]))));
+      } catch (e) {
+        return json(res, e.code || 500, { error: e.message });
+      }
+    }
 
     if (p === '/api/password' && req.method === 'POST') {
       const { oldPassword, newPassword } = await readBody(req);
@@ -646,6 +709,10 @@ const server = http.createServer(async (req, res) => {
         phone: String(b.phone || '').trim(),
         address: String(b.address || '').trim(),
         message: String(b.message || '').trim(),
+        /* Set when the customer was picked from billing rather than typed.
+           pppoeUsername is the key everything else joins on. */
+        accountNo: String(b.accountNo || '').trim(),
+        pppoeUsername: String(b.pppoeUsername || '').trim().toLowerCase(),
         assignedTo: assignee ? assignee.id : null,
         assignedName: assignee ? assignee.name : null,
         status: 'open',
@@ -664,7 +731,10 @@ const server = http.createServer(async (req, res) => {
         t.issue = issue ? issue.label : String(b.issue || '').trim();
         t.issueFlow = issue ? issue.flow : 'generic';
       }
-      if (t.type === 'installation') { t.data.cust_name = t.customer; t.data.cust_address = t.address; t.data.cust_phone = t.phone; }
+      if (t.type === 'installation') {
+        t.data.cust_name = t.customer; t.data.cust_address = t.address; t.data.cust_phone = t.phone;
+        if (t.accountNo) t.data.cust_account = t.accountNo;   // step 9 starts pre-filled
+      }
       db.tickets.push(t); saveDB();
       return json(res, 200, { ticket: t });
     }
@@ -679,7 +749,8 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'PUT') {
         const b = await readBody(req);
         if (isAdmin) {
-          ['subject', 'customer', 'phone', 'address', 'message', 'number'].forEach(k => { if (b[k] !== undefined) t[k] = String(b[k]).trim(); });
+          ['subject', 'customer', 'phone', 'address', 'message', 'number', 'accountNo'].forEach(k => { if (b[k] !== undefined) t[k] = String(b[k]).trim(); });
+          if (b.pppoeUsername !== undefined) t.pppoeUsername = String(b.pppoeUsername).trim().toLowerCase();
           if (b.assignedTo !== undefined) {
             const a = db.users.find(u => u.id === b.assignedTo);
             t.assignedTo = a ? a.id : null; t.assignedName = a ? a.name : null;
