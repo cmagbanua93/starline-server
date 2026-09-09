@@ -21,6 +21,10 @@ const BACKUP_TOKEN = process.env.BACKUP_TOKEN || '';
    online right now. Tickets ask it rather than keeping a second customer list. */
 const MONITOR_URL = (process.env.MONITOR_URL || '').replace(/\/$/, '');
 const MONITOR_TOKEN = process.env.MONITOR_TOKEN || '';
+/* The FTTH map owns the network inventory. A completed installation is written
+   there, so the map becomes correct through ordinary work rather than upkeep. */
+const FTTH_URL = (process.env.FTTH_URL || '').replace(/\/$/, '');
+const FTTH_TOKEN = process.env.FTTH_TOKEN || '';
 try { fs.mkdirSync(PHOTO_DIR, { recursive: true }); } catch (e) { console.error('Cannot create photo dir:', e.message); }
 
 /* ---------------- database (JSON file) ---------------- */
@@ -268,6 +272,109 @@ function lookupError(message, code) {
   return e;
 }
 
+/* ---------------- writing an installation onto the FTTH map ----------------
+ * Two systems, two databases: this write cannot be atomic with completing the
+ * job. So the job always completes, and the map write is queued and retried.
+ * A ticket carries its own sync state, and nothing is ever silently dropped.
+ */
+async function ftthCall(method, pathname, body) {
+  if (!FTTH_URL || !FTTH_TOKEN) throw lookupError('The FTTH map is not connected (FTTH_URL / FTTH_TOKEN).', 503);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const r = await fetch(FTTH_URL + pathname, {
+      method,
+      headers: { 'x-api-key': FTTH_TOKEN, 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: controller.signal
+    });
+    let out = {};
+    try { out = JSON.parse(await r.text()); } catch (e) {}
+    if (!r.ok) throw lookupError(out.error || ('FTTH map returned HTTP ' + r.status), r.status);
+    return out;
+  } catch (err) {
+    if (err.code) throw err;
+    throw lookupError(
+      err.name === 'AbortError' ? 'The FTTH map did not answer in time.' : 'Cannot reach the FTTH map right now.',
+      502
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* Everything the map needs about the subscriber, taken from the job the
+   technician actually did. */
+function installPayload(t) {
+  const d = t.data || {};
+  const loc = d.location || {};
+  return {
+    ticketId: t.id,
+    portId: d.nap_port_id,
+    subscriber: {
+      name: d.cust_name || t.customer || '',
+      address: d.cust_address || t.address || '',
+      phone: d.cust_phone || t.phone || '',
+      pppoe_username: t.pppoeUsername || '',
+      plan: d.cust_plan || '',
+      onu_serial: d.modem_serial || '',
+      lat: loc.lat, lng: loc.lng,
+      drop_length_m: d.cable_used,
+      installed_on: t.completed ? new Date(t.completed).toISOString().slice(0, 10) : null,
+      account_no: t.accountNo || '',
+      notes: d.final_notes || ''
+    }
+  };
+}
+
+async function pushInstall(t) {
+  const d = t.data || {};
+  if (!d.nap_port_id) {
+    /* The NAP was typed by hand rather than picked, so there is no port on the
+       map to attach to. Say so plainly instead of retrying forever. */
+    t.ftthSync = { state: 'manual', message: 'NAP entered by hand — the map was not updated', at: Date.now() };
+    return saveDB();
+  }
+  if (!FTTH_URL || !FTTH_TOKEN) {
+    t.ftthSync = { state: 'off', message: 'The FTTH map is not connected', at: Date.now() };
+    return saveDB();
+  }
+  const prior = t.ftthSync || {};
+  t.ftthSync = { state: 'pending', attempts: (prior.attempts || 0) + 1, lastTry: Date.now() };
+  saveDB();
+  try {
+    const r = await ftthCall('POST', '/api/installations', installPayload(t));
+    t.ftthSync = {
+      state: 'done',
+      subscriberId: r.subscriber ? r.subscriber.id : null,
+      alreadyThere: !!r.already,
+      attempts: t.ftthSync.attempts,
+      at: Date.now()
+    };
+    console.log(`[ftth] ticket ${t.number} written to the map (subscriber ${t.ftthSync.subscriberId})`);
+  } catch (e) {
+    /* A refusal is not an outage. The map saying "that port is taken" or "that
+       username is already here" will say the same thing in five minutes, so it
+       stops and asks for a person instead of retrying for ever. Only genuine
+       unreachability keeps its place in the queue. */
+    const permanent = [400, 404, 409].includes(e.code);
+    t.ftthSync = Object.assign({}, t.ftthSync, {
+      state: permanent ? 'blocked' : 'pending',
+      error: e.message
+    });
+    console.error(`[ftth] ticket ${t.number} ${permanent ? 'refused by the map' : 'not written yet'}: ${e.message}`);
+  }
+  saveDB();
+}
+
+/* Anything still pending is retried in the background — a redeploy of the map
+   during a completion costs a few minutes, not a lost port assignment. */
+const FTTH_RETRY_MS = 5 * 60 * 1000;
+setInterval(() => {
+  const waiting = db.tickets.filter(t => t.ftthSync && t.ftthSync.state === 'pending');
+  waiting.slice(0, 5).forEach(t => { pushInstall(t); });
+}, FTTH_RETRY_MS).unref?.();
+
 async function monitorLookup(pathAndQuery) {
   if (!MONITOR_URL || !MONITOR_TOKEN) {
     throw lookupError('Customer lookup is not set up yet (MONITOR_URL / MONITOR_TOKEN).', 503);
@@ -466,6 +573,47 @@ const server = http.createServer(async (req, res) => {
       } catch (e) {
         return json(res, e.code || 500, { error: e.message });
       }
+    }
+
+    /* ---- the FTTH map, for the port picker in step 4 ---- */
+    if (p === '/api/ftth/naps' && req.method === 'GET') {
+      try {
+        const qs = url.searchParams.toString();
+        return json(res, 200, await ftthCall('GET', '/api/nap-candidates' + (qs ? '?' + qs : '')));
+      } catch (e) {
+        return json(res, e.code || 500, { error: e.message });
+      }
+    }
+    if ((p === '/api/ftth/reserve' || p === '/api/ftth/release') && req.method === 'POST') {
+      const rb = await readBody(req);
+      const portId = String(rb.portId || '').trim();
+      const rt = db.tickets.find(x => x.id === rb.ticketId);
+      if (!rt) return json(res, 404, { error: 'Ticket not found' });
+      if (!isAdmin && rt.assignedTo !== me.id) return json(res, 403, { error: 'Not your ticket' });
+      if (!portId) return json(res, 400, { error: 'portId required' });
+      try {
+        const action = p.endsWith('reserve') ? 'reserve' : 'release';
+        return json(res, 200, await ftthCall('POST', `/api/ports/${encodeURIComponent(portId)}/${action}`, { ticketId: rt.id }));
+      } catch (e) {
+        return json(res, e.code || 500, { error: e.message });
+      }
+    }
+
+    /* Jobs that finished but whose map write has not gone through yet. */
+    if (p === '/api/ftth/pending' && req.method === 'GET') {
+      const list = db.tickets
+        .filter(t => t.ftthSync && ['pending', 'blocked', 'manual', 'off'].includes(t.ftthSync.state))
+        .filter(t => isAdmin || t.assignedTo === me.id)
+        .map(t => ({ id: t.id, number: t.number, customer: t.customer, completed: t.completed, ftthSync: t.ftthSync }));
+      return json(res, 200, { pending: list });
+    }
+    const retryOne = p.match(/^\/api\/ftth\/retry\/([\w.]+)$/);
+    if (retryOne && req.method === 'POST') {
+      if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+      const rt = db.tickets.find(x => x.id === retryOne[1]);
+      if (!rt) return json(res, 404, { error: 'Ticket not found' });
+      await pushInstall(rt);
+      return json(res, 200, { ftthSync: rt.ftthSync });
     }
 
     if (p === '/api/password' && req.method === 'POST') {
@@ -839,6 +987,12 @@ const server = http.createServer(async (req, res) => {
         }
         t.updated = Date.now(); t.updatedBy = me.name;
         saveDB();
+        /* A finished installation belongs on the map. The technician is not kept
+           waiting for it: the reply goes back now and the write is queued. */
+        if (t.status === 'completed' && t.type === 'installation' &&
+            (!t.ftthSync || !['done', 'manual'].includes(t.ftthSync.state))) {
+          pushInstall(t).catch(e => console.error('[ftth] push failed:', e.message));
+        }
         return json(res, 200, { ticket: t });
       }
       if (req.method === 'DELETE') {
