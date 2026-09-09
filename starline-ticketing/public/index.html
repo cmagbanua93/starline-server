@@ -271,6 +271,27 @@
   .st-on{background:#dcfce7;color:#166534}
   .st-off{background:#fee2e2;color:#991b1b}
   .ctx-warn{font-size:12px;font-weight:700;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:7px 9px;margin-top:6px}
+  /* ---- NAP / port picker ---- */
+  .nap-wrap{margin:6px 0 2px}
+  .nap-card{border:1px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden;background:#fff}
+  .nap-card.open{border-color:var(--primary)}
+  .nap-head{display:block;width:100%;text-align:left;background:#f8fafc;border:none;padding:10px 12px;cursor:pointer;font:inherit}
+  .nap-name{display:block;font-weight:700;font-size:13.5px;color:var(--text)}
+  .nap-free{color:#15803d}
+  .nap-full{color:var(--danger)}
+  .port-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(58px,1fr));gap:7px;padding:10px 12px 12px}
+  .port{position:relative;border:1.5px solid var(--border);background:#fff;border-radius:9px;padding:9px 4px 14px;font-weight:800;font-size:15px;color:var(--text);cursor:pointer;font-family:inherit}
+  .port .port-col{position:absolute;left:0;right:0;bottom:3px;font-size:8.5px;font-weight:700;letter-spacing:.04em;color:var(--muted);text-transform:uppercase}
+  .port.free{border-color:#86efac;background:#f0fdf4}
+  .port.free:hover{background:#dcfce7}
+  .port.mine{border-color:var(--primary);background:#dbeafe;box-shadow:0 0 0 2px rgba(37,99,235,.2)}
+  .port.occupied{background:#f1f5f9;color:#94a3b8;cursor:not-allowed}
+  .port.occupied .port-col{color:#cbd5e1}
+  .port.reserved{background:#fef9c3;border-color:#fde047;color:#a16207;cursor:not-allowed}
+  .port.faulty{background:#fee2e2;border-color:#fecaca;color:#991b1b;cursor:not-allowed}
+  .nap-chosen{background:#dbeafe;border:1px solid #93c5fd;color:#1e3a8a;border-radius:10px;padding:8px 10px;font-size:12px;font-weight:700;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .sync-ok{background:#dcfce7;color:#166534;border:1px solid #bbf7d0;border-radius:8px;padding:7px 9px;font-size:12px;font-weight:700;margin-top:8px}
+  .sync-wait{background:#fef9c3;color:#854d0e;border:1px solid #fde047;border-radius:8px;padding:7px 9px;font-size:12px;font-weight:700;margin-top:8px}
   .auto-remark{background:#eef2ff;border:1px solid #c7d2fe;color:#3730a3;font-size:12.5px;font-weight:700;border-radius:10px;padding:9px 11px;margin-bottom:10px}
   .alert-row{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:9px 11px;margin-bottom:6px}
   .alert-row:last-child{margin-bottom:0}
@@ -827,6 +848,7 @@ const WORKFLOWS = {
     { key:'nap', title:'4. NAP Box &amp; Port Details',
       desc:'Record the NAP box the subscriber is connected to and the exact port used, then take a photo of the NAP box cassette. Time and GPS location are stamped on the photo automatically.',
       fields:[
+        {k:'nap_pick', type:'nap_picker', label:'Pick the box and port from the map'},
         {k:'nap_id', type:'text', label:'NAP Box ID / Name', req:true, placeholder:'e.g. NAP-BRGY1-014'},
         {k:'nap_port', type:'text', label:'Port Number Connected', req:true, placeholder:'e.g. Port 5 of 8'},
         {k:'nap_photo', type:'photo', label:'Photo of NAP Box Cassette', req:true, autogps:true},
@@ -1852,6 +1874,7 @@ function renderTicket(){
     ${t.message?`<div class="tmeta" style="margin-top:6px">💬 ${esc(t.message)}</div>`:''}
     <div class="progressbar"><div style="width:${pct}%"></div></div>
     <div class="tmeta" style="margin-top:4px">${pct}% complete${t.completed?' · Finished '+fmt(t.completed):''}</div>
+    ${syncBadge(t)}
     <div id="ctxTech"></div>`;
   loadCustomerContext(t, 'ctxTech');
 
@@ -1883,6 +1906,7 @@ function renderTicket(){
       </div>
       ${isLast&&!allDone?'<div class="tmeta" style="margin-top:8px;color:var(--danger)">Finish all required (*) items in every step to complete the job.</div>':''}
     </div>`;
+  if(document.getElementById('napPickWrap')) loadNapPicker();
   renderSummary(t, 'summaryArea');
 }
 function gotoStep(i){ const t=byId(currentId); collectStep(); t.step=i; persist(t); renderTicket(); }
@@ -1908,7 +1932,7 @@ function collectStep(){
   const s = getWorkflow(t)[t.step];
   if(!s) return;
   s.fields.forEach(f=>{
-    if(f.type==='photo'||f.type==='signature') return;
+    if(f.type==='photo'||f.type==='signature'||f.type==='nap_picker') return;
     if(f.type==='gps'){
       const lat=document.getElementById('f_'+f.k+'_lat'), lng=document.getElementById('f_'+f.k+'_lng');
       if(lat&&lng&&lat.value&&lng.value) t.data[f.k]={lat:parseFloat(lat.value),lng:parseFloat(lng.value)};
@@ -1952,6 +1976,16 @@ function finishTicket(){
 function renderField(t,f){
   const v = t.data[f.k];
   const reqMark = f.req?' <span class="req">*</span>':'';
+  if(f.type==='nap_picker'){
+    const chosen = t.data.nap_port_id
+      ? `<div class="nap-chosen">🔌 Holding ${esc(t.data.nap_port||'')} on ${esc(t.data.nap_id||'')}
+           <button type="button" class="linked-x" title="Choose a different port" onclick="clearNapChoice()">✕</button></div>`
+      : '';
+    return `<label>${f.label}</label>
+      ${chosen}
+      <div id="napPickWrap" class="nap-wrap"><div class="tmeta">Loading boxes from the FTTH map…</div></div>
+      <div class="tmeta" style="margin-top:6px">Not on the map yet? Leave this and type the box and port by hand below — the job still completes.</div>`;
+  }
   if(f.type==='photo'){
     const inner = (v&&v.img)
       ? `<img src="${v.img}"><div class="photo-stamp">📷 ${fmt(v.time)}${v.lat!=null?` · 📍 ${v.lat.toFixed(6)}, ${v.lng.toFixed(6)}`:''} — tap to retake</div>`
@@ -2040,6 +2074,105 @@ function renderField(t,f){
   return `<label>${f.label}${reqMark}</label>
     <input type="${type}" ${f.step?'step="'+f.step+'"':''} id="f_${f.k}" placeholder="${f.placeholder||''}" value="${esc(v||'')}"${calc}>${calcBox}`;
 }
+/* =================== NAP / PORT PICKER (from the FTTH map) ===================
+   The map is the source of truth for what is free — billing only knows the NAP
+   for about one subscriber in five. Picking a port holds it immediately, so two
+   technicians working the same barangay cannot both claim it. */
+let NAPS = [], NAP_OPEN = null;
+
+async function loadNapPicker(){
+  const t = byId(currentId);
+  const wrap = document.getElementById('napPickWrap');
+  if(!t || !wrap) return;
+  try{
+    const qs = new URLSearchParams();
+    const loc = t.data && t.data.location;          // set once the GPS step is done
+    if(loc && loc.lat!=null && loc.lng!=null){ qs.set('lat', loc.lat); qs.set('lng', loc.lng); }
+    const d = await api('/api/ftth/naps' + (qs.toString()?'?'+qs.toString():''));
+    NAPS = d.naps || [];
+    if(!NAP_OPEN && t.data.nap_device_id) NAP_OPEN = t.data.nap_device_id;
+    renderNapList();
+  }catch(e){
+    wrap.innerHTML = `<div class="tmeta">The FTTH map is unavailable — ${esc(e.message)} Type the box and port by hand below.</div>`;
+  }
+}
+
+function renderNapList(){
+  const t = byId(currentId);
+  const wrap = document.getElementById('napPickWrap');
+  if(!wrap || !t) return;
+  if(!NAPS.length){
+    wrap.innerHTML = '<div class="tmeta">No NAP boxes on the map yet. Type the box and port by hand below.</div>';
+    return;
+  }
+  wrap.innerHTML = NAPS.map(n=>{
+    const open = NAP_OPEN === n.id;
+    const dist = n.distance_m!=null
+      ? (n.distance_m < 1000 ? n.distance_m+' m away' : (n.distance_m/1000).toFixed(1)+' km away')
+      : (n.area || '');
+    const full = n.counts.free === 0;
+    return `<div class="nap-card ${open?'open':''}">
+      <button type="button" class="nap-head" onclick="openNap('${n.id}')">
+        <span class="nap-name">${esc(n.name)}</span>
+        <span class="tmeta">${esc(dist)}${dist?' · ':''}<b class="${full?'nap-full':'nap-free'}">${n.counts.free} free</b> of ${n.counts.total}</span>
+      </button>
+      ${open?`<div class="port-grid">${n.ports.map(p=>{
+        const mine = t.data.nap_port_id === p.id;
+        const cls = mine ? 'mine' : p.state;
+        const can = p.state === 'free' || mine;
+        const title = mine ? 'Held for this job'
+          : p.state==='free' ? 'Free' : p.state==='reserved' ? 'Held for another job'
+          : p.state==='faulty' ? 'Marked faulty' : 'In use';
+        return `<button type="button" class="port ${cls}" ${can?'':'disabled'} title="${esc(title)} — ${esc(p.fiber_color||'')}"
+          onclick="chooseNapPort('${n.id}','${p.id}')">${p.port_no}<span class="port-col">${esc((p.fiber_color||'').slice(0,3))}</span></button>`;
+      }).join('')}</div>
+      <div class="tmeta" style="margin-top:6px">Grey = in use · amber = held by another job · red = faulty</div>`:''}
+    </div>`;
+  }).join('');
+}
+
+function openNap(id){
+  NAP_OPEN = (NAP_OPEN === id) ? null : id;
+  renderNapList();
+}
+
+async function chooseNapPort(napId, portId){
+  const t = byId(currentId);
+  const nap = NAPS.find(n=>n.id===napId);
+  const port = nap && nap.ports.find(p=>p.id===portId);
+  if(!t || !nap || !port) return;
+  if(t.data.nap_port_id === portId) return;              // already holding this one
+  collectStep();                                          // keep anything typed on this step
+  try{
+    await api('/api/ftth/reserve','POST',{ ticketId: t.id, portId });
+  }catch(e){
+    alert('Could not hold that port: ' + e.message);
+    await loadNapPicker();                                // someone else may have taken it
+    return;
+  }
+  const previous = t.data.nap_port_id;
+  t.data.nap_device_id = napId;
+  t.data.nap_port_id   = portId;
+  t.data.nap_id        = nap.name;
+  t.data.nap_port      = 'Port ' + port.port_no + (port.fiber_color? ' ('+port.fiber_color+')' : '') + ' of ' + nap.counts.total;
+  await persist(t);
+  if(previous && previous !== portId){
+    try{ await api('/api/ftth/release','POST',{ ticketId: t.id, portId: previous }); }catch(e){}
+  }
+  renderTicket();
+}
+
+async function clearNapChoice(){
+  const t = byId(currentId);
+  if(!t || !t.data.nap_port_id) return;
+  const portId = t.data.nap_port_id;
+  collectStep();
+  t.data.nap_port_id = ''; t.data.nap_device_id = '';
+  await persist(t);
+  try{ await api('/api/ftth/release','POST',{ ticketId: t.id, portId }); }catch(e){}
+  renderTicket();
+}
+
 function cableCalcText(t, endOverride){
   const start = parseFloat(t.data.cable_start);
   const endEl = document.getElementById('f_cable_end');
@@ -3033,6 +3166,19 @@ function customerContextHtml(d){
   </div>`;
 }
 
+/* Where a finished installation stands with the FTTH map. Nothing is ever
+   silently dropped: if the write has not gone through, the ticket says so. */
+function syncBadge(t){
+  const s = t && t.ftthSync;
+  if(!s || t.type!=='installation') return '';
+  if(s.state==='done')   return `<div class="sync-ok">🗺 Written to the FTTH map${s.alreadyThere?' (was already there)':''}</div>`;
+  if(s.state==='manual') return `<div class="sync-wait">🗺 The NAP was typed by hand, so the map was not updated. Pin it on the map yourself, or reopen the job and pick the port.</div>`;
+  if(s.state==='off')    return `<div class="sync-wait">🗺 The FTTH map is not connected, so this job was not written to it.</div>`;
+  if(s.state==='pending')return `<div class="sync-wait">🗺 Waiting to be written to the map — attempt ${s.attempts||1}${s.error?': '+esc(s.error):''}. It keeps retrying on its own.</div>`;
+  if(s.state==='blocked')return `<div class="ctx-warn">🗺 The map would not accept this job: ${esc(s.error||'')}. Sort it out on the map, then retry from the office.</div>`;
+  return '';
+}
+
 async function loadCustomerContext(t, elId){
   const el = document.getElementById(elId);
   if(!el) return;
@@ -3098,6 +3244,7 @@ async function openReport(id){
     <div class="tmeta">${t.started?'▶ Started '+fmt(t.started):'▶ Not started yet'}${t.completed?' · 🏁 Finished '+fmt(t.completed):''}</div>
     <div style="margin-top:6px">${timerChip(t)}</div>
     <div class="progressbar"><div style="width:${progress(t)}%"></div></div>
+    ${syncBadge(t)}
     <div id="ctxRep" class="no-print"></div>`;
   loadCustomerContext(t, 'ctxRep');
   const techs = users.filter(u=>u.role==='tech');
