@@ -575,6 +575,62 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    /* ---- what still has to be typed into billing ----
+       Installations finish during the day; billing is caught up at night. This
+       is that night's worklist, worked out by comparing each completed job with
+       what billing currently holds. It clears itself: once TaokiNinam matches,
+       the row stops appearing. Nothing to tick off. */
+    if (p === '/api/billing-catchup' && req.method === 'GET') {
+      if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+      const installs = db.tickets
+        .filter(t => t.type === 'installation' && t.status === 'completed')
+        .sort((a, b) => (b.completed || 0) - (a.completed || 0));
+
+      /* One lookup per distinct account, a few at a time. */
+      const names = [...new Set(installs.map(t => t.pppoeUsername).filter(Boolean))];
+      const live = new Map();
+      for (let i = 0; i < names.length; i += 6) {
+        await Promise.all(names.slice(i, i + 6).map(async u => {
+          try { live.set(u, (await monitorLookup('/api/customers/' + encodeURIComponent(u))).customer); }
+          catch (e) { live.set(u, null); }
+        }));
+      }
+
+      const rows = [];
+      for (const t of installs) {
+        const d = t.data || {};
+        const row = {
+          ticketId: t.id, number: t.number, completed: t.completed, tech: t.assignedName || '',
+          username: t.pppoeUsername || '',
+          name: d.cust_name || t.customer || '',
+          phone: d.cust_phone || t.phone || '',
+          address: d.cust_address || t.address || '',
+          plan: d.cust_plan || '',
+          nap: d.nap_id || '', port: d.nap_port || '',
+          onu: d.modem_serial || '',
+          reasons: []
+        };
+        if (!row.username) {
+          row.reasons.push('no PPPoE account linked to this job');
+        } else {
+          const c = live.get(row.username);
+          if (!c) {
+            row.reasons.push('that PPPoE account is not in billing yet');
+          } else {
+            row.billing = { name: c.customerName || '', accountNo: c.accountNo || '', napBox: c.napBox || '' };
+            const billingName = String(c.customerName || '').trim();
+            if (!billingName || billingName.toLowerCase() === row.username.toLowerCase()) {
+              row.reasons.push('billing still shows the PPPoE username as the name');
+            }
+            if (!String(c.accountNo || '').trim()) row.reasons.push('no account number — not activated yet');
+            if (row.nap && !String(c.napBox || '').trim()) row.reasons.push('NAP and port not recorded in billing');
+          }
+        }
+        if (row.reasons.length) rows.push(row);
+      }
+      return json(res, 200, { rows, checked: installs.length });
+    }
+
     /* ---- the FTTH map, for the port picker in step 4 ---- */
     if (p === '/api/ftth/naps' && req.method === 'GET') {
       try {
@@ -897,8 +953,7 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'PUT') {
         const b = await readBody(req);
         if (isAdmin) {
-          ['subject', 'customer', 'phone', 'address', 'message', 'number', 'accountNo'].forEach(k => { if (b[k] !== undefined) t[k] = String(b[k]).trim(); });
-          if (b.pppoeUsername !== undefined) t.pppoeUsername = String(b.pppoeUsername).trim().toLowerCase();
+          ['subject', 'customer', 'phone', 'address', 'message', 'number'].forEach(k => { if (b[k] !== undefined) t[k] = String(b[k]).trim(); });
           if (b.assignedTo !== undefined) {
             const a = db.users.find(u => u.id === b.assignedTo);
             t.assignedTo = a ? a.id : null; t.assignedName = a ? a.name : null;
@@ -914,6 +969,12 @@ const server = http.createServer(async (req, res) => {
             if (t.issueFlow !== wasFlow && t.status !== 'completed') t.step = 0;
           }
         }
+        /* The technician programs the PPPoE credentials into the modem, so the
+           technician is who knows the account. Linking it is theirs to do — the
+           office is asleep while the work happens. */
+        if (b.pppoeUsername !== undefined) t.pppoeUsername = String(b.pppoeUsername).trim().toLowerCase();
+        if (b.accountNo !== undefined) t.accountNo = String(b.accountNo).trim();
+
         if (b.data !== undefined) {
           /* a client that is still holding a summary must not be able to blank out
              photos it never received */
