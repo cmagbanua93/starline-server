@@ -514,6 +514,24 @@
     </div>
   </div>
 
+  <!-- reel register: every physical reel and where it is -->
+  <div id="matReels" class="hidden">
+    <div class="card">
+      <div class="sec-head"><div class="sec-title">Needs attention</div></div>
+      <div class="step-desc">Reels that are short, waiting to be handed in, or that a job could not account for.</div>
+      <div id="reelAlerts"></div>
+    </div>
+    <div class="card">
+      <div class="sec-head"><div class="sec-title">Reel register — every reel and who holds it</div></div>
+      <div class="step-desc">The code here is the code written on the reel's tag. Count a reel and enter what you measured; the system records the difference rather than quietly agreeing with itself.</div>
+      <div id="reelTable"></div>
+    </div>
+    <div class="card">
+      <div class="sec-head"><div class="sec-title">Reel history — every movement</div></div>
+      <div id="reelLogPanel"></div>
+    </div>
+  </div>
+
   <!-- warehouse + technician stock -->
   <div id="matStock" class="hidden">
     <div class="card">
@@ -1704,17 +1722,36 @@ function renderTechList(){
 
   /* current stock on hand */
   const inv = (USER&&USER.inv)||{connectors:0,cables:[],items:[]};
-  const reels = (inv.cables||[]).filter(r=>r.meters>0);
+  /* Every reel the technician holds is listed, including spent and returning ones.
+     A reel that drops off this list is a reel nobody is answerable for, which is
+     exactly what the register exists to prevent. */
+  const allReels = (inv.cables||[]).slice().sort((a,b)=>(a.issuedAt||0)-(b.issuedAt||0));
+  const usable = allReels.filter(r=>r.meters>REEL_EMPTY_M && r.state!=='returning');
   const lowFic = (inv.connectors||0)<5;
+  const reelRow = (r)=>{
+    const spent = r.meters<=REEL_EMPTY_M;
+    const returning = r.state==='returning';
+    const low = !spent && !returning && r.meters<=REEL_LOW_M;
+    const colour = returning ? 'color:var(--muted)' : (spent||low) ? 'color:var(--danger);font-weight:700' : '';
+    const tail = returning ? ' — returning to office, awaiting confirmation'
+      : spent ? ' — spent, return the empty reel'
+      : low ? ' — low, keep for short drops' : '';
+    const canReturn = !returning;
+    return `<div class="tmeta" style="font-size:13px;${colour};display:flex;justify-content:space-between;gap:8px;align-items:center">
+      <span>🧵 <b>${esc(r.code||'')}</b> ${esc(r.name)} — ${r.meters} m${tail}</span>
+      ${canReturn?`<button class="pill" style="flex:none;padding:2px 8px;font-size:11px" onclick="returnReel('${esc(r.id)}','${esc(r.code||'')}',${r.meters})">Return</button>`:''}
+    </div>`;
+  };
   document.getElementById('techStockPanel').innerHTML = `
     <div class="sec-head" style="margin-bottom:5px">
       <span class="sec-title">📦 My Stock on Hand</span>
       <span class="badge b-install">Request ›</span>
     </div>
     <div class="tmeta" style="font-size:13px${lowFic?';color:var(--danger);font-weight:700':''}">🔌 FIC Connectors: ${inv.connectors||0} pcs${lowFic?' — running low!':''}</div>
-    ${reels.length
-      ? reels.map(r=>`<div class="tmeta" style="font-size:13px${r.meters<50?';color:var(--danger);font-weight:700':''}">🧵 ${esc(r.name)}: ${r.meters} m left${r.meters<50?' — running low!':''}</div>`).join('')
+    ${allReels.length
+      ? allReels.map(reelRow).join('')
       : '<div class="tmeta" style="font-size:13px;color:var(--danger);font-weight:700">🧵 No fiber cable — request from the admin</div>'}
+    ${!usable.length&&allReels.length?'<div class="tmeta" style="font-size:13px;color:var(--danger);font-weight:700">🧵 Nothing usable left — request a fresh reel</div>':''}
     ${(inv.items||[]).map(i=>`<div class="tmeta" style="font-size:13px">📦 ${esc(i.name)}: ${i.qty} pcs</div>`).join('')}`;
 
   const counts = {
@@ -1793,13 +1830,20 @@ function renderTechStats(){
   const urgent = open.concat(prog).filter(t=>(t.priority||3)===1);
   const inv = (USER&&USER.inv)||{connectors:0,cables:[],items:[]};
   const lowFic = (inv.connectors||0) < 5;
-  const noCable = !((inv.cables||[]).some(r=>r.meters>50));
+  /* A reel marked for return is already promised back to the office, so it does
+     not count as cable the technician can still pull from today. */
+  const drawable = (inv.cables||[]).filter(r=>r.state!=='returning' && r.state!=='written_off');
+  const noCable = !drawable.some(r=>r.meters>REEL_LOW_M);
+  const onlyScraps = !noCable ? false : drawable.some(r=>r.meters>REEL_EMPTY_M);
+  const returning = (inv.cables||[]).filter(r=>r.state==='returning');
   const rows = [];
   if(urgent.length) rows.push(`⚡ ${urgent.length} urgent job${urgent.length===1?'':'s'} assigned to you`);
   if(stale.length) rows.push(`🕒 ${stale.length} job${stale.length===1?' has':'s have'} been waiting over 2 days`);
   if(longRun.length) rows.push(`⏱ ${longRun.length} job${longRun.length===1?'':'s'} still open after a day — close ${longRun.length===1?'it':'them'} if finished`);
   if(lowFic) rows.push(`🔌 Only ${inv.connectors||0} FIC connectors left — request more`);
-  if(noCable) rows.push('🧵 No usable fiber cable on hand — request a reel');
+  if(noCable && onlyScraps) rows.push('🧵 Only short remnants left — request a fresh reel before taking a long run');
+  else if(noCable) rows.push('🧵 No usable fiber cable on hand — request a reel');
+  if(returning.length) rows.push(`↩ ${returning.length} reel${returning.length===1?'':'s'} waiting to be handed in at the office`);
   const attEl = document.getElementById('techAttention');
   attEl.classList.toggle('hidden', !rows.length);
   if(rows.length){
@@ -2066,16 +2110,32 @@ function renderField(t,f){
       <div class="photo-box ${v?'has':''}" onclick="openSigModal('${f.k}')">${inner}</div>`;
   }
   if(f.type==='reel_select'){
-    const reels = ((USER&&USER.inv&&USER.inv.cables)||[]).filter(r=>r.meters>0);
+    /* A reel being returned to the office must not still be drawable, or cable
+       goes out on a reel the technician has already signed back in. */
+    const reels = ((USER&&USER.inv&&USER.inv.cables)||[])
+      .filter(r=>r.meters>REEL_EMPTY_M && r.state!=='returning' && r.state!=='written_off');
     if(!reels.length){
       return `<label>${f.label}${reqMark}</label>
         <div class="gps-out" style="background:#fef3c7;border-color:#fcd34d;color:#92400e">No fiber cable in your stock. Tap 📦 Materials on your job list to request cable from the admin${f.req?' — required to finish this job':''}.</div>`;
     }
+    /* Oldest reel of each cable type first: that is the one to finish before
+       opening a new one, and it is what stops part-used reels piling up. The
+       technician still picks the cable TYPE they need — the app names the reel,
+       so they are not hunting through identical-looking entries. */
+    const byType = {};
+    reels.forEach(r=>{ (byType[r.name] = byType[r.name] || []).push(r); });
+    Object.keys(byType).forEach(k=> byType[k].sort((a,b)=>(a.issuedAt||0)-(b.issuedAt||0)) );
+    const activeIds = {};
+    Object.keys(byType).forEach(k=>{ activeIds[byType[k][0].id] = true; });
+    const ordered = [];
+    Object.keys(byType).sort().forEach(k=> byType[k].forEach(r=>ordered.push(r)) );
+    const sel = ordered.find(r=>r.id===v);
     return `<label>${f.label}${reqMark}</label>
       <select id="f_${f.k}" onchange="onReelChange()">
         <option value="">— select cable —</option>
-        ${reels.map(r=>`<option value="${esc(r.id)}" ${r.id===v?'selected':''}>${esc(r.name)} — ${r.meters} m left</option>`).join('')}
-      </select>`;
+        ${ordered.map(r=>`<option value="${esc(r.id)}" ${r.id===v?'selected':''}>${esc(r.code||'')} · ${esc(r.name)} — ${r.meters} m${activeIds[r.id]?' · USE THIS ONE':''}</option>`).join('')}
+      </select>
+      ${reelPickerNote(sel, activeIds)}`;
   }
   if(f.type==='select'){
     return `<label>${f.label}${reqMark}</label>
@@ -2340,6 +2400,38 @@ function updateCableCalc(){
   const out = document.getElementById('cableCalcOut');
   if(out && t) out.textContent = cableCalcText(t);
 }
+/* Mirrors the server's reel thresholds so the picker warns with the same numbers
+   the server enforces. */
+const REEL_EMPTY_M = 2, REEL_LOW_M = 100;
+
+/* Guidance under the reel picker. The point is to catch the "this reel is too
+   short for today's run" problem BEFORE the cable is pulled — that is the moment
+   a technician would otherwise improvise a mid-span joint, which StarLine does not
+   allow, or quietly open a second reel that nobody records. */
+function reelPickerNote(sel, activeIds){
+  if(!sel) return `<p class="hint">Pick the cable type you need — the reel marked <b>USE THIS ONE</b> is the oldest of that type and should be finished first.</p>`;
+  const bits = [];
+  if(!activeIds[sel.id]) bits.push(`<b>${esc(sel.code||'')}</b> is not the oldest reel of this cable. Finish the one marked USE THIS ONE first, unless it is not on the truck.`);
+  if(sel.meters<=REEL_LOW_M) bits.push(`<b>${esc(sel.code||'')} has only ${sel.meters} m left.</b> If today's run is longer than that, do <u>not</u> join mid-span — start a fresh reel for the whole run and keep this one for a short drop.`);
+  if(!bits.length) bits.push(`Drawing from <b>${esc(sel.code||'')}</b> — ${sel.meters} m on the reel. This code is recorded on the job.`);
+  const warn = sel.meters<=REEL_LOW_M;
+  return `<p class="hint"${warn?' style="color:#92400e;background:#fef3c7;border:1px solid #fcd34d;padding:8px;border-radius:8px"':''}>${bits.join('<br>')}</p>`;
+}
+/* Handing a reel back. It leaves the job picker straight away so no further cable
+   can be drawn from it, but it stays on the technician's record until the office
+   confirms it physically arrived — that gap is the accountability. */
+async function returnReel(id, code, meters){
+  const msg = meters>REEL_LOW_M
+    ? `Return reel ${code} to the office with ${meters} m still on it?\n\nIt will stop appearing on your jobs straight away, and stays on your record until the office confirms they received it.`
+    : `Return reel ${code} (${meters} m left) to the office?\n\nIt will stop appearing on your jobs, and stays on your record until the office confirms they received it.`;
+  if(!confirm(msg)) return;
+  try{
+    await api('/api/reels/'+id+'/return', 'POST', {});
+    USER = (await api('/api/me')).user;
+    renderTechList();
+    alert('Reel '+code+' is marked for return. Hand it in at the office — it stays on your record until they confirm they received it.');
+  }catch(e){ alert(e.message||'Could not mark that reel for return'); }
+}
 function onReelChange(){
   /* auto-fill the starting meter with the reel's tracked remaining meters */
   const sel = document.getElementById('f_cable_reel');
@@ -2347,6 +2439,20 @@ function onReelChange(){
   if(!sel) return;
   const reel = ((USER&&USER.inv&&USER.inv.cables)||[]).find(r=>r.id===sel.value);
   if(reel && startEl && !startEl.value) startEl.value = reel.meters;
+  /* Refresh the note under the picker so the short-reel warning appears the
+     moment a reel is chosen, not after the next re-render. */
+  const note = sel.parentElement && sel.parentElement.querySelector('.hint');
+  if(note && reel){
+    const mine = ((USER&&USER.inv&&USER.inv.cables)||[])
+      .filter(r=>r.meters>REEL_EMPTY_M && r.state!=='returning' && r.state!=='written_off');
+    const oldest = {};
+    mine.forEach(r=>{ if(!oldest[r.name] || (r.issuedAt||0) < (oldest[r.name].issuedAt||0)) oldest[r.name] = r; });
+    const activeIds = {};
+    Object.keys(oldest).forEach(k=>{ activeIds[oldest[k].id] = true; });
+    const tmp = document.createElement('div');
+    tmp.innerHTML = reelPickerNote(reel, activeIds);
+    note.replaceWith(tmp.firstElementChild);
+  }
 }
 
 /* =================== CAMERA (opens directly) =================== */
@@ -3017,8 +3123,9 @@ function renderInvPanel(){
         const reels=(inv.cables||[]).filter(r=>r.meters!==0);
         const cableHtml = reels.length
           ? reels.map(r=>{
-              const low = r.meters<50?' style="color:var(--danger);font-weight:700"':'';
-              return `<div${low}>${esc(r.name)}: ${r.meters} m</div>`;
+              const low = r.meters<=REEL_LOW_M?' style="color:var(--danger);font-weight:700"':'';
+              const tag = r.state==='returning'?' — returning':'';
+              return `<div${low}><b>${esc(r.code||'')}</b> ${esc(r.name)}: ${r.meters} m${tag}</div>`;
             }).join('')
           : '<span style="color:var(--danger);font-weight:700">none</span>';
         const lowK = (inv.connectors||0)<5?' style="color:var(--danger);font-weight:700"':'';
@@ -3058,8 +3165,8 @@ function renderUsage(){
         <td style="color:var(--primary);font-weight:700;cursor:pointer" onclick="openReport('${t.id}')">${esc(t.number)}</td>
         <td>${typeBadge(t.type)}</td>
         <td>${esc(t.assignedName||'—')}</td>
-        <td>${esc(t.data.cable_reel_name || (t.data.cable_reel?'(reel)':'—'))}</td>
-        <td>${t.data.cable_used!==undefined?t.data.cable_used+' m':'—'}</td>
+        <td>${t.data.cable_reel_code?`<b>${esc(t.data.cable_reel_code)}</b><div class="tmeta">${esc(t.data.cable_reel_name||'')}</div>`:esc(t.data.cable_reel_name || (t.data.cable_reel?'(reel)':'—'))}</td>
+        <td>${t.data.cable_used!==undefined?t.data.cable_used+' m':'—'}${t.data.cable_shortfall?`<div class="tmeta" style="color:var(--danger);font-weight:700">${t.data.cable_shortfall} m unaccounted</div>`:''}</td>
         <td>${parseInt(t.data.connectors)||0} pcs</td>
       </tr>`).join('')}
     </table>` : '<div class="tmeta">No completed jobs with materials yet.</div>'}`;
@@ -3145,9 +3252,132 @@ function usageLogTable(list, opts){
 
 /* ---- admin Materials page ---- */
 let matTab = 'requests';
+/* ---------------- reel register (admin) ---------------- */
+let REELS = [], REELLOG = [], REEL_ALERTS = 0;
+async function loadReels(){
+  try{
+    const r = await api('/api/reels');
+    REELS = r.reels || []; REELLOG = r.log || [];
+  }catch(e){ REELS = []; REELLOG = []; }
+  REEL_ALERTS = REELS.filter(reelNeedsAttention).length;
+}
+/* What an admin actually has to act on: a reel promised back that has not arrived,
+   a job that drew more than the reel held, or a reel too short to trust for a run. */
+function reelNeedsAttention(r){
+  return r.state==='returning' || (r.shortfall>0) || (r.holder==='tech' && r.state==='open' && r.meters<=REEL_LOW_M);
+}
+function reelStateLabel(r){
+  if(r.state==='returning') return ['Waiting to be handed in','#92400e','#fef3c7'];
+  if(r.state==='written_off') return ['Written off','#991b1b','#fee2e2'];
+  if(r.holder==='office') return ['At the office','#1e40af','#dbeafe'];
+  if(r.meters<=REEL_EMPTY_M) return ['Spent','#525252','#f5f5f5'];
+  if(r.meters<=REEL_LOW_M) return ['Low — short drops only','#92400e','#fef3c7'];
+  return ['In use','#166534','#dcfce7'];
+}
+function renderReels(){
+  const alerts = REELS.filter(reelNeedsAttention);
+  document.getElementById('reelAlerts').innerHTML = alerts.length ? alerts.map(r=>{
+    const why = r.state==='returning'
+        ? `${esc(r.techName||'A technician')} marked it for return with ${r.meters} m on it — confirm when it physically arrives.`
+      : r.shortfall>0
+        ? `A job drew ${r.shortfall} m more than this reel held. Find out whether a second reel was used or the meter was misread.`
+        : `Only ${r.meters} m left with ${esc(r.techName||'the technician')} — not enough for a full run.`;
+    return `<div class="tmeta" style="padding:8px 0;border-bottom:1px solid var(--line)">
+      <b>${esc(r.code||'')}</b> · ${esc(r.name)} — ${why}</div>`;
+  }).join('') : '<div class="tmeta">Nothing to chase. Every reel is accounted for.</div>';
+
+  /* One card per reel rather than a wide table: on a phone a six-column table
+     pushes the action buttons off-screen, and the office often does this count
+     standing at the rack with a handset. */
+  const rows = REELS.slice().sort((a,b)=>String(a.code).localeCompare(String(b.code)));
+  document.getElementById('reelTable').innerHTML = rows.length ? rows.map(r=>{
+    const [lbl,fg,bg] = reelStateLabel(r);
+    const used = r.startUnknown
+      ? 'starting length unknown — this reel was repaired from a negative balance'
+      : (r.startMeters!==undefined ? `${Math.round((r.startMeters-r.meters)*100)/100} m used of ${r.startMeters} m` : '');
+    return `<div style="padding:10px 0;border-bottom:1px solid var(--line)">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline;flex-wrap:wrap">
+        <div><b style="font-size:15px">${esc(r.code||'')}</b>
+          <span class="tmeta">· ${esc(r.name)}</span></div>
+        <span class="badge" style="color:${fg};background:${bg}">${lbl}</span>
+      </div>
+      <div class="tmeta" style="margin-top:2px">
+        <b style="color:var(--txt)">${r.meters} m left</b> · ${esc(used)}
+        · held by ${esc(r.holder==='office'?'the office':(r.techName||'—'))}
+      </div>
+      ${r.shortfall>0?`<div class="tmeta" style="color:var(--danger);font-weight:700">${r.shortfall} m unaccounted for on this reel</div>`:''}
+      <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+        <button class="pill" style="padding:3px 10px;font-size:12px" onclick="countReel('${esc(r.id)}','${esc(r.code||'')}',${r.meters})">Count it</button>
+        ${r.state==='returning'?`<button class="pill" style="padding:3px 10px;font-size:12px" onclick="receiveReel('${esc(r.id)}','${esc(r.code||'')}',${r.meters})">Confirm received</button>`:''}
+        <button class="pill" style="padding:3px 10px;font-size:12px" onclick="writeOffReel('${esc(r.id)}','${esc(r.code||'')}')">Write off</button>
+      </div>
+    </div>`;
+  }).join('') : '<div class="tmeta">No reels issued yet. Release a cable request and each reel appears here with its own code.</div>';
+
+  const L = REELLOG.slice(0,120);
+  document.getElementById('reelLogPanel').innerHTML = L.length ? L.map(l=>{
+    const v = (l.variance !== undefined && l.variance !== null) ? l.variance : null;
+    const amount = (l.event==='reconciled'||l.event==='received')
+      ? `counted ${l.counted} m against ${l.expected} m expected` +
+        (v ? ` — <b style="color:${v<0?'var(--danger)':'#166534'}">${v>0?'+':''}${v} m</b>` : ' — matched')
+      : (l.meters!==undefined ? `${l.meters} m` : '');
+    return `<div style="padding:8px 0;border-bottom:1px solid var(--line)">
+      <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+        <span><b>${esc(l.code||'')}</b> — ${esc(reelEventLabel(l.event))}</span>
+        <span class="tmeta">${esc(new Date(l.ts).toLocaleString())}</span>
+      </div>
+      <div class="tmeta">${amount}${amount?' · ':''}${esc(l.by||l.techName||'—')}</div>
+      ${l.note?`<div class="tmeta" style="font-style:italic">${esc(l.note)}</div>`:''}
+    </div>`;
+  }).join('') : '<div class="tmeta">No reel movements recorded yet.</div>';
+}
+function reelEventLabel(e){
+  return ({ issued:'Issued to technician', reissued:'Remnant re-issued', drawn:'Cable drawn on a job',
+    shortfall:'Drew more than the reel held', shortfall_recovered:'Negative balance repaired',
+    emptied:'Reel run down to empty', return_started:'Technician marked it for return',
+    received:'Received back at the office', reconciled:'Physically counted',
+    adjusted:'Metres changed by an admin', removed:'Removed from stock', written_off:'Written off' })[e] || e;
+}
+/* Counting is typed in, never pre-filled with what the system already believes —
+   a pre-filled box turns a count into a tap. */
+async function countReel(id, code, expected){
+  const v = prompt('Reel '+code+'\n\nMeasure the reel and type the metres actually on it.\nThe system expects '+expected+' m — leave this blank to cancel.');
+  if(v===null || String(v).trim()==='') return;
+  const counted = parseFloat(v);
+  if(isNaN(counted) || counted<0) return alert('Enter the measured length in metres, for example 240');
+  const note = prompt('Anything to note about this count? (optional)') || '';
+  try{
+    const r = await api('/api/reels/'+id+'/reconcile','POST',{counted, note});
+    await loadReels(); renderMaterials();
+    alert(r.variance===0
+      ? 'Counted '+counted+' m — matches what the system expected.'
+      : 'Counted '+counted+' m against '+r.expected+' m expected. A difference of '+(r.variance>0?'+':'')+r.variance+' m is recorded against '+code+'.');
+  }catch(e){ alert(e.message); }
+}
+async function receiveReel(id, code, expected){
+  const v = prompt('Receiving reel '+code+'.\n\nMeasure it now and type the metres on it.\nThe technician\'s app says '+expected+' m.');
+  if(v===null) return;
+  const counted = String(v).trim()==='' ? undefined : parseFloat(v);
+  if(counted!==undefined && (isNaN(counted)||counted<0)) return alert('Enter the measured length in metres.');
+  try{
+    await api('/api/reels/'+id+'/receive','POST',{counted});
+    await loadReels(); renderMaterials();
+    alert('Reel '+code+' received. It is off the technician\'s record and back in office stock.');
+  }catch(e){ alert(e.message); }
+}
+async function writeOffReel(id, code){
+  const reason = prompt('Write off reel '+code+'?\n\nThis takes it out of stock for good. Say why — this is kept on the record.');
+  if(reason===null || !reason.trim()) return;
+  if(!confirm('Write off '+code+' for good?\n\nReason: '+reason.trim())) return;
+  try{
+    await api('/api/reels/'+id+'/writeoff','POST',{reason:reason.trim()});
+    await loadReels(); renderMaterials();
+  }catch(e){ alert(e.message); }
+}
+
 function setMatTab(tab){ matTab = tab; renderMaterials(); }
 async function openMaterials(){
-  await Promise.all([loadRequests(), loadWarehouse(), loadStockLog()]);
+  await Promise.all([loadRequests(), loadWarehouse(), loadStockLog(), loadReels()]);
   await loadUsers();
   renderMaterials();
   renderNav();
@@ -3157,10 +3387,12 @@ function renderMaterials(){
   document.getElementById('matSeg').innerHTML = [
     ['requests','Requests'+(pending?` (${pending})`:'')],
     ['usage','Usage'],
+    ['reels','Reels'+(REEL_ALERTS?` (${REEL_ALERTS})`:'')],
     ['stock','Stock']
   ].map(([v,l])=>`<button class="${matTab===v?'on':''}" onclick="setMatTab('${v}')">${l}</button>`).join('');
   document.getElementById('matRequests').classList.toggle('hidden', matTab!=='requests');
   document.getElementById('matUsage').classList.toggle('hidden', matTab!=='usage');
+  document.getElementById('matReels').classList.toggle('hidden', matTab!=='reels');
   document.getElementById('matStock').classList.toggle('hidden', matTab!=='stock');
   if(matTab==='requests') renderRequests();
   if(matTab==='usage'){
@@ -3177,6 +3409,7 @@ function renderMaterials(){
       </tr>`).join('')}
     </table>` : '<div class="tmeta">Nothing has been released yet. Releasing a request records it here.</div>';
   }
+  if(matTab==='reels') renderReels();
   if(matTab==='stock'){ renderWarehouse(); renderInvPanel(); }
 }
 
