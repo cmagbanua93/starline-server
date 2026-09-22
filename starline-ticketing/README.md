@@ -26,6 +26,20 @@ The Overview is a summary only — every stat, chart bar and "needs attention" r
 5. **Job clock:** the timer starts the moment the technician first works on a job and stops on completion. The report carries an automatic remark — "Completed in 3 hours 20 minutes from the time the technician started work" — and the lists show a live "running" chip.
 6. **Materials:** technicians request stock; you approve and release it. Everything released is recorded, and everything a completed job consumed (cable metres, connectors, issued items) is deducted from that technician automatically. Materials → Usage shows **released vs used vs unused** per item, a dated usage log per job, and the release log.
 
+## Fiber reels — keeping the count honest
+
+Every physical reel is tracked as itself, not as an anonymous lump of metres.
+
+- **Each reel gets a code** the moment it is issued — `BLA-0001`, `GLO-0003`. Write that code on the reel's tag. It appears on the job that drew from it, in the usage log, and in the register, so any reel can be traced to a technician and a job.
+- **The technician picks a cable type, not a reel.** The oldest reel of that type is marked **USE THIS ONE**, so stock rotates and part-used reels get finished instead of piling up. Choosing a different reel is allowed — it just says so, for when the marked one is not on the truck.
+- **Short reels are caught before the cable is pulled.** Under 100 m the app warns: do not join mid-span, start a fresh reel for the whole run and keep the short one for a drop.
+- **A reel can never go below zero.** If a job records more metres than the reel held, the draw is capped at what was really on it and the difference is recorded as *unaccounted* against both the reel and the job, which is flagged for review. (Before this, an over-draw pushed the reel negative and it silently disappeared from stock.)
+- **Returning a reel is a two-step handover.** The technician taps **Return**; the reel immediately stops appearing on their jobs but stays on their record until the office taps **Confirm received**. A reel in that gap is a reel someone still has to answer for.
+- **Counting never guesses.** Materials → Reels → *Count it* asks for the metres you actually measured; it is never pre-filled with what the system expects. The difference is recorded either way, so a clean count is evidence too.
+- **Write-offs need a reason**, and the reason is kept.
+
+Materials → **Reels** shows what needs chasing, every reel and who holds it, and the full movement history.
+
 Technician phones must reach the server: on the same Wi-Fi/LAN use the **Network** address printed at startup (e.g. `http://192.168.1.10:3000`). For technicians in the field, host it on a VPS or expose it with a domain.
 
 ## Camera note (important)
