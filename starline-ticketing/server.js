@@ -76,7 +76,50 @@ function humanDuration(ms) {
    items are any other stock {id, name, qty} */
 db.warehouse = db.warehouse || { connectors: 0, cables: [], items: [] };
 db.warehouse.items = db.warehouse.items || [];
-/* inventory model: { connectors: N, cables: [{id, name, meters}] } — migrate old flat cable number */
+/* remnants handed back by technicians: part-used reels that are back at the office
+   and can be re-issued. Kept apart from full reels so nobody re-issues one by
+   accident thinking it holds a full 1000 m. */
+db.warehouse.remnants = db.warehouse.remnants || [];
+
+/* ---------------- reel register ----------------
+ * Every physical reel is one object with a code that is written on its tag. That
+ * code is what makes a reel accountable: it shows on the job that drew from it, in
+ * the usage log, and in the register, so a reel cannot quietly leave the company.
+ * A reel below REEL_EMPTY_M is spent; below REEL_LOW_M it is warned about, because
+ * starting a long run on a nearly-empty reel is what forces a mid-span joint. */
+const REEL_EMPTY_M = 2;
+const REEL_LOW_M = 100;
+db.reelSeq = db.reelSeq || 0;
+/* Append-only audit trail: issued, drawn, shortfall, returned, received, reconciled.
+   Nothing edits a reel's metres without leaving a row here. */
+db.reelLog = db.reelLog || [];
+
+function cablePrefix(name) {
+  const words = String(name || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
+  let p = words.map(w => w[0]).join('').replace(/[^A-Z]/g, '');
+  if (p.length < 2) p = String(name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3);
+  return p.slice(0, 3) || 'CBL';
+}
+function nextReelCode(name) {
+  db.reelSeq += 1;
+  return cablePrefix(name) + '-' + String(db.reelSeq).padStart(4, '0');
+}
+function round2(n) { return Math.round((parseFloat(n) || 0) * 100) / 100; }
+
+/* One row per reel event. `expected` vs `counted` on a reconcile is deliberately
+   kept even when they match, so a clean count is evidence too. */
+function logReel(reel, event, detail) {
+  db.reelLog.push(Object.assign({
+    id: 'rl' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    ts: Date.now(),
+    reelId: reel ? reel.id : '', code: reel ? reel.code : '', name: reel ? reel.name : '',
+    event
+  }, detail || {}));
+  if (db.reelLog.length > 20000) db.reelLog = db.reelLog.slice(-20000);
+}
+
+/* inventory model: { connectors: N, cables: [{id, code, name, meters, startMeters, state}] } */
+let migratedReels = false;
 db.users.forEach(u => {
   u.inv = u.inv || {};
   if (u.inv.connectors === undefined) u.inv.connectors = 0;
@@ -86,7 +129,46 @@ db.users.forEach(u => {
     if (u.inv.cable > 0) u.inv.cables.push({ id: 'r' + Date.now() + Math.random().toString(36).slice(2, 6), name: 'Stock cable', meters: u.inv.cable });
     delete u.inv.cable;
   }
+  /* Backfill reels that pre-date the register, and rescue any that an over-draw
+     already pushed below zero — those had silently vanished from every
+     "meters > 0" list while still sitting in the file. */
+  /* Connectors could be driven negative by the same unfloored subtraction. */
+  if (u.inv.connectors < 0) { u.inv.connectors = 0; migratedReels = true; }
+  u.inv.cables.forEach(r => {
+    if (!r.code) { r.code = nextReelCode(r.name); migratedReels = true; }
+    if (r.meters < 0) {
+      const short = round2(-r.meters);
+      r.meters = 0;
+      migratedReels = true;
+      r.shortfall = round2((r.shortfall || 0) + short);
+      logReel(r, 'shortfall_recovered', { techId: u.id, techName: u.name, meters: short,
+        note: 'Reel was below zero from an unguarded over-draw and has been floored at 0 m.' });
+    }
+    r.meters = round2(r.meters);
+    /* Set after the rescue above, never before: a reel that had been driven
+       negative has no knowable starting length, and recording 0 would read as
+       "nothing was ever on it" instead of "we cannot say". */
+    if (r.startMeters === undefined) {
+      if (r.shortfall > 0) r.startUnknown = true;
+      else r.startMeters = round2(r.meters);
+    }
+    if (!r.state) r.state = r.meters <= REEL_EMPTY_M ? 'empty' : 'open';
+    if (!r.issuedAt) r.issuedAt = r.issuedAt || Date.now();
+  });
 });
+
+/* A rescue that only lived in memory would be undone by the next restart reading
+   the same bad figures, so it is written back once at boot. */
+if (migratedReels) { try { fs.writeFileSync(DB_FILE, JSON.stringify(db)); } catch (e) { console.error('reel migration save failed:', e.message); } }
+
+/* The reel a technician should be drawing from for a given cable type: oldest
+   issued first, so stock rotates and remnants do not pile up forever. */
+function activeReelFor(u, cableName) {
+  const n = String(cableName || '').trim().toLowerCase();
+  return ((u && u.inv && u.inv.cables) || [])
+    .filter(r => r.state === 'open' && r.meters > REEL_EMPTY_M && (!n || r.name.toLowerCase() === n))
+    .sort((a, b) => (a.issuedAt || 0) - (b.issuedAt || 0))[0] || null;
+}
 
 let saveTimer = null;
 function saveDB() {
@@ -436,7 +518,7 @@ function ticketSummary(t) {
 /* Records stock leaving the warehouse for a technician. `qty` is pieces (reels for
    cable) and `meters` the cable length that represents, so the usage report can
    compare metres released against metres consumed. */
-function logStock(tech, kind, name, qty, meters, source, by) {
+function logStock(tech, kind, name, qty, meters, source, by, codes) {
   const q = parseFloat(qty) || 0;
   if (!tech || !q) return;
   db.stockLog.push({
@@ -445,6 +527,7 @@ function logStock(tech, kind, name, qty, meters, source, by) {
     techId: tech.id, techName: tech.name,
     kind, name: String(name || '').trim() || (kind === 'connector' ? 'FIC Connector' : ''),
     qty: q, meters: parseFloat(meters) || 0,
+    codes: Array.isArray(codes) ? codes.slice() : (codes ? [codes] : []),
     source: source || 'direct', by: by || ''
   });
   if (db.stockLog.length > 5000) db.stockLog = db.stockLog.slice(-5000);
@@ -460,13 +543,29 @@ function addItemTo(u, name, qty) {
   if (ex) { ex.qty += q; if (ex.qty <= 0) u.inv.items = u.inv.items.filter(i => i !== ex); }
   else if (q > 0) u.inv.items.push({ name: n, qty: q });
 }
-function addStockTo(u, cableName, cableMeters, connectors) {
+/* Issues one physical reel to a technician and gives it its code. `existing` carries
+   a remnant being re-issued, so a part-used reel keeps the code already on its tag
+   rather than being reborn as a fresh one. Returns the reel for logging. */
+function addStockTo(u, cableName, cableMeters, connectors, existing, by) {
   u.inv = u.inv || { connectors: 0, cables: [] };
   u.inv.cables = u.inv.cables || [];
+  let reel = null;
   const name = String(cableName || '').trim();
-  const meters = parseFloat(cableMeters) || 0;
-  if (name && meters > 0) u.inv.cables.push({ id: 'r' + Date.now() + Math.random().toString(36).slice(2, 6), name, meters: Math.round(meters * 100) / 100 });
+  const meters = round2(cableMeters);
+  if (name && meters > 0) {
+    reel = existing ? Object.assign({}, existing, { meters }) : {
+      id: 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      code: nextReelCode(name), name, meters, startMeters: meters
+    };
+    reel.state = 'open';
+    reel.issuedAt = Date.now();
+    u.inv.cables.push(reel);
+    logReel(reel, existing ? 'reissued' : 'issued', {
+      techId: u.id, techName: u.name, meters, by: by || ''
+    });
+  }
   u.inv.connectors = (u.inv.connectors || 0) + (parseInt(connectors) || 0);
+  return reel;
 }
 
 /* ---------------- static files ---------------- */
@@ -789,8 +888,13 @@ const server = http.createServer(async (req, res) => {
             if (wh.qty < qty) return json(res, 400, { error: 'Not enough stock: request needs ' + qty + ' reel(s) of ' + wh.name + ' (' + wh.meters + ' m/reel) but warehouse has only ' + wh.qty + '.' });
             wh.qty -= qty;
             if (wh.qty <= 0) db.warehouse.cables = db.warehouse.cables.filter(c => c !== wh);
-            for (let i = 0; i < qty; i++) addStockTo(tech, wh.name, wh.meters, 0);
-            logStock(tech, 'cable', wh.name, qty, qty * wh.meters, 'request', me.name);
+            const issued = [];
+            for (let i = 0; i < qty; i++) {
+              const reel = addStockTo(tech, wh.name, wh.meters, 0, null, me.name);
+              if (reel) issued.push(reel.code);
+            }
+            r.reelCodes = issued;
+            logStock(tech, 'cable', wh.name, qty, qty * wh.meters, 'request', me.name, issued);
           } else if (kind === 'connector' && qty > 0) {
             if ((db.warehouse.connectors || 0) < qty) return json(res, 400, { error: 'Not enough FIC connectors in warehouse: requested ' + qty + ', available ' + (db.warehouse.connectors || 0) + '.' });
             db.warehouse.connectors -= qty;
@@ -860,23 +964,164 @@ const server = http.createServer(async (req, res) => {
       const b = await readBody(req);
       const u = db.users.find(x => x.id === m[1]);
       if (!u) return json(res, 404, { error: 'User not found' });
-      addStockTo(u, b.cableName, b.cableMeters, b.connectors);
+      const directReel = addStockTo(u, b.cableName, b.cableMeters, b.connectors, null, me.name);
       /* stock handed over directly (not through a request) still belongs in the ledger */
       if (String(b.cableName || '').trim() && (parseFloat(b.cableMeters) || 0) > 0)
-        logStock(u, 'cable', b.cableName, 1, b.cableMeters, 'direct', me.name);
+        logStock(u, 'cable', b.cableName, 1, b.cableMeters, 'direct', me.name, directReel ? [directReel.code] : []);
       if ((parseInt(b.connectors) || 0) > 0)
         logStock(u, 'connector', 'FIC Connector', parseInt(b.connectors), 0, 'direct', me.name);
       if (b.itemName !== undefined && b.itemQty !== undefined) {
         addItemTo(u, b.itemName, b.itemQty);
         if ((parseInt(b.itemQty) || 0) > 0) logStock(u, 'item', b.itemName, parseInt(b.itemQty), 0, 'direct', me.name);
       }
-      if (b.removeReel) { u.inv.cables = (u.inv.cables || []).filter(r => r.id !== b.removeReel); }
+      /* Re-issuing a remnant keeps the code already written on its physical tag,
+         so its history stays in one thread instead of restarting as a new reel. */
+      if (b.issueRemnantId) {
+        const rem = (db.warehouse.remnants || []).find(r => r.id === b.issueRemnantId);
+        if (!rem) return json(res, 400, { error: 'That remnant is no longer in the office stock.' });
+        db.warehouse.remnants = db.warehouse.remnants.filter(r => r.id !== rem.id);
+        addStockTo(u, rem.name, rem.meters, 0, rem, me.name);
+        logStock(u, 'cable', rem.name, 1, rem.meters, 'remnant', me.name, [rem.code]);
+      }
+      /* Removing or re-typing a reel's metres by hand is exactly the move that
+         would hide a missing reel, so both leave a row in the register. */
+      if (b.removeReel) {
+        const gone = (u.inv.cables || []).find(r => r.id === b.removeReel);
+        if (gone) logReel(gone, 'removed', {
+          techId: u.id, techName: u.name, meters: gone.meters, by: me.name,
+          note: String(b.reason || '').trim() || 'Removed from the technician\'s stock by an admin.'
+        });
+        u.inv.cables = (u.inv.cables || []).filter(r => r.id !== b.removeReel);
+      }
       if (b.setReelId && b.setReelMeters !== undefined) {
         const reel = (u.inv.cables || []).find(r => r.id === b.setReelId);
-        if (reel) reel.meters = Math.round((parseFloat(b.setReelMeters) || 0) * 100) / 100;
+        if (reel) {
+          const before = round2(reel.meters);
+          reel.meters = Math.max(0, round2(b.setReelMeters));
+          logReel(reel, 'adjusted', {
+            techId: u.id, techName: u.name, before, after: reel.meters,
+            variance: round2(reel.meters - before), by: me.name,
+            note: String(b.reason || '').trim() || 'Metres set by an admin.'
+          });
+          if (reel.meters > REEL_EMPTY_M && reel.state === 'empty') reel.state = 'open';
+          if (reel.meters <= REEL_EMPTY_M && reel.state === 'open') reel.state = 'empty';
+        }
       }
       saveDB();
       return json(res, 200, { user: publicUser(u) });
+    }
+
+    /* ---- reel register ----
+     * The point of this block is that a reel can only leave the system through a
+     * door that records who opened it. */
+    if (p === '/api/reels' && req.method === 'GET') {
+      const rows = [];
+      db.users.forEach(u => {
+        if (isAdmin || u.id === me.id) {
+          ((u.inv && u.inv.cables) || []).forEach(r => rows.push(Object.assign({}, r, {
+            holder: 'tech', techId: u.id, techName: u.name,
+            low: r.state === 'open' && r.meters <= REEL_LOW_M
+          })));
+        }
+      });
+      if (isAdmin) {
+        (db.warehouse.remnants || []).forEach(r => rows.push(Object.assign({}, r, { holder: 'office' })));
+      }
+      return json(res, 200, {
+        reels: rows,
+        log: isAdmin ? db.reelLog.slice(-500).reverse() : [],
+        thresholds: { empty: REEL_EMPTY_M, low: REEL_LOW_M }
+      });
+    }
+
+    m = p.match(/^\/api\/reels\/([\w.]+)\/(return|receive|reconcile|writeoff)$/);
+    if (m && req.method === 'POST') {
+      const b = await readBody(req);
+      const action = m[2];
+      let owner = null, reel = null;
+      db.users.forEach(u => {
+        const hit = ((u.inv && u.inv.cables) || []).find(r => r.id === m[1]);
+        if (hit) { owner = u; reel = hit; }
+      });
+      const remnant = (db.warehouse.remnants || []).find(r => r.id === m[1]);
+
+      if (action === 'return') {
+        /* The technician hands a reel back. It leaves their job list straight away
+           so they cannot keep drawing from it, but it stays on their record as
+           "returning" until an admin confirms it physically arrived — that gap is
+           the whole point, and it is what a quietly kept reel shows up as. */
+        if (!reel) return json(res, 404, { error: 'Reel not found' });
+        if (!isAdmin && owner.id !== me.id) return json(res, 403, { error: 'That reel is not issued to you' });
+        if (reel.state === 'returning') return json(res, 400, { error: 'That reel is already marked for return' });
+        reel.state = 'returning';
+        reel.returnedAt = Date.now();
+        logReel(reel, 'return_started', {
+          techId: owner.id, techName: owner.name, meters: reel.meters, by: me.name,
+          note: String(b.reason || '').trim() || 'Technician is returning the reel to the office.'
+        });
+        saveDB();
+        return json(res, 200, { ok: true, reel });
+      }
+
+      if (action === 'receive') {
+        if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+        if (!reel) return json(res, 404, { error: 'Reel not found' });
+        /* Received metres are counted at the office, not assumed from the app. */
+        const counted = b.counted === undefined || b.counted === '' ? round2(reel.meters) : Math.max(0, round2(b.counted));
+        const expected = round2(reel.meters);
+        reel.meters = counted;
+        reel.state = counted <= REEL_EMPTY_M ? 'spent' : 'office';
+        reel.holderNote = '';
+        logReel(reel, 'received', {
+          techId: owner.id, techName: owner.name, expected, counted,
+          variance: round2(counted - expected), by: me.name
+        });
+        owner.inv.cables = owner.inv.cables.filter(r => r.id !== reel.id);
+        if (counted > REEL_EMPTY_M) db.warehouse.remnants.push(reel);
+        saveDB();
+        return json(res, 200, { ok: true, reel });
+      }
+
+      if (action === 'reconcile') {
+        /* A physical count. The counted figure is never auto-filled from what the
+           system expected — an admin who just taps through would otherwise record
+           agreement that nobody actually checked. */
+        const target = reel || remnant;
+        if (!target) return json(res, 404, { error: 'Reel not found' });
+        if (!isAdmin && (!owner || owner.id !== me.id)) return json(res, 403, { error: 'That reel is not issued to you' });
+        if (b.counted === undefined || b.counted === null || b.counted === '') {
+          return json(res, 400, { error: 'Enter the metres actually measured on the reel.' });
+        }
+        const counted = Math.max(0, round2(b.counted));
+        const expected = round2(target.meters);
+        target.meters = counted;
+        target.lastCountAt = Date.now();
+        if (counted <= REEL_EMPTY_M && target.state === 'open') target.state = 'empty';
+        if (counted > REEL_EMPTY_M && target.state === 'empty') target.state = 'open';
+        logReel(target, 'reconciled', {
+          techId: owner ? owner.id : '', techName: owner ? owner.name : 'Office',
+          expected, counted, variance: round2(counted - expected), by: me.name,
+          note: String(b.note || '').trim()
+        });
+        saveDB();
+        return json(res, 200, { ok: true, reel: target, expected, counted, variance: round2(counted - expected) });
+      }
+
+      if (action === 'writeoff') {
+        if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+        const target = reel || remnant;
+        if (!target) return json(res, 404, { error: 'Reel not found' });
+        if (!String(b.reason || '').trim()) return json(res, 400, { error: 'A write-off needs a reason.' });
+        target.state = 'written_off';
+        logReel(target, 'written_off', {
+          techId: owner ? owner.id : '', techName: owner ? owner.name : 'Office',
+          meters: round2(target.meters), by: me.name, note: String(b.reason).trim()
+        });
+        if (owner) owner.inv.cables = owner.inv.cables.filter(r => r.id !== target.id);
+        db.warehouse.remnants = (db.warehouse.remnants || []).filter(r => r.id !== target.id);
+        saveDB();
+        return json(res, 200, { ok: true });
+      }
     }
 
     m = p.match(/^\/api\/users\/([\w.]+)\/password$/);
@@ -1021,16 +1266,59 @@ const server = http.createServer(async (req, res) => {
                 cableUsed = parseFloat(t.data.cable_length) || 0;
                 t.data.cable_used = Math.round(cableUsed * 100) / 100;
               }
-              /* deduct from the specific reel the technician selected */
+              /* Deduct from the specific reel the technician selected.
+                 A reel can never go below zero: before the floor was added an
+                 over-draw made `meters` negative, which dropped the reel out of
+                 every "meters > 0" list — so the reel and its remaining cable
+                 disappeared from stock instead of raising a question. Now the
+                 draw is capped at what the reel actually held and the excess is
+                 recorded as a shortfall for the admin to settle. */
               if (cableUsed > 0 && t.data && t.data.cable_reel) {
                 const reel = tech.inv.cables.find(r => r.id === t.data.cable_reel);
                 if (reel) {
-                  reel.meters = Math.round((reel.meters - cableUsed) * 100) / 100;
+                  const before = round2(reel.meters);
+                  const drawn = Math.min(cableUsed, before);
+                  reel.meters = round2(before - drawn);
+                  reel.lastUsedAt = Date.now();
                   t.data.cable_reel_name = reel.name;
+                  t.data.cable_reel_code = reel.code;
+                  t.data.cable_drawn = round2(drawn);
+                  logReel(reel, 'drawn', {
+                    techId: tech.id, techName: tech.name, ticketId: t.id, ticketRef: t.ref || '',
+                    meters: round2(drawn), before, after: reel.meters
+                  });
+                  if (cableUsed > before + 0.001) {
+                    const short = round2(cableUsed - before);
+                    reel.shortfall = round2((reel.shortfall || 0) + short);
+                    t.data.cable_shortfall = short;
+                    t.data.cable_review =
+                      'This job recorded ' + round2(cableUsed) + ' m but reel ' + reel.code +
+                      ' only held ' + before + ' m. ' + short + ' m is unaccounted — check whether a' +
+                      ' second reel was used, or the meter reading was misread.';
+                    t.needsStockReview = true;
+                    logReel(reel, 'shortfall', {
+                      techId: tech.id, techName: tech.name, ticketId: t.id, ticketRef: t.ref || '',
+                      meters: short, note: t.data.cable_review
+                    });
+                  }
+                  if (reel.meters <= REEL_EMPTY_M && reel.state === 'open') {
+                    reel.state = 'empty';
+                    logReel(reel, 'emptied', { techId: tech.id, techName: tech.name, after: reel.meters });
+                  }
                 }
               }
+              /* Connectors were unfloored too: issuing 10 and reporting 12 used
+                 left a negative count that read as stock owed back rather than
+                 as a discrepancy. */
               const connUsed = parseInt(t.data && t.data.connectors) || 0;
-              tech.inv.connectors = tech.inv.connectors - connUsed;
+              if (connUsed > 0) {
+                const connHeld = parseInt(tech.inv.connectors) || 0;
+                tech.inv.connectors = Math.max(0, connHeld - connUsed);
+                if (connUsed > connHeld) {
+                  t.data.connector_shortfall = connUsed - connHeld;
+                  t.needsStockReview = true;
+                }
+              }
               /* issued items (modems, clamps, patch cords, ...) consumed on this job */
               const usedItems = Array.isArray(t.data && t.data.items_used) ? t.data.items_used : [];
               const cleanItems = [];
