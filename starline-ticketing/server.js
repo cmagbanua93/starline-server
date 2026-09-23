@@ -66,6 +66,24 @@ if (!Array.isArray(db.settings.repairIssues) || !db.settings.repairIssues.length
    stores them separately and guessing where a Filipino name splits is how a
    wrong surname ends up on an invoice. Older tickets only have the single
    `cust_name`, so both shapes are read here and nowhere else. */
+/* The GPS step stores a point as {lat, lng}, not a string. Stringifying it
+   directly wrote "[object Object]" into billing's coordinates field. Billing
+   stores "lat,lng" with no space, so that is what is produced here — and an
+   unusable point yields nothing rather than a placeholder, since the merge rule
+   then leaves whatever billing already had. */
+function coordsText(v) {
+  if (v && typeof v === 'object') {
+    const lat = parseFloat(v.lat), lng = parseFloat(v.lng);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) return lat + ',' + lng;
+    return '';
+  }
+  const s = String(v == null ? '' : v).trim();
+  if (!s || s === '[object Object]') return '';
+  /* tolerate "10.24, 123.79" typed by hand */
+  const m = /^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/.exec(s);
+  return m ? m[1] + ',' + m[2] : s;
+}
+
 function subscriberFirst(d) {
   const f = String((d && d.cust_fname) || '').trim();
   if (f) return f;
@@ -504,7 +522,7 @@ async function pushBilling(t) {
     area: String(d.nap_id || '').trim(),        // the NAP box name IS the billing area
     phone: String(d.cust_phone || t.phone || '').trim(),
     email: String(d.cust_email || '').trim(),
-    coordinates: String(d.location || '').trim(),
+    coordinates: coordsText(d.location),
     installDate,
     port: String(d.nap_port || '').trim(),
     plan: String(d.cust_plan || '').trim(),
