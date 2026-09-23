@@ -62,6 +62,29 @@ if (!Array.isArray(db.settings.repairIssues) || !db.settings.repairIssues.length
 /* ---------------- elapsed-time helper ----------------
  * Stored as text as well as milliseconds so every screen (and any export) shows
  * the same wording without recomputing it. */
+/* The installation form captures first and last name separately, because billing
+   stores them separately and guessing where a Filipino name splits is how a
+   wrong surname ends up on an invoice. Older tickets only have the single
+   `cust_name`, so both shapes are read here and nowhere else. */
+function subscriberFirst(d) {
+  const f = String((d && d.cust_fname) || '').trim();
+  if (f) return f;
+  const parts = String((d && d.cust_name) || '').trim().split(/\s+/).filter(Boolean);
+  return parts.length > 1 ? parts.slice(0, -1).join(' ') : (parts[0] || '');
+}
+function subscriberLast(d) {
+  const l = String((d && d.cust_lname) || '').trim();
+  if (l) return l;
+  const parts = String((d && d.cust_name) || '').trim().split(/\s+/).filter(Boolean);
+  return parts.length > 1 ? parts[parts.length - 1] : '';
+}
+function subscriberName(d) {
+  const f = String((d && d.cust_fname) || '').trim();
+  const l = String((d && d.cust_lname) || '').trim();
+  const joined = [f, l].filter(Boolean).join(' ');
+  return joined || String((d && d.cust_name) || '').trim();
+}
+
 function humanDuration(ms) {
   if (!(ms > 0)) return 'less than a minute';
   const mins = Math.floor(ms / 60000);
@@ -394,7 +417,7 @@ function installPayload(t) {
     ticketId: t.id,
     portId: d.nap_port_id,
     subscriber: {
-      name: d.cust_name || t.customer || '',
+      name: subscriberName(d) || t.customer || '',
       address: d.cust_address || t.address || '',
       phone: d.cust_phone || t.phone || '',
       pppoe_username: t.pppoeUsername || '',
@@ -449,6 +472,79 @@ async function pushInstall(t) {
   saveDB();
 }
 
+/* ---- pushing a finished installation into billing ----
+ * The office used to retype every completed install into TaokiNinam overnight.
+ * This does it at the moment the technician closes the job.
+ *
+ * It is deliberately fire-and-record: the technician's phone never waits on
+ * billing, and a failure is kept on the ticket rather than thrown away, because
+ * nobody is reviewing these and a silent failure would be worse than the typing
+ * it replaces. The monitor holds the billing credentials and does the actual
+ * three-step write; this only decides when and with what. */
+async function pushBilling(t) {
+  if (!MONITOR_URL || !MONITOR_TOKEN) return;
+  if (t.type !== 'installation') return;
+  const d = t.data || {};
+  const username = String(t.pppoeUsername || '').trim();
+  if (!username) {
+    t.billingSync = { state: 'blocked', at: Date.now(),
+      error: 'No PPPoE account is linked to this job, so there is nothing in billing to update.' };
+    saveDB();
+    return;
+  }
+  /* The install date is the day the work finished, which is what billing calls
+     the subscription date. */
+  const done = new Date(t.completed || Date.now());
+  const installDate = `${done.getFullYear()}-${String(done.getMonth() + 1).padStart(2, '0')}-${String(done.getDate()).padStart(2, '0')}`;
+
+  const payload = {
+    username,
+    fname: subscriberFirst(d), lname: subscriberLast(d),
+    address: String(d.cust_address || t.address || '').trim(),
+    area: String(d.nap_id || '').trim(),        // the NAP box name IS the billing area
+    phone: String(d.cust_phone || t.phone || '').trim(),
+    email: String(d.cust_email || '').trim(),
+    coordinates: String(d.location || '').trim(),
+    installDate,
+    port: String(d.nap_port || '').trim(),
+    plan: String(d.cust_plan || '').trim(),
+  };
+
+  t.billingSync = { state: 'pending', at: Date.now() };
+  saveDB();
+  try {
+    const r = await fetch(MONITOR_URL + '/api/billing-push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': MONITOR_TOKEN },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(60000),
+    });
+    const out = await r.json().catch(() => ({}));
+    if (r.ok && out.ok) {
+      t.billingSync = { state: 'done', at: Date.now(), recordId: out.recordId, steps: out.steps || [] };
+    } else {
+      t.billingSync = { state: 'failed', at: Date.now(),
+        error: out.error || `billing returned HTTP ${r.status}`, steps: out.steps || [] };
+      console.error(`[billing] ticket ${t.number} (${username}) not pushed: ${t.billingSync.error}`);
+    }
+  } catch (e) {
+    t.billingSync = { state: 'failed', at: Date.now(), error: e.name === 'TimeoutError' ? 'billing did not answer in time' : e.message };
+    console.error(`[billing] ticket ${t.number} (${username}) not pushed: ${t.billingSync.error}`);
+  }
+  saveDB();
+}
+
+/* A failed push is retried on the same clock as the map push. Retrying is safe:
+   the monitor skips billing that is already on and a plan that already matches,
+   so a repeat cannot move a due date or text the subscriber twice. */
+const BILLING_RETRY_MS = 10 * 60 * 1000;
+setInterval(() => {
+  db.tickets
+    .filter(t => t.status === 'completed' && t.billingSync && t.billingSync.state === 'failed')
+    .slice(0, 3)
+    .forEach(t => { pushBilling(t); });
+}, BILLING_RETRY_MS).unref?.();
+
 /* Anything still pending is retried in the background — a redeploy of the map
    during a completion costs a few minutes, not a lost port assignment. */
 const FTTH_RETRY_MS = 5 * 60 * 1000;
@@ -456,6 +552,8 @@ setInterval(() => {
   const waiting = db.tickets.filter(t => t.ftthSync && t.ftthSync.state === 'pending');
   waiting.slice(0, 5).forEach(t => { pushInstall(t); });
 }, FTTH_RETRY_MS).unref?.();
+
+let catalogCache = { at: 0, data: null };
 
 async function monitorLookup(pathAndQuery) {
   if (!MONITOR_URL || !MONITOR_TOKEN) {
@@ -674,6 +772,27 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    /* ---- the lists billing owns ----
+       Areas and plans are billing's to define, so the ticket offers exactly what
+       billing will accept rather than keeping its own copy that drifts. Cached
+       briefly so a phone opening a job does not hit TaokiNinam every time. */
+    if (p === '/api/billing-catalog' && req.method === 'GET') {
+      const now = Date.now();
+      if (catalogCache.data && now - catalogCache.at < 10 * 60 * 1000) {
+        return json(res, 200, catalogCache.data);
+      }
+      try {
+        const c = await monitorLookup('/api/billing-catalog');
+        catalogCache = { at: now, data: { configured: true, areas: c.areas || [], products: c.products || [] } };
+        return json(res, 200, catalogCache.data);
+      } catch (e) {
+        /* Never block a technician mid-job: fall back to whatever was last seen,
+           and otherwise say plainly that the list could not be loaded. */
+        if (catalogCache.data) return json(res, 200, Object.assign({ stale: true }, catalogCache.data));
+        return json(res, 200, { configured: false, areas: [], products: [], error: e.message });
+      }
+    }
+
     /* ---- what still has to be typed into billing ----
        Installations finish during the day; billing is caught up at night. This
        is that night's worklist, worked out by comparing each completed job with
@@ -701,7 +820,7 @@ const server = http.createServer(async (req, res) => {
         const row = {
           ticketId: t.id, number: t.number, completed: t.completed, tech: t.assignedName || '',
           username: t.pppoeUsername || '',
-          name: d.cust_name || t.customer || '',
+          name: subscriberName(d) || t.customer || '',
           phone: d.cust_phone || t.phone || '',
           address: d.cust_address || t.address || '',
           plan: d.cust_plan || '',
@@ -1181,6 +1300,12 @@ const server = http.createServer(async (req, res) => {
         t.issueFlow = issue ? issue.flow : 'generic';
       }
       if (t.type === 'installation') {
+        /* A starting guess only — the technician sees both fields and fixes them
+           before completing, which is the point of splitting them here rather
+           than splitting blind at the billing end. */
+        const parts = String(t.customer || '').trim().split(/\s+/).filter(Boolean);
+        t.data.cust_lname = parts.length > 1 ? parts[parts.length - 1] : '';
+        t.data.cust_fname = parts.length > 1 ? parts.slice(0, -1).join(' ') : (parts[0] || '');
         t.data.cust_name = t.customer; t.data.cust_address = t.address; t.data.cust_phone = t.phone;
         if (t.accountNo) t.data.cust_account = t.accountNo;   // step 9 starts pre-filled
       }
@@ -1251,6 +1376,13 @@ const server = http.createServer(async (req, res) => {
             delete t.durationMs; delete t.durationText;
             if (t.data) delete t.data.auto_remark;
           }
+          /* Keep the single-name field in step with the split ones, so reports,
+             the FTTH push and older screens all read the same subscriber. */
+          if (b.status === 'completed' && t.data) {
+            const n = subscriberName(t.data);
+            if (n) t.data.cust_name = n;
+          }
+
           /* Deduct materials from the technician's inventory once, on first completion */
           if (b.status === 'completed' && !t.invApplied && t.assignedTo) {
             const tech = db.users.find(u => u.id === t.assignedTo);
@@ -1341,6 +1473,14 @@ const server = http.createServer(async (req, res) => {
         if (t.status === 'completed' && t.type === 'installation' &&
             (!t.ftthSync || !['done', 'manual'].includes(t.ftthSync.state))) {
           pushInstall(t).catch(e => console.error('[ftth] push failed:', e.message));
+        }
+        /* And into billing, on the same terms: queued, never blocking the phone.
+           A push that already succeeded is not repeated — the monitor would skip
+           the work anyway, but not asking at all is cheaper and keeps the
+           ticket's record of what happened intact. */
+        if (t.status === 'completed' && t.type === 'installation' &&
+            (!t.billingSync || !['done', 'manual'].includes(t.billingSync.state))) {
+          pushBilling(t).catch(e => console.error('[billing] push failed:', e.message));
         }
         return json(res, 200, { ticket: t });
       }
