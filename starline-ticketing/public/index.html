@@ -947,15 +947,17 @@ const WORKFLOWS = {
     { key:'mainnap', title:'2. Main NAP Details',
       desc:'Fill out the details of the Main NAP box feeding the new NAP: the port number used for the new NAP box and the fiber color of the run. Then take a photo of the Main NAP — time and GPS are stamped automatically.',
       fields:[
-        {k:'main_nap', type:'text', label:'Main NAP Box Details (ID / location)', req:true, placeholder:'e.g. MAIN-NAP-02, corner post Brgy 1'},
-        {k:'main_nap_port', type:'text', label:'Port Number Used for the New NAP Box', req:true, placeholder:'e.g. Port 3 of 8'},
-        {k:'fiber_color', type:'select', label:'Fiber Color Used (Main NAP → New NAP)', req:true, options:['No Color','Blue','Orange','Green','Brown','Slate','White','Red','Black','Yellow','Violet','Rose','Aqua']},
+        {k:'feeder_pick', type:'feeder_picker', label:'Pick the feeding box and port from the map'},
+        {k:'main_nap', type:'text', label:'Feeding Box (ID / location)', req:true, placeholder:'e.g. MAIN NAP - WARD 3'},
+        {k:'main_nap_port', type:'text', label:'Port Used for the New NAP Box', req:true, placeholder:'e.g. Port 3 of 8'},
+        {k:'fiber_color', type:'select', label:'Fiber Color Used (feeding box → new NAP)', req:true, options:['No Color','Blue','Orange','Green','Brown','Slate','White','Red','Black','Yellow','Violet','Rose','Aqua']},
         {k:'main_nap_photo', type:'photo', label:'Photo of Main NAP', req:true, autogps:true}
       ]},
     { key:'napbox', title:'3. New NAP Box &amp; Reading',
       desc:'Install the new NAP box on the post, take a photo of it with its tagging, and record its optical reading.',
       fields:[
-        {k:'nap_id', type:'text', label:'New NAP Box ID / Tag Name', req:true, placeholder:'e.g. NAP-BRGY1-015'},
+        {k:'nap_id', type:'area_select', label:'New NAP Box Name / Area', req:true},
+        {k:'nap_ports', type:'select', label:'Box Size (ports)', req:true, options:['4','8','12','16']},
         {k:'nap_box_photo', type:'photo', label:'Photo of New NAP Box with Tagging', req:true, autogps:true},
         {k:'nap_reading', type:'number', label:'NAP Box Reading (dBm)', req:true, placeholder:'e.g. -18.5', step:'0.1'},
         {k:'nap_reading_photo', type:'photo', label:'Photo of Power Meter Reading', autogps:true}
@@ -1988,6 +1990,7 @@ function renderTicket(){
       ${isLast&&!allDone?'<div class="tmeta" style="margin-top:8px;color:var(--danger)">Finish all required (*) items in every step to complete the job.</div>':''}
     </div>`;
   if(document.getElementById('napPickWrap')) loadNapPicker();
+  if(document.getElementById('feederPickWrap')) loadFeederPicker();
   renderSummary(t, 'summaryArea');
 }
 function gotoStep(i){ const t=byId(currentId); collectStep(); t.step=i; persist(t); renderTicket(); }
@@ -2013,7 +2016,7 @@ function collectStep(){
   const s = getWorkflow(t)[t.step];
   if(!s) return;
   s.fields.forEach(f=>{
-    if(f.type==='photo'||f.type==='signature'||f.type==='nap_picker'||f.type==='pppoe_link') return;
+    if(f.type==='photo'||f.type==='signature'||f.type==='nap_picker'||f.type==='feeder_picker'||f.type==='pppoe_link') return;
     if(f.type==='gps'){
       const lat=document.getElementById('f_'+f.k+'_lat'), lng=document.getElementById('f_'+f.k+'_lng');
       if(lat&&lng&&lat.value&&lng.value) t.data[f.k]={lat:parseFloat(lat.value),lng:parseFloat(lng.value)};
@@ -2081,6 +2084,20 @@ function renderField(t,f){
       ${chosen}
       <div id="napPickWrap" class="nap-wrap"><div class="tmeta">Loading boxes from the FTTH map…</div></div>
       <div class="tmeta" style="margin-top:6px">Not on the map yet? Leave this and type the box and port by hand below — the job still completes.</div>`;
+  }
+  if(f.type==='feeder_picker'){
+    /* Which existing box feeds the new one. Picking it from the map — rather
+       than typing its name — is what lets the system draw the real cable run,
+       so an outage trace knows what sits behind the new box. Boxes chain, so
+       the parent may itself be a sub-main hanging off a main. */
+    const chosen = t.data.feeder_port_id
+      ? `<div class="nap-chosen">🔌 Feeding from ${esc(t.data.main_nap_port||'')} on ${esc(t.data.main_nap||'')}
+           <button type="button" class="linked-x" title="Choose a different box or port" onclick="clearFeederChoice()">✕</button></div>`
+      : '';
+    return `<label>${f.label}${reqMark}</label>
+      ${chosen}
+      <div id="feederPickWrap" class="nap-wrap"><div class="tmeta">Loading boxes from the FTTH map…</div></div>
+      <div class="tmeta" style="margin-top:6px">Pick the box and the port the new NAP is fed from. If the feeding box is not on the map yet, leave this — the job still completes, and the new box is placed without its cable run drawn.</div>`;
   }
   if(f.type==='photo'){
     const inner = (v&&v.img)
@@ -2192,19 +2209,28 @@ function renderField(t,f){
        the box on the map and it is the group billing texts when that box is
        down. Offering billing's own list is what keeps those in step. */
     const areas = CATALOG.areas||[];
+    /* A box being installed today has no subscribers, so its area may not exist
+       in billing yet. Typing a new one has to stay possible or a new NAP could
+       not be named at all. */
+    const allowNew = f.allowNew !== false;
     if(!areas.length){
       return `<label>${f.label}${reqMark}</label>
         <input type="text" id="f_${f.k}" value="${esc(v||'')}" placeholder="e.g. WARD 3 - NAP 2">
         <p class="hint">Could not load the area list from billing — type the NAP name exactly as it appears there.</p>`;
     }
+    /* A list you can also type into. A box already in service is picked from
+       billing's list; a box being installed right now may not be there yet, and
+       must still be nameable. */
     const known = areas.includes(v);
     return `<label>${f.label}${reqMark}</label>
-      <select id="f_${f.k}">
-        <option value="">— select NAP / area —</option>
-        ${areas.map(a=>`<option value="${esc(a)}" ${a===v?'selected':''}>${esc(a)}</option>`).join('')}
-        ${v&&!known?`<option value="${esc(v)}" selected>${esc(v)} (not in billing)</option>`:''}
-      </select>
-      <p class="hint">This is the NAP box and the billing area — one name for both, so an outage SMS reaches exactly this box.</p>`;
+      <input type="text" id="f_${f.k}" list="areas_${f.k}" value="${esc(v||'')}"
+             placeholder="${allowNew?'pick one, or type a new box name':'pick from billing'}" oninput="areaPicked('${f.k}')" onchange="areaPicked('${f.k}')">
+      <datalist id="areas_${f.k}">
+        ${areas.map(a=>`<option value="${esc(a)}"></option>`).join('')}
+      </datalist>
+      <p class="hint" id="areahint_${f.k}">${v&&!known
+        ? (allowNew?esc(v)+' is not in billing yet — it will be saved as typed.':'⚠ '+esc(v)+' is not one of billing\'s areas.')
+        : 'This is the NAP box and the billing area — one name for both, so an outage SMS reaches exactly this box.'}</p>`;
   }
   const type = f.type==='number'?'number':'text';
   const calc = f.cableCalc ? ` oninput="updateCableCalc()"` : '';
@@ -2457,6 +2483,122 @@ async function chooseNapPort(napId, portId){
   if(previous && previous !== portId){
     try{ await api('/api/ftth/release','POST',{ ticketId: t.id, portId: previous }); }catch(e){}
   }
+  renderTicket();
+}
+
+/* ---- picking the box that feeds a new NAP ----
+ * Same list and the same port reservation as the subscriber picker, but writing
+ * its own keys, so a NAP-install job holding a feeder port cannot be confused
+ * with a subscriber job holding a drop port. */
+let FEEDERS = [], FEEDER_OPEN = null;
+
+/* Says whether the name typed is one billing already knows. Not a block: a new
+   box has to be nameable before billing has any subscribers on it. */
+function areaPicked(key){
+  const el = document.getElementById('f_'+key);
+  const hint = document.getElementById('areahint_'+key);
+  if(!el || !hint) return;
+  const v = String(el.value||'').trim();
+  const areas = CATALOG.areas||[];
+  if(!v){ hint.textContent = 'This is the NAP box and the billing area — one name for both.'; hint.style.color=''; return; }
+  if(areas.includes(v)){ hint.textContent = '✓ '+v+' is an area billing already knows.'; hint.style.color=''; }
+  else { hint.textContent = v+' is not in billing yet — it will be saved as typed.'; hint.style.color=''; }
+}
+
+async function loadFeederPicker(){
+  const t = byId(currentId);
+  const wrap = document.getElementById('feederPickWrap');
+  if(!t || !wrap) return;
+  try{
+    const qs = new URLSearchParams();
+    const loc = t.data && t.data.location;
+    if(loc && loc.lat!=null && loc.lng!=null){ qs.set('lat', loc.lat); qs.set('lng', loc.lng); }
+    const d = await api('/api/ftth/naps' + (qs.toString()?'?'+qs.toString():''));
+    FEEDERS = d.naps || [];
+    if(!FEEDER_OPEN && t.data.feeder_device_id) FEEDER_OPEN = t.data.feeder_device_id;
+    renderFeederList();
+  }catch(e){
+    wrap.innerHTML = `<div class="tmeta">The FTTH map is unavailable — ${esc(e.message)} The job still completes; the new box just will not be placed automatically.</div>`;
+  }
+}
+
+function renderFeederList(){
+  const t = byId(currentId);
+  const wrap = document.getElementById('feederPickWrap');
+  if(!wrap || !t) return;
+  if(!FEEDERS.length){
+    wrap.innerHTML = '<div class="tmeta">No boxes on the map yet, so there is nothing to feed from. The new box can still be placed on its own.</div>';
+    return;
+  }
+  wrap.innerHTML = FEEDERS.map(n=>{
+    const open = FEEDER_OPEN === n.id;
+    const dist = n.distance_m!=null
+      ? (n.distance_m < 1000 ? n.distance_m+' m away' : (n.distance_m/1000).toFixed(1)+' km away')
+      : (n.area || '');
+    const full = n.counts.free === 0;
+    return `<div class="nap-card ${open?'open':''}">
+      <button type="button" class="nap-head" onclick="openFeeder('${n.id}')">
+        <span class="nap-name">${esc(n.name)}</span>
+        <span class="tmeta">${esc(dist)}${dist?' · ':''}<b class="${full?'nap-full':'nap-free'}">${n.counts.free} free</b> of ${n.counts.total}</span>
+      </button>
+      ${open?`<div class="port-grid">${n.ports.map(p=>{
+        const mine = t.data.feeder_port_id === p.id;
+        const cls = mine ? 'mine' : p.state;
+        const can = p.state === 'free' || mine;
+        const title = mine ? 'Held for this job'
+          : p.state==='free' ? 'Free' : p.state==='reserved' ? 'Held for another job'
+          : p.state==='faulty' ? 'Marked faulty' : 'In use';
+        return `<button type="button" class="port ${cls}" ${can?'':'disabled'} title="${esc(title)} — ${esc(p.fiber_color||'')}"
+          onclick="chooseFeederPort('${n.id}','${p.id}')">${p.port_no}<span class="port-col">${esc((p.fiber_color||'').slice(0,3))}</span></button>`;
+      }).join('')}</div>
+      <div class="tmeta" style="margin-top:6px">Grey = in use · amber = held by another job · red = faulty</div>`:''}
+    </div>`;
+  }).join('');
+}
+
+function openFeeder(id){
+  FEEDER_OPEN = (FEEDER_OPEN === id) ? null : id;
+  renderFeederList();
+}
+
+async function chooseFeederPort(devId, portId){
+  const t = byId(currentId);
+  const dev = FEEDERS.find(n=>n.id===devId);
+  const port = dev && dev.ports.find(p=>p.id===portId);
+  if(!t || !dev || !port) return;
+  if(t.data.feeder_port_id === portId) return;
+  collectStep();
+  try{
+    await api('/api/ftth/reserve','POST',{ ticketId: t.id, portId });
+  }catch(e){
+    alert('Could not hold that port: ' + e.message);
+    await loadFeederPicker();
+    return;
+  }
+  const previous = t.data.feeder_port_id;
+  t.data.feeder_device_id = devId;
+  t.data.feeder_port_id   = portId;
+  /* The typed fields stay in step, so the printed report reads the same as it
+     always did whether or not the map was used. */
+  t.data.main_nap      = dev.name;
+  t.data.main_nap_port = 'Port ' + port.port_no + (port.fiber_color? ' ('+port.fiber_color+')' : '') + ' of ' + dev.counts.total;
+  if(port.fiber_color && !t.data.fiber_color) t.data.fiber_color = port.fiber_color;
+  await persist(t);
+  if(previous && previous !== portId){
+    try{ await api('/api/ftth/release','POST',{ ticketId: t.id, portId: previous }); }catch(e){}
+  }
+  renderTicket();
+}
+
+async function clearFeederChoice(){
+  const t = byId(currentId);
+  if(!t || !t.data.feeder_port_id) return;
+  const portId = t.data.feeder_port_id;
+  collectStep();
+  t.data.feeder_port_id = ''; t.data.feeder_device_id = '';
+  await persist(t);
+  try{ await api('/api/ftth/release','POST',{ ticketId: t.id, portId }); }catch(e){}
+  await loadFeederPicker();
   renderTicket();
 }
 
