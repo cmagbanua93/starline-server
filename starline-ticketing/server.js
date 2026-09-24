@@ -541,8 +541,15 @@ async function pushBilling(t) {
     if (r.ok && out.ok) {
       t.billingSync = { state: 'done', at: Date.now(), recordId: out.recordId, steps: out.steps || [] };
     } else {
-      t.billingSync = { state: 'failed', at: Date.now(),
-        error: out.error || `billing returned HTTP ${r.status}`, steps: out.steps || [] };
+      /* The monitor reports a step failure in the step itself, not as a
+         top-level error. Showing "HTTP 502" instead of "the record did not come
+         back with the values that were sent" defeats the point of surfacing it
+         at all, so the step's own words win. */
+      const bad = (out.steps || []).find(x => x.status === 'failed');
+      const why = out.error
+        || (bad && (bad.detail || `the ${bad.step} step failed`))
+        || `billing returned HTTP ${r.status}`;
+      t.billingSync = { state: 'failed', at: Date.now(), error: why, steps: out.steps || [] };
       console.error(`[billing] ticket ${t.number} (${username}) not pushed: ${t.billingSync.error}`);
     }
   } catch (e) {
@@ -790,6 +797,23 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    /* Retry a push by hand. Safe to press repeatedly: the monitor skips billing
+       that is already on and a plan that already matches, so this cannot move a
+       live due date or text a subscriber twice. */
+    /* Its own binding: `m` is declared further down this scope, so assigning to
+       it here would touch it before initialisation. */
+    const retryMatch = p.match(/^\/api\/tickets\/([\w.]+)\/billing-retry$/);
+    if (retryMatch && req.method === 'POST') {
+      if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+      const t = db.tickets.find(x => x.id === retryMatch[1]);
+      if (!t) return json(res, 404, { error: 'Ticket not found' });
+      if (t.status !== 'completed' || t.type !== 'installation') {
+        return json(res, 400, { error: 'Only a completed installation can be pushed to billing.' });
+      }
+      await pushBilling(t);
+      return json(res, 200, { billingSync: t.billingSync || null });
+    }
+
     /* ---- the lists billing owns ----
        Areas and plans are billing's to define, so the ticket offers exactly what
        billing will accept rather than keeping its own copy that drifts. Cached
@@ -864,7 +888,24 @@ const server = http.createServer(async (req, res) => {
         }
         if (row.reasons.length) rows.push(row);
       }
-      return json(res, 200, { rows, checked: installs.length });
+      /* Pushes that did not land. With the push fully automatic nobody is
+         watching it happen, so the one place an admin looks at billing is the
+         one place these have to surface. */
+      const pushes = db.tickets
+        .filter(t => t.type === 'installation' && t.billingSync &&
+                     ['failed', 'blocked', 'pending'].includes(t.billingSync.state))
+        .sort((a, b) => (b.billingSync.at || 0) - (a.billingSync.at || 0))
+        .slice(0, 50)
+        .map(t => ({
+          ticketId: t.id, number: t.number,
+          customer: subscriberName(t.data) || t.customer || '',
+          username: t.pppoeUsername || '',
+          state: t.billingSync.state,
+          error: t.billingSync.error || '',
+          at: t.billingSync.at || 0,
+          steps: t.billingSync.steps || [],
+        }));
+      return json(res, 200, { rows, checked: installs.length, pushes });
     }
 
     /* ---- the FTTH map, for the port picker in step 4 ---- */
