@@ -3993,13 +3993,18 @@ function napMapPanel(t){
   const tone  = { done:'b-done', manual:'b-p2', blocked:'b-p1', pending:'b-progress', off:'b-p2' }[s && s.state] || 'b-open';
   const d = t.data || {};
   const loc = d.location || {};
+  /* Only a name and a pole stop a box being placed. The size is not required:
+     an older job that never recorded one still goes on the map, with no ports,
+     and the size is set on the map afterwards. */
   const missing = [];
   if(!String(d.nap_id||'').trim()) missing.push('the box name');
   if(loc.lat==null || loc.lng==null) missing.push('GPS coordinates');
-  if(![4,8,12,16].includes(parseInt(d.nap_ports,10))) missing.push('the box size (4/8/12/16 ports)');
+  const unsized = ![4,8,12,16].includes(parseInt(d.nap_ports,10));
   const blockNote = missing.length
-    ? `<div class="ctx-warn">This job is missing ${esc(missing.join(' and '))}. Reopen it, fill that in, and the box can be placed.</div>`
-    : '';
+    ? `<div class="ctx-warn">This job is missing ${esc(missing.join(' and '))}, so it cannot be placed. GPS cannot be recovered from the office — the box has to be pinned on the map by hand.</div>`
+    : (unsized && (!s || s.state!=='done')
+        ? `<div class="tmeta">No box size was recorded on this job, so it will be placed with no ports. Set the size on the map afterwards and the ports appear.</div>`
+        : '');
   return `<div class="card" style="margin-top:10px">
     <div class="sec-head"><div class="sec-title">FTTH map</div>
       <span class="badge ${tone}">${esc(label)}</span></div>
