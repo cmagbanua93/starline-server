@@ -3826,6 +3826,18 @@ function customerContextHtml(d){
    silently dropped: if the write has not gone through, the ticket says so. */
 function syncBadge(t){
   const s = t && t.ftthSync;
+  /* A NAP job writes a box onto the map rather than a subscriber onto a port,
+     so it reads differently. Without this a finished NAP job said nothing at all
+     about whether its box ever reached the map. */
+  if(t && t.type==='nap_install'){
+    if(!s) return '';
+    if(s.state==='done')   return `<div class="sync-ok">🗺 ${esc(s.message||'Placed on the map')}</div>`;
+    if(s.state==='manual') return `<div class="sync-wait">🗺 ${esc(s.message||'Not placed on the map')}</div>`;
+    if(s.state==='off')    return `<div class="sync-wait">🗺 The FTTH map is not connected, so this box was not placed on it.</div>`;
+    if(s.state==='pending')return `<div class="sync-wait">🗺 Waiting to be placed on the map — attempt ${s.attempts||1}${s.error?': '+esc(s.error):''}. It keeps retrying on its own.</div>`;
+    if(s.state==='blocked')return `<div class="ctx-warn">🗺 The map would not accept this box: ${esc(s.error||'')}</div>`;
+    return '';
+  }
   if(!s || t.type!=='installation') return '';
   if(s.state==='done')   return `<div class="sync-ok">🗺 Written to the FTTH map${s.alreadyThere?' (was already there)':''}</div>`;
   if(s.state==='manual') return `<div class="sync-wait">🗺 The NAP was typed by hand, so the map was not updated. Pin it on the map yourself, or reopen the job and pick the port.</div>`;
@@ -3923,6 +3935,7 @@ async function openReport(id){
       <button class="btn btn-ghost btn-sm" onclick="exportJSON()">⬇ JSON</button>
     </div>
     ${t.status==='completed' && t.type==='installation' ? billingSyncPanel(t) : ''}
+    ${t.status==='completed' && t.type==='nap_install' ? napMapPanel(t) : ''}
     <div class="wizard-btns">
       ${t.status==='completed'?'<button class="btn btn-ghost btn-sm" onclick="reopenTicket()">Reopen</button>':''}
       <button class="btn btn-warn btn-sm" onclick="deleteTicket()">🗑 Delete Ticket</button>
@@ -3968,6 +3981,51 @@ function billingSyncPanel(t){
     </div>
   </div>`;
 }
+/* The map side of a finished NAP job, and the one button that puts it there.
+   Jobs completed before the map integration existed have no ftthSync at all —
+   they are not failures, they simply never had the chance, so they say so and
+   offer the same button rather than looking broken. */
+function napMapPanel(t){
+  const s = t.ftthSync;
+  const when = s && s.at ? new Date(s.at).toLocaleString() : '';
+  const label = { done:'on the map', manual:'needs details', blocked:'map refused it',
+                  pending:'placing…', off:'map not connected' }[s && s.state] || 'not placed yet';
+  const tone  = { done:'b-done', manual:'b-p2', blocked:'b-p1', pending:'b-progress', off:'b-p2' }[s && s.state] || 'b-open';
+  const d = t.data || {};
+  const loc = d.location || {};
+  const missing = [];
+  if(!String(d.nap_id||'').trim()) missing.push('the box name');
+  if(loc.lat==null || loc.lng==null) missing.push('GPS coordinates');
+  if(![4,8,12,16].includes(parseInt(d.nap_ports,10))) missing.push('the box size (4/8/12/16 ports)');
+  const blockNote = missing.length
+    ? `<div class="ctx-warn">This job is missing ${esc(missing.join(' and '))}. Reopen it, fill that in, and the box can be placed.</div>`
+    : '';
+  return `<div class="card" style="margin-top:10px">
+    <div class="sec-head"><div class="sec-title">FTTH map</div>
+      <span class="badge ${tone}">${esc(label)}</span></div>
+    ${when?`<div class="tmeta">Last attempt ${esc(when)}</div>`:''}
+    ${s && s.message?`<div class="tmeta">${esc(s.message)}</div>`:''}
+    ${s && s.error?`<div class="tmeta" style="color:var(--danger)">${esc(s.error)}</div>`:''}
+    ${!s?`<div class="tmeta">This job finished before it could be written to the map.</div>`:''}
+    ${blockNote}
+    <div class="tmeta" style="margin-top:6px">Placing again is safe: a box this job already placed is found rather than planted twice.</div>
+    <div class="wizard-btns">
+      <button class="btn btn-ghost btn-sm" ${missing.length?'disabled':''} onclick="retryNapMap('${esc(t.id)}','${esc(t.number)}')">Place on the map</button>
+    </div>
+  </div>`;
+}
+
+async function retryNapMap(id, number){
+  try{
+    const d = await api('/api/ftth/retry/'+id, 'POST', {});
+    const s = d.ftthSync || {};
+    alert(s.state==='done'
+      ? 'Job '+number+': '+(s.message||'placed on the map')+'.'
+      : 'Job '+number+' was not placed — '+(s.message||s.error||s.state||'unknown reason'));
+    await refreshTickets(); openReport(id);
+  }catch(e){ alert('Could not place it on the map: '+e.message); }
+}
+
 async function reopenTicket(){
   if(!confirm('Reopen this completed ticket?')) return;
   try{
