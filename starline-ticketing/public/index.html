@@ -2239,6 +2239,16 @@ function copyCatchup(i){
 }
 
 let BILLING_ROWS = [];
+async function retryBillingPush(id, number){
+  if(!confirm('Push '+number+' to billing again?\n\nSafe to repeat: billing that is already active keeps its due date, and a plan that already matches is left alone.')) return;
+  try{
+    const r = await api('/api/tickets/'+id+'/billing-retry','POST',{});
+    const st = r.billingSync || {};
+    if(st.state==='done') alert(number+' is now in billing.');
+    else alert('Still not through: '+(st.error||st.state||'unknown')+'\n\nThe job stays on this list.');
+  }catch(e){ alert(e.message); }
+  renderBillingCatchup();
+}
 async function renderBillingCatchup(){
   const box = document.getElementById('billingList');
   box.innerHTML = '<div class="card"><div class="tmeta">Comparing finished jobs with billing…</div></div>';
@@ -2246,11 +2256,37 @@ async function renderBillingCatchup(){
   try{ d = await api('/api/billing-catchup'); }
   catch(e){ box.innerHTML = `<div class="card"><div class="tmeta">Could not check billing — ${esc(e.message)}</div></div>`; return; }
   BILLING_ROWS = d.rows || [];
+
+  /* Jobs whose automatic push did not land. These come first: a push nobody
+     saw fail is the one way a subscriber quietly never reaches billing. */
+  const pushes = d.pushes || [];
+  const pushHtml = pushes.length ? `<div class="card">
+    <div class="sec-head"><div class="sec-title">⚠ Pushes that did not land</div></div>
+    <div class="step-desc">These finished jobs did not reach billing. Retrying is safe — billing that is already on keeps its due date, and a plan that already matches is left alone, so nobody is charged differently or texted twice.</div>
+    ${pushes.map(pu=>{
+      const why = pu.state==='blocked'
+          ? 'No PPPoE account is linked to this job, so there is no billing record to update. Link the account on the ticket, then retry.'
+        : pu.state==='pending' ? 'Still in progress — give it a moment, then refresh.'
+        : (pu.error || 'The push failed.');
+      const got = (pu.steps||[]).filter(x=>x.status==='done').map(x=>x.step);
+      return `<div style="padding:10px 0;border-bottom:1px solid var(--line)">
+        <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+          <span><b style="color:var(--primary);cursor:pointer" onclick="openReport('${esc(pu.ticketId)}')">${esc(pu.number)}</b>
+            ${pu.customer?' · '+esc(pu.customer):''}${pu.username?' · <b>'+esc(pu.username)+'</b>':''}</span>
+          <span class="badge ${pu.state==='blocked'?'b-p2':pu.state==='pending'?'b-progress':'b-p1'}">${esc(pu.state)}</span>
+        </div>
+        <div class="tmeta" style="margin-top:2px">${esc(why)}</div>
+        ${got.length?`<div class="tmeta">Already done before it stopped: ${esc(got.join(', '))}</div>`:''}
+        <div style="margin-top:6px"><button class="pill" style="padding:3px 10px;font-size:12px" onclick="retryBillingPush('${esc(pu.ticketId)}','${esc(pu.number)}')">Retry now</button></div>
+      </div>`;
+    }).join('')}
+  </div>` : '';
+
   if(!BILLING_ROWS.length){
-    box.innerHTML = `<div class="card"><div class="sync-ok">✔ Nothing waiting. All ${d.checked} finished installation${d.checked===1?'':'s'} match billing.</div></div>`;
+    box.innerHTML = pushHtml + `<div class="card"><div class="sync-ok">✔ Nothing waiting. All ${d.checked} finished installation${d.checked===1?'':'s'} match billing.</div></div>`;
     return;
   }
-  box.innerHTML = `<div class="card"><div class="sync-wait">${BILLING_ROWS.length} installation${BILLING_ROWS.length===1?'':'s'} still to encode in TaokiNinam. Rows disappear on their own once billing matches.</div></div>`
+  box.innerHTML = pushHtml + `<div class="card"><div class="sync-wait">${BILLING_ROWS.length} installation${BILLING_ROWS.length===1?'':'s'} still to encode in TaokiNinam. Rows disappear on their own once billing matches.</div></div>`
     + BILLING_ROWS.map((r,i)=>`
     <div class="card catchup">
       <div class="ticket-top">
