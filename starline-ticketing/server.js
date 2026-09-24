@@ -582,6 +582,19 @@ async function pushBilling(t) {
     saveDB();
     return;
   }
+  /* Step 9 is the only source for the subscriber's name now, so an empty one is
+     a real gap rather than something to paper over. Pushing blank names would
+     silently leave whatever billing already held — usually a placeholder — and
+     nobody would ever know. Surfacing it costs one line in the failures panel
+     and a click of "Send to billing again" once the name is filled in. */
+  const first = subscriberFirst(d), last = subscriberLast(d);
+  if (!first && !last) {
+    t.billingSync = { state: 'blocked', at: Date.now(),
+      error: 'No customer name was entered at Step 9, so billing has nothing to update. Add the name to the job, then send it to billing again.' };
+    saveDB();
+    return;
+  }
+
   /* The install date is the day the work finished, which is what billing calls
      the subscription date. */
   const done = new Date(t.completed || Date.now());
@@ -589,7 +602,7 @@ async function pushBilling(t) {
 
   const payload = {
     username,
-    fname: subscriberFirst(d), lname: subscriberLast(d),
+    fname: first, lname: last,
     address: String(d.cust_address || t.address || '').trim(),
     area: String(d.nap_id || '').trim(),        // the NAP box name IS the billing area
     phone: String(d.cust_phone || t.phone || '').trim(),
@@ -1434,14 +1447,16 @@ const server = http.createServer(async (req, res) => {
         t.issueFlow = issue ? issue.flow : 'generic';
       }
       if (t.type === 'installation') {
-        /* A starting guess only — the technician sees both fields and fixes them
-           before completing, which is the point of splitting them here rather
-           than splitting blind at the billing end. */
-        const parts = String(t.customer || '').trim().split(/\s+/).filter(Boolean);
-        t.data.cust_lname = parts.length > 1 ? parts[parts.length - 1] : '';
-        t.data.cust_fname = parts.length > 1 ? parts.slice(0, -1).join(' ') : (parts[0] || '');
-        t.data.cust_name = t.customer; t.data.cust_address = t.address; t.data.cust_phone = t.phone;
-        if (t.accountNo) t.data.cust_account = t.accountNo;   // step 9 starts pre-filled
+        /* The name typed at creation is a label for this job, nothing more. It
+           used to pre-fill First/Last at Step 9, which meant a placeholder like
+           "Walk-in Brgy 3" could be tapped past and land on the subscriber's
+           invoices. Step 9 now starts empty, so the technician standing with the
+           customer is the one who supplies the name that reaches billing.
+
+           Address and phone are different: they are dispatch details the office
+           genuinely knows up front, and they are not identity. */
+        t.data.cust_address = t.address; t.data.cust_phone = t.phone;
+        if (t.accountNo) t.data.cust_account = t.accountNo;
       }
       db.tickets.push(t); saveDB();
       return json(res, 200, { ticket: t });
