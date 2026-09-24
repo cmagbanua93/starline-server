@@ -480,19 +480,28 @@ function napInstallPayload(t) {
   };
 }
 
-async function pushNapInstall(t) {
+/* What a NAP job still needs before the map will take it. Shared by the push and
+   by the pending list, so the office is never told "retry" about a job that
+   cannot land, nor told something is missing that the push would accept. */
+function napInstallMissing(t) {
   const d = t.data || {};
   const loc = d.location || {};
+  const missing = [];
+  if (!String(d.nap_id || '').trim()) missing.push('the new box has no name');
+  if (loc.lat == null || loc.lng == null) missing.push('no GPS coordinates were captured');
+  if (![4, 8, 12, 16].includes(parseInt(d.nap_ports, 10))) missing.push('the box size is not set');
+  return missing;
+}
+
+async function pushNapInstall(t) {
+  const d = t.data || {};
   if (!FTTH_URL || !FTTH_TOKEN) {
     t.ftthSync = { state: 'off', message: 'The FTTH map is not connected', at: Date.now() };
     return saveDB();
   }
   /* Say exactly what is missing rather than retrying something that cannot
      succeed — these are the technician's to fix, not the network's. */
-  const missing = [];
-  if (!String(d.nap_id || '').trim()) missing.push('the new box has no name');
-  if (loc.lat == null || loc.lng == null) missing.push('no GPS coordinates were captured');
-  if (![4, 8, 12, 16].includes(parseInt(d.nap_ports, 10))) missing.push('the box size is not set');
+  const missing = napInstallMissing(t);
   if (missing.length) {
     t.ftthSync = { state: 'manual', message: 'Not placed on the map — ' + missing.join('; '), at: Date.now() };
     return saveDB();
@@ -1020,12 +1029,25 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    /* Jobs that finished but whose map write has not gone through yet. */
+    /* Jobs that finished but whose map write has not gone through yet.
+       "Never attempted" counts too: a job completed before the map integration
+       existed carries no ftthSync at all, so filtering on ftthSync alone left
+       exactly the backlog that needs attention invisible. */
     if (p === '/api/ftth/pending' && req.method === 'GET') {
+      const mapped = ['installation', 'nap_install'];
       const list = db.tickets
-        .filter(t => t.ftthSync && ['pending', 'blocked', 'manual', 'off'].includes(t.ftthSync.state))
+        .filter(t => t.status === 'completed' && mapped.includes(t.type))
+        .filter(t => !t.ftthSync || ['pending', 'blocked', 'manual', 'off'].includes(t.ftthSync.state))
         .filter(t => isAdmin || t.assignedTo === me.id)
-        .map(t => ({ id: t.id, number: t.number, customer: t.customer, completed: t.completed, ftthSync: t.ftthSync }));
+        .sort((a, b) => (b.completed || 0) - (a.completed || 0))
+        .map(t => ({
+          id: t.id, number: t.number, type: t.type, customer: t.customer,
+          completed: t.completed,
+          ftthSync: t.ftthSync || { state: 'never', message: 'This job finished before it could be written to the map.' },
+          /* What a NAP job would still need, so the office can see why a retry
+             will not land before spending a click on it. */
+          missing: t.type === 'nap_install' ? napInstallMissing(t) : undefined,
+        }));
       return json(res, 200, { pending: list });
     }
     const retryOne = p.match(/^\/api\/ftth\/retry\/([\w.]+)$/);
@@ -1033,7 +1055,12 @@ const server = http.createServer(async (req, res) => {
       if (!isAdmin) return json(res, 403, { error: 'Admin only' });
       const rt = db.tickets.find(x => x.id === retryOne[1]);
       if (!rt) return json(res, 404, { error: 'Ticket not found' });
-      await pushInstall(rt);
+      /* A NAP job places a box; a subscriber job hangs someone off a port. They
+         are different writes. Sending a NAP job through the subscriber push made
+         it fail on a missing drop port and report "NAP entered by hand", which
+         is both wrong and unfixable from the office. */
+      if (rt.type === 'nap_install') await pushNapInstall(rt);
+      else await pushInstall(rt);
       return json(res, 200, { ftthSync: rt.ftthSync });
     }
 
