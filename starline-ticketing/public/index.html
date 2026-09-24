@@ -2247,7 +2247,10 @@ async function retryBillingPush(id, number){
     if(st.state==='done') alert(number+' is now in billing.');
     else alert('Still not through: '+(st.error||st.state||'unknown')+'\n\nThe job stays on this list.');
   }catch(e){ alert(e.message); }
-  renderBillingCatchup();
+  /* Called from the billing worklist and from a job's own report — refresh
+     whichever one the user is actually looking at. */
+  if(currentView==='viewReport' && currentId){ await refreshTickets(true); openReport(currentId); }
+  else renderBillingCatchup();
 }
 async function renderBillingCatchup(){
   const box = document.getElementById('billingList');
@@ -3734,6 +3737,7 @@ async function openReport(id){
       <button class="btn btn-ghost btn-sm" onclick="window.print()">🖨 Print</button>
       <button class="btn btn-ghost btn-sm" onclick="exportJSON()">⬇ JSON</button>
     </div>
+    ${t.status==='completed' && t.type==='installation' ? billingSyncPanel(t) : ''}
     <div class="wizard-btns">
       ${t.status==='completed'?'<button class="btn btn-ghost btn-sm" onclick="reopenTicket()">Reopen</button>':''}
       <button class="btn btn-warn btn-sm" onclick="deleteTicket()">🗑 Delete Ticket</button>
@@ -3753,6 +3757,31 @@ async function reassignTicket(){
     ticketsEtag = null;
     await refreshTickets(); openReport(currentId);
   }catch(e){ alert(e.message); }
+}
+/* What the automatic push did for this job, and a way to run it again.
+   Available on every completed installation, not only ones that failed: a detail
+   corrected after completion, or a fix shipped since, both need re-sending, and
+   until now there was no way to ask for it. */
+function billingSyncPanel(t){
+  const b = t.billingSync;
+  const when = b && b.at ? new Date(b.at).toLocaleString() : '';
+  const label = { done:'sent to billing', failed:'did not reach billing',
+                  blocked:'not sent', pending:'sending…' }[b && b.state] || 'not sent yet';
+  const tone  = { done:'b-done', failed:'b-p1', blocked:'b-p2', pending:'b-progress' }[b && b.state] || 'b-open';
+  const steps = (b && b.steps || []).map(x =>
+    `<div class="tmeta">• ${esc(x.step)}: ${esc(x.status)}${x.detail?' — '+esc(x.detail):''}${x.dueDate?' (due '+esc(x.dueDate)+')':''}${x.product?' ('+esc(x.product)+(x.profile?' / '+esc(x.profile):'')+')':''}</div>`
+  ).join('');
+  return `<div class="card" style="margin-top:10px">
+    <div class="sec-head"><div class="sec-title">Billing</div>
+      <span class="badge ${tone}">${label}</span></div>
+    ${when?`<div class="tmeta">Last attempt ${esc(when)}</div>`:''}
+    ${b && b.error?`<div class="tmeta" style="color:var(--danger)">${esc(b.error)}</div>`:''}
+    ${steps}
+    <div class="tmeta" style="margin-top:6px">Sending again is safe: billing that is already active keeps its due date, and a plan that already matches is left alone, so nobody is charged differently or texted twice.</div>
+    <div class="wizard-btns">
+      <button class="btn btn-ghost btn-sm" onclick="retryBillingPush('${esc(t.id)}','${esc(t.number)}')">Send to billing again</button>
+    </div>
+  </div>`;
 }
 async function reopenTicket(){
   if(!confirm('Reopen this completed ticket?')) return;
