@@ -1,0 +1,1663 @@
+/* StarLine Field Ops — standalone server
+ * Zero dependencies. Run with:  node server.js
+ * Data stored in ./db.json
+ */
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const zlib = require('zlib');
+
+const PORT = process.env.PORT || 3000;
+const DB_FILE = process.env.DB_FILE || path.join(__dirname, 'db.json');
+const PUBLIC = path.join(__dirname, 'public');
+/* photos live next to the database (on the mounted volume), NOT inside db.json */
+const PHOTO_DIR = process.env.PHOTO_DIR || path.join(path.dirname(DB_FILE), 'photos');
+/* Everything here lives in one JSON file on one volume. BACKUP_TOKEN opens a
+   read-only endpoint so a scheduled job elsewhere can keep copies off this disk. */
+const BACKUP_TOKEN = process.env.BACKUP_TOKEN || '';
+/* The monitoring service already knows who each PPPoE account belongs to (it
+   joins the billing export to the router every cycle) and whether they are
+   online right now. Tickets ask it rather than keeping a second customer list. */
+const MONITOR_URL = (process.env.MONITOR_URL || '').replace(/\/$/, '');
+const MONITOR_TOKEN = process.env.MONITOR_TOKEN || '';
+/* The FTTH map owns the network inventory. A completed installation is written
+   there, so the map becomes correct through ordinary work rather than upkeep. */
+const FTTH_URL = (process.env.FTTH_URL || '').replace(/\/$/, '');
+const FTTH_TOKEN = process.env.FTTH_TOKEN || '';
+try { fs.mkdirSync(PHOTO_DIR, { recursive: true }); } catch (e) { console.error('Cannot create photo dir:', e.message); }
+
+/* ---------------- database (JSON file) ---------------- */
+let db = { users: [], tickets: [], sessions: {} };
+try { db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); } catch (e) {}
+db.users = db.users || []; db.tickets = db.tickets || []; db.sessions = db.sessions || {};
+db.settings = db.settings || { plans: [] };
+db.requests = db.requests || [];
+/* every movement of stock out of the warehouse to a technician, so "how much was
+   released vs how much was used" can be answered exactly */
+db.stockLog = db.stockLog || [];
+
+/* ---------------- repair issue types ----------------
+ * Each reported repair issue drives a different technician workflow. `flow` picks
+ * the step template the app runs; admins can add their own issues and choose which
+ * template they follow. */
+const REPAIR_FLOWS = ['modem', 'connector', 'nap_reading', 'fiber_cut', 'main_nap', 'generic'];
+const DEFAULT_REPAIR_ISSUES = [
+  { id: 'ri_modem', label: 'Modem / ONU issue — needs repair or replacement', flow: 'modem' },
+  { id: 'ri_connector', label: 'Defective connector', flow: 'connector' },
+  { id: 'ri_reading', label: 'High reading — check the NAP box', flow: 'nap_reading' },
+  { id: 'ri_fibercut', label: 'Fiber cut — NAP box to subscriber', flow: 'fiber_cut' },
+  { id: 'ri_mainnap', label: 'Main NAP problem', flow: 'main_nap' }
+];
+if (!Array.isArray(db.settings.repairIssues) || !db.settings.repairIssues.length) {
+  db.settings.repairIssues = DEFAULT_REPAIR_ISSUES.slice();
+} else {
+  /* tolerate an older plain-string list */
+  db.settings.repairIssues = db.settings.repairIssues.map((x, i) => {
+    if (typeof x === 'string') return { id: 'ri' + i + Date.now().toString(36), label: x, flow: 'generic' };
+    return { id: x.id || 'ri' + i + Date.now().toString(36), label: String(x.label || ''), flow: REPAIR_FLOWS.includes(x.flow) ? x.flow : 'generic' };
+  }).filter(x => x.label);
+}
+
+/* ---------------- elapsed-time helper ----------------
+ * Stored as text as well as milliseconds so every screen (and any export) shows
+ * the same wording without recomputing it. */
+/* The installation form captures first and last name separately, because billing
+   stores them separately and guessing where a Filipino name splits is how a
+   wrong surname ends up on an invoice. Older tickets only have the single
+   `cust_name`, so both shapes are read here and nowhere else. */
+/* The GPS step stores a point as {lat, lng}, not a string. Stringifying it
+   directly wrote "[object Object]" into billing's coordinates field. Billing
+   stores "lat,lng" with no space, so that is what is produced here — and an
+   unusable point yields nothing rather than a placeholder, since the merge rule
+   then leaves whatever billing already had. */
+function coordsText(v) {
+  if (v && typeof v === 'object') {
+    const lat = parseFloat(v.lat), lng = parseFloat(v.lng);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) return lat + ',' + lng;
+    return '';
+  }
+  const s = String(v == null ? '' : v).trim();
+  if (!s || s === '[object Object]') return '';
+  /* tolerate "10.24, 123.79" typed by hand */
+  const m = /^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/.exec(s);
+  return m ? m[1] + ',' + m[2] : s;
+}
+
+function subscriberFirst(d) {
+  const f = String((d && d.cust_fname) || '').trim();
+  if (f) return f;
+  const parts = String((d && d.cust_name) || '').trim().split(/\s+/).filter(Boolean);
+  return parts.length > 1 ? parts.slice(0, -1).join(' ') : (parts[0] || '');
+}
+function subscriberLast(d) {
+  const l = String((d && d.cust_lname) || '').trim();
+  if (l) return l;
+  const parts = String((d && d.cust_name) || '').trim().split(/\s+/).filter(Boolean);
+  return parts.length > 1 ? parts[parts.length - 1] : '';
+}
+function subscriberName(d) {
+  const f = String((d && d.cust_fname) || '').trim();
+  const l = String((d && d.cust_lname) || '').trim();
+  const joined = [f, l].filter(Boolean).join(' ');
+  return joined || String((d && d.cust_name) || '').trim();
+}
+
+function humanDuration(ms) {
+  if (!(ms > 0)) return 'less than a minute';
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return 'less than a minute';
+  if (mins < 60) return mins + (mins === 1 ? ' minute' : ' minutes');
+  const hrs = Math.floor(mins / 60), rm = mins % 60;
+  if (hrs < 48) return hrs + (hrs === 1 ? ' hour' : ' hours') + (rm ? ' ' + rm + (rm === 1 ? ' minute' : ' minutes') : '');
+  const days = Math.floor(hrs / 24), rh = hrs % 24;
+  return days + (days === 1 ? ' day' : ' days') + (rh ? ' ' + rh + (rh === 1 ? ' hour' : ' hours') : '');
+}
+/* warehouse/office stock: cables are reel types {id, name, meters (per reel), qty (pcs)};
+   items are any other stock {id, name, qty} */
+db.warehouse = db.warehouse || { connectors: 0, cables: [], items: [] };
+db.warehouse.items = db.warehouse.items || [];
+/* remnants handed back by technicians: part-used reels that are back at the office
+   and can be re-issued. Kept apart from full reels so nobody re-issues one by
+   accident thinking it holds a full 1000 m. */
+db.warehouse.remnants = db.warehouse.remnants || [];
+
+/* ---------------- reel register ----------------
+ * Every physical reel is one object with a code that is written on its tag. That
+ * code is what makes a reel accountable: it shows on the job that drew from it, in
+ * the usage log, and in the register, so a reel cannot quietly leave the company.
+ * A reel below REEL_EMPTY_M is spent; below REEL_LOW_M it is warned about, because
+ * starting a long run on a nearly-empty reel is what forces a mid-span joint. */
+const REEL_EMPTY_M = 2;
+const REEL_LOW_M = 100;
+db.reelSeq = db.reelSeq || 0;
+/* Append-only audit trail: issued, drawn, shortfall, returned, received, reconciled.
+   Nothing edits a reel's metres without leaving a row here. */
+db.reelLog = db.reelLog || [];
+
+function cablePrefix(name) {
+  const words = String(name || '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
+  let p = words.map(w => w[0]).join('').replace(/[^A-Z]/g, '');
+  if (p.length < 2) p = String(name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3);
+  return p.slice(0, 3) || 'CBL';
+}
+function nextReelCode(name) {
+  db.reelSeq += 1;
+  return cablePrefix(name) + '-' + String(db.reelSeq).padStart(4, '0');
+}
+function round2(n) { return Math.round((parseFloat(n) || 0) * 100) / 100; }
+
+/* One row per reel event. `expected` vs `counted` on a reconcile is deliberately
+   kept even when they match, so a clean count is evidence too. */
+function logReel(reel, event, detail) {
+  db.reelLog.push(Object.assign({
+    id: 'rl' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    ts: Date.now(),
+    reelId: reel ? reel.id : '', code: reel ? reel.code : '', name: reel ? reel.name : '',
+    event
+  }, detail || {}));
+  if (db.reelLog.length > 20000) db.reelLog = db.reelLog.slice(-20000);
+}
+
+/* inventory model: { connectors: N, cables: [{id, code, name, meters, startMeters, state}] } */
+let migratedReels = false;
+db.users.forEach(u => {
+  u.inv = u.inv || {};
+  if (u.inv.connectors === undefined) u.inv.connectors = 0;
+  if (!Array.isArray(u.inv.cables)) u.inv.cables = [];
+  if (!Array.isArray(u.inv.items)) u.inv.items = [];
+  if (typeof u.inv.cable === 'number') {
+    if (u.inv.cable > 0) u.inv.cables.push({ id: 'r' + Date.now() + Math.random().toString(36).slice(2, 6), name: 'Stock cable', meters: u.inv.cable });
+    delete u.inv.cable;
+  }
+  /* Backfill reels that pre-date the register, and rescue any that an over-draw
+     already pushed below zero — those had silently vanished from every
+     "meters > 0" list while still sitting in the file. */
+  /* Connectors could be driven negative by the same unfloored subtraction. */
+  if (u.inv.connectors < 0) { u.inv.connectors = 0; migratedReels = true; }
+  u.inv.cables.forEach(r => {
+    if (!r.code) { r.code = nextReelCode(r.name); migratedReels = true; }
+    if (r.meters < 0) {
+      const short = round2(-r.meters);
+      r.meters = 0;
+      migratedReels = true;
+      r.shortfall = round2((r.shortfall || 0) + short);
+      logReel(r, 'shortfall_recovered', { techId: u.id, techName: u.name, meters: short,
+        note: 'Reel was below zero from an unguarded over-draw and has been floored at 0 m.' });
+    }
+    r.meters = round2(r.meters);
+    /* Set after the rescue above, never before: a reel that had been driven
+       negative has no knowable starting length, and recording 0 would read as
+       "nothing was ever on it" instead of "we cannot say". */
+    if (r.startMeters === undefined) {
+      if (r.shortfall > 0) r.startUnknown = true;
+      else r.startMeters = round2(r.meters);
+    }
+    if (!r.state) r.state = r.meters <= REEL_EMPTY_M ? 'empty' : 'open';
+    if (!r.issuedAt) r.issuedAt = r.issuedAt || Date.now();
+  });
+});
+
+/* A rescue that only lived in memory would be undone by the next restart reading
+   the same bad figures, so it is written back once at boot. */
+if (migratedReels) { try { fs.writeFileSync(DB_FILE, JSON.stringify(db)); } catch (e) { console.error('reel migration save failed:', e.message); } }
+
+/* The reel a technician should be drawing from for a given cable type: oldest
+   issued first, so stock rotates and remnants do not pile up forever. */
+function activeReelFor(u, cableName) {
+  const n = String(cableName || '').trim().toLowerCase();
+  return ((u && u.inv && u.inv.cables) || [])
+    .filter(r => r.state === 'open' && r.meters > REEL_EMPTY_M && (!n || r.name.toLowerCase() === n))
+    .sort((a, b) => (a.issuedAt || 0) - (b.issuedAt || 0))[0] || null;
+}
+
+let saveTimer = null;
+function saveDB() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    fs.writeFile(DB_FILE, JSON.stringify(db), err => { if (err) console.error('DB save failed:', err.message); });
+  }, 150);
+}
+
+function flushDB() {
+  clearTimeout(saveTimer);
+  try { fs.writeFileSync(DB_FILE, JSON.stringify(db)); } catch (e) {}
+}
+process.on('SIGINT', () => { flushDB(); process.exit(0); });
+process.on('SIGTERM', () => { flushDB(); process.exit(0); });
+
+/* ---------------- photo storage (FIX 3) ----------------
+ * Photos used to be kept as base64 data: URLs inside ticket.data, which meant
+ * every copy of a ticket carried its images. They are now written once to
+ * PHOTO_DIR, named by content hash, and referenced by a short "/photos/<hash>.jpg"
+ * URL that the browser can cache forever.
+ */
+const IMG_EXT = { 'image/jpeg': '.jpg', 'image/jpg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' };
+const DATA_URL_RE = /^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]+)$/;
+
+function storeDataUrl(dataUrl) {
+  const m = DATA_URL_RE.exec(dataUrl);
+  if (!m) return null;
+  let buf;
+  try { buf = Buffer.from(m[2].replace(/\s/g, ''), 'base64'); } catch (e) { return null; }
+  if (!buf.length) return null;
+  const file = crypto.createHash('sha1').update(buf).digest('hex') + (IMG_EXT[m[1].toLowerCase()] || '.bin');
+  const full = path.join(PHOTO_DIR, file);
+  try { if (!fs.existsSync(full)) fs.writeFileSync(full, buf); }
+  catch (e) { console.error('Photo write failed:', e.message); return null; }
+  return '/photos/' + file;
+}
+
+/* Walk an object and replace every inline data:image/... string with a /photos/ URL.
+   Returns true if anything was moved out. */
+function externalizePhotos(node, depth) {
+  depth = depth || 0;
+  if (!node || typeof node !== 'object' || depth > 6) return false;
+  let changed = false;
+  for (const k of Object.keys(node)) {
+    const v = node[k];
+    if (typeof v === 'string') {
+      if (v.startsWith('data:image/')) {
+        const url = storeDataUrl(v);
+        if (url) { node[k] = url; changed = true; }
+      }
+    } else if (v && typeof v === 'object') {
+      if (externalizePhotos(v, depth + 1)) changed = true;
+    }
+  }
+  return changed;
+}
+
+/* One-time migration: pull every base64 image already sitting in db.json out to disk.
+   A full copy of the original database is written next to it first, so this is
+   reversible: stop the service, restore the .bak over db.json, redeploy the old build. */
+(function migratePhotos() {
+  const needsMigration = db.tickets.some(t => t.data && JSON.stringify(t.data).includes('data:image/'));
+  if (!needsMigration) return;
+
+  const backup = DB_FILE + '.pre-photo-migration.bak';
+  try {
+    if (!fs.existsSync(backup)) {
+      fs.copyFileSync(DB_FILE, backup);
+      console.log(`Backed up original database -> ${backup} (${(fs.statSync(backup).size / 1048576).toFixed(2)} MB)`);
+    }
+  } catch (e) {
+    console.error('ABORTING MIGRATION — could not write backup:', e.message);
+    return;   // never rewrite the database without a safety copy
+  }
+
+  let n = 0;
+  db.tickets.forEach(t => { if (t.data && externalizePhotos(t.data)) n++; });
+  if (n) {
+    flushDB();
+    console.log(`Moved inline photos out of ${n} ticket(s) -> ${PHOTO_DIR}`);
+    try { console.log(`db.json is now ${(fs.statSync(DB_FILE).size / 1048576).toFixed(2)} MB`); } catch (e) {}
+  }
+})();
+
+/* ---------------- password helpers ---------------- */
+function hashPassword(pw) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(pw, salt, 32).toString('hex');
+  return salt + ':' + hash;
+}
+function checkPassword(pw, stored) {
+  if (!stored) return false;
+  const [salt, hash] = stored.split(':');
+  const test = crypto.scryptSync(pw, salt, 32).toString('hex');
+  return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(test, 'hex'));
+}
+
+/* Seed default admin on first run */
+if (!db.users.length) {
+  db.users.push({
+    id: 'u' + Date.now(),
+    username: 'admin',
+    name: 'Administrator',
+    role: 'admin',
+    pass: hashPassword('admin123')
+  });
+  saveDB();
+  console.log('Created default admin account -> username: admin  password: admin123');
+  console.log('CHANGE THIS PASSWORD after first login (Technicians page > Change my password).');
+}
+
+/* ---------------- http helpers ---------------- */
+/* Already-compressed payloads: gzipping them just burns CPU. */
+const NO_GZIP = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/x-icon']);
+
+/* Central writer: gzips when the client asked for it and it actually helps (FIX 4). */
+function sendBody(req, res, code, body, type, extra) {
+  const headers = Object.assign({ 'Content-Type': type }, extra || {});
+  if (!Buffer.isBuffer(body)) body = Buffer.from(body);
+  if (body.length > 1024 && !NO_GZIP.has(type) && /\bgzip\b/.test(String(req.headers['accept-encoding'] || ''))) {
+    let gz = null;
+    try { gz = zlib.gzipSync(body, { level: 6 }); } catch (e) {}
+    if (gz && gz.length < body.length) {
+      body = gz;
+      headers['Content-Encoding'] = 'gzip';
+      headers['Vary'] = headers['Vary'] ? headers['Vary'] + ', Accept-Encoding' : 'Accept-Encoding';
+    }
+  }
+  headers['Content-Length'] = body.length;
+  res.writeHead(code, headers);
+  if (req.method === 'HEAD') return res.end();
+  res.end(body);
+}
+
+function json(res, code, obj) {
+  return sendBody(res.req, res, code, Buffer.from(JSON.stringify(obj)), 'application/json');
+}
+
+/* Same as json(), but tags the payload so an unchanged poll costs a 304 with no
+   body instead of the whole list (FIX 2). */
+function jsonCached(req, res, obj) {
+  const body = Buffer.from(JSON.stringify(obj));
+  const etag = '"' + crypto.createHash('sha1').update(body).digest('base64') + '"';
+  if (req.headers['if-none-match'] === etag) {
+    res.writeHead(304, { 'ETag': etag, 'Cache-Control': 'no-cache' });
+    return res.end();
+  }
+  return sendBody(req, res, 200, body, 'application/json', { 'ETag': etag, 'Cache-Control': 'no-cache' });
+}
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let size = 0; const chunks = [];
+    req.on('data', c => {
+      size += c.length;
+      if (size > 40 * 1024 * 1024) { reject(new Error('Payload too large')); req.destroy(); return; }
+      chunks.push(c);
+    });
+    req.on('end', () => {
+      try { resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : {}); }
+      catch (e) { reject(new Error('Invalid JSON')); }
+    });
+    req.on('error', reject);
+  });
+}
+function auth(req) {
+  const h = req.headers.authorization || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : null;
+  if (!token || !db.sessions[token]) return null;
+  const user = db.users.find(u => u.id === db.sessions[token]);
+  return user ? { user, token } : null;
+}
+function publicUser(u) { return { id: u.id, username: u.username, name: u.name, role: u.role, inv: u.inv || { connectors: 0, cables: [], items: [] } }; }
+
+/* ---------------- customer lookup (via the monitoring service) ----------------
+ * The API key stays on this server: the technician's browser never sees it, and
+ * a monitoring outage degrades to "lookup unavailable" rather than blocking the
+ * job — the customer name can always still be typed by hand.
+ */
+function lookupError(message, code) {
+  const e = new Error(message);
+  e.code = code;
+  return e;
+}
+
+/* ---------------- writing an installation onto the FTTH map ----------------
+ * Two systems, two databases: this write cannot be atomic with completing the
+ * job. So the job always completes, and the map write is queued and retried.
+ * A ticket carries its own sync state, and nothing is ever silently dropped.
+ */
+async function ftthCall(method, pathname, body) {
+  if (!FTTH_URL || !FTTH_TOKEN) throw lookupError('The FTTH map is not connected (FTTH_URL / FTTH_TOKEN).', 503);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const r = await fetch(FTTH_URL + pathname, {
+      method,
+      headers: { 'x-api-key': FTTH_TOKEN, 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: controller.signal
+    });
+    let out = {};
+    try { out = JSON.parse(await r.text()); } catch (e) {}
+    if (!r.ok) throw lookupError(out.error || ('FTTH map returned HTTP ' + r.status), r.status);
+    return out;
+  } catch (err) {
+    if (err.code) throw err;
+    throw lookupError(
+      err.name === 'AbortError' ? 'The FTTH map did not answer in time.' : 'Cannot reach the FTTH map right now.',
+      502
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* Everything the map needs about the subscriber, taken from the job the
+   technician actually did. */
+function installPayload(t) {
+  const d = t.data || {};
+  const loc = d.location || {};
+  return {
+    ticketId: t.id,
+    portId: d.nap_port_id,
+    subscriber: {
+      name: subscriberName(d) || t.customer || '',
+      address: d.cust_address || t.address || '',
+      phone: d.cust_phone || t.phone || '',
+      pppoe_username: t.pppoeUsername || '',
+      plan: d.cust_plan || '',
+      onu_serial: d.modem_serial || '',
+      lat: loc.lat, lng: loc.lng,
+      drop_length_m: d.cable_used,
+      installed_on: t.completed ? new Date(t.completed).toISOString().slice(0, 10) : null,
+      account_no: t.accountNo || '',
+      notes: d.final_notes || ''
+    }
+  };
+}
+
+/* ---- a new NAP box onto the map ----
+ * The technician recorded where the box is, how big it is and which port feeds
+ * it. Without this the office retyped all of that onto the map, or nobody did,
+ * and the box stayed invisible to the port picker and to outage tracing. */
+function napInstallPayload(t) {
+  const d = t.data || {};
+  const loc = d.location || {};
+  const name = String(d.nap_id || '').trim();
+  return {
+    ticketId: t.id,
+    nap: {
+      name,
+      area: name,                       // one value names the box and its billing area
+      lat: loc.lat, lng: loc.lng,
+      port_count: parseInt(d.nap_ports, 10) || 0,
+      address: String(d.main_nap || '').trim(),
+      notes: [
+        d.nap_reading !== undefined && d.nap_reading !== '' ? 'Reading at install: ' + d.nap_reading + ' dBm' : '',
+        String(d.final_notes || '').trim(),
+        'Installed on job ' + t.number,
+      ].filter(Boolean).join(' · '),
+    },
+    feeder: d.feeder_port_id ? {
+      from_port_id: d.feeder_port_id,
+      fiber_color: d.fiber_color && d.fiber_color !== 'No Color' ? d.fiber_color : '',
+      cable_length_m: d.cable_used,
+    } : null,
+  };
+}
+
+async function pushNapInstall(t) {
+  const d = t.data || {};
+  const loc = d.location || {};
+  if (!FTTH_URL || !FTTH_TOKEN) {
+    t.ftthSync = { state: 'off', message: 'The FTTH map is not connected', at: Date.now() };
+    return saveDB();
+  }
+  /* Say exactly what is missing rather than retrying something that cannot
+     succeed — these are the technician's to fix, not the network's. */
+  const missing = [];
+  if (!String(d.nap_id || '').trim()) missing.push('the new box has no name');
+  if (loc.lat == null || loc.lng == null) missing.push('no GPS coordinates were captured');
+  if (![4, 8, 12, 16].includes(parseInt(d.nap_ports, 10))) missing.push('the box size is not set');
+  if (missing.length) {
+    t.ftthSync = { state: 'manual', message: 'Not placed on the map — ' + missing.join('; '), at: Date.now() };
+    return saveDB();
+  }
+
+  const prior = t.ftthSync || {};
+  t.ftthSync = { state: 'pending', attempts: (prior.attempts || 0) + 1, lastTry: Date.now() };
+  saveDB();
+  try {
+    const r = await ftthCall('POST', '/api/nap-installs', napInstallPayload(t));
+    const dev = r.device || {};
+    t.ftthSync = {
+      state: 'done', at: Date.now(), deviceId: dev.id, deviceName: dev.name,
+      created: r.created !== false,
+      linked: !!r.link,
+      message: (r.created === false ? 'Already on the map' : 'Placed on the map')
+        + (r.link ? ' and connected to its feeding box' : ' — cable run not drawn, no feeding port was picked'),
+    };
+  } catch (e) {
+    const permanent = e.code === 400;
+    t.ftthSync = {
+      state: permanent ? 'blocked' : 'pending', at: Date.now(),
+      attempts: t.ftthSync.attempts, error: e.message,
+    };
+    console.error(`[ftth] NAP job ${t.number} not placed: ${e.message}`);
+  }
+  saveDB();
+}
+
+async function pushInstall(t) {
+  const d = t.data || {};
+  if (!d.nap_port_id) {
+    /* The NAP was typed by hand rather than picked, so there is no port on the
+       map to attach to. Say so plainly instead of retrying forever. */
+    t.ftthSync = { state: 'manual', message: 'NAP entered by hand — the map was not updated', at: Date.now() };
+    return saveDB();
+  }
+  if (!FTTH_URL || !FTTH_TOKEN) {
+    t.ftthSync = { state: 'off', message: 'The FTTH map is not connected', at: Date.now() };
+    return saveDB();
+  }
+  const prior = t.ftthSync || {};
+  t.ftthSync = { state: 'pending', attempts: (prior.attempts || 0) + 1, lastTry: Date.now() };
+  saveDB();
+  try {
+    const r = await ftthCall('POST', '/api/installations', installPayload(t));
+    t.ftthSync = {
+      state: 'done',
+      subscriberId: r.subscriber ? r.subscriber.id : null,
+      alreadyThere: !!r.already,
+      attempts: t.ftthSync.attempts,
+      at: Date.now()
+    };
+    console.log(`[ftth] ticket ${t.number} written to the map (subscriber ${t.ftthSync.subscriberId})`);
+  } catch (e) {
+    /* A refusal is not an outage. The map saying "that port is taken" or "that
+       username is already here" will say the same thing in five minutes, so it
+       stops and asks for a person instead of retrying for ever. Only genuine
+       unreachability keeps its place in the queue. */
+    const permanent = [400, 404, 409].includes(e.code);
+    t.ftthSync = Object.assign({}, t.ftthSync, {
+      state: permanent ? 'blocked' : 'pending',
+      error: e.message
+    });
+    console.error(`[ftth] ticket ${t.number} ${permanent ? 'refused by the map' : 'not written yet'}: ${e.message}`);
+  }
+  saveDB();
+}
+
+/* ---- pushing a finished installation into billing ----
+ * The office used to retype every completed install into TaokiNinam overnight.
+ * This does it at the moment the technician closes the job.
+ *
+ * It is deliberately fire-and-record: the technician's phone never waits on
+ * billing, and a failure is kept on the ticket rather than thrown away, because
+ * nobody is reviewing these and a silent failure would be worse than the typing
+ * it replaces. The monitor holds the billing credentials and does the actual
+ * three-step write; this only decides when and with what. */
+async function pushBilling(t) {
+  if (!MONITOR_URL || !MONITOR_TOKEN) return;
+  if (t.type !== 'installation') return;
+  const d = t.data || {};
+  const username = String(t.pppoeUsername || '').trim();
+  if (!username) {
+    t.billingSync = { state: 'blocked', at: Date.now(),
+      error: 'No PPPoE account is linked to this job, so there is nothing in billing to update.' };
+    saveDB();
+    return;
+  }
+  /* Step 9 is the only source for the subscriber's name now, so an empty one is
+     a real gap rather than something to paper over. Pushing blank names would
+     silently leave whatever billing already held — usually a placeholder — and
+     nobody would ever know. Surfacing it costs one line in the failures panel
+     and a click of "Send to billing again" once the name is filled in. */
+  const first = subscriberFirst(d), last = subscriberLast(d);
+  if (!first && !last) {
+    t.billingSync = { state: 'blocked', at: Date.now(),
+      error: 'No customer name was entered at Step 9, so billing has nothing to update. Add the name to the job, then send it to billing again.' };
+    saveDB();
+    return;
+  }
+
+  /* The install date is the day the work finished, which is what billing calls
+     the subscription date. */
+  const done = new Date(t.completed || Date.now());
+  const installDate = `${done.getFullYear()}-${String(done.getMonth() + 1).padStart(2, '0')}-${String(done.getDate()).padStart(2, '0')}`;
+
+  const payload = {
+    username,
+    fname: first, lname: last,
+    address: String(d.cust_address || t.address || '').trim(),
+    area: String(d.nap_id || '').trim(),        // the NAP box name IS the billing area
+    phone: String(d.cust_phone || t.phone || '').trim(),
+    email: String(d.cust_email || '').trim(),
+    coordinates: coordsText(d.location),
+    installDate,
+    port: String(d.nap_port || '').trim(),
+    plan: String(d.cust_plan || '').trim(),
+  };
+
+  t.billingSync = { state: 'pending', at: Date.now() };
+  saveDB();
+  try {
+    const r = await fetch(MONITOR_URL + '/api/billing-push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': MONITOR_TOKEN },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(60000),
+    });
+    const out = await r.json().catch(() => ({}));
+    if (r.ok && out.ok) {
+      t.billingSync = { state: 'done', at: Date.now(), recordId: out.recordId, steps: out.steps || [] };
+    } else {
+      /* The monitor reports a step failure in the step itself, not as a
+         top-level error. Showing "HTTP 502" instead of "the record did not come
+         back with the values that were sent" defeats the point of surfacing it
+         at all, so the step's own words win. */
+      const bad = (out.steps || []).find(x => x.status === 'failed');
+      const why = out.error
+        || (bad && (bad.detail || `the ${bad.step} step failed`))
+        || `billing returned HTTP ${r.status}`;
+      t.billingSync = { state: 'failed', at: Date.now(), error: why, steps: out.steps || [] };
+      console.error(`[billing] ticket ${t.number} (${username}) not pushed: ${t.billingSync.error}`);
+    }
+  } catch (e) {
+    t.billingSync = { state: 'failed', at: Date.now(), error: e.name === 'TimeoutError' ? 'billing did not answer in time' : e.message };
+    console.error(`[billing] ticket ${t.number} (${username}) not pushed: ${t.billingSync.error}`);
+  }
+  saveDB();
+}
+
+/* A failed push is retried on the same clock as the map push. Retrying is safe:
+   the monitor skips billing that is already on and a plan that already matches,
+   so a repeat cannot move a due date or text the subscriber twice. */
+const BILLING_RETRY_MS = 10 * 60 * 1000;
+setInterval(() => {
+  db.tickets
+    .filter(t => t.status === 'completed' && t.billingSync && t.billingSync.state === 'failed')
+    .slice(0, 3)
+    .forEach(t => { pushBilling(t); });
+}, BILLING_RETRY_MS).unref?.();
+
+/* Anything still pending is retried in the background — a redeploy of the map
+   during a completion costs a few minutes, not a lost port assignment. */
+const FTTH_RETRY_MS = 5 * 60 * 1000;
+setInterval(() => {
+  const waiting = db.tickets.filter(t => t.ftthSync && t.ftthSync.state === 'pending');
+  waiting.slice(0, 5).forEach(t => {
+    if (t.type === 'nap_install') pushNapInstall(t);
+    else pushInstall(t);
+  });
+}, FTTH_RETRY_MS).unref?.();
+
+let catalogCache = { at: 0, data: null };
+
+async function monitorLookup(pathAndQuery) {
+  if (!MONITOR_URL || !MONITOR_TOKEN) {
+    throw lookupError('Customer lookup is not set up yet (MONITOR_URL / MONITOR_TOKEN).', 503);
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  try {
+    const r = await fetch(MONITOR_URL + pathAndQuery, {
+      headers: { 'x-api-key': MONITOR_TOKEN },
+      signal: controller.signal
+    });
+    let body = {};
+    try { body = JSON.parse(await r.text()); } catch (e) {}
+    if (!r.ok) throw lookupError(body.error || ('Lookup failed (HTTP ' + r.status + ')'), r.status === 404 ? 404 : 502);
+    return body;
+  } catch (err) {
+    if (err.code) throw err;
+    throw lookupError(
+      err.name === 'AbortError'
+        ? 'The monitoring service did not answer in time.'
+        : 'Cannot reach the monitoring service right now.',
+      502
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* ---------------- ticket list shaping (FIX 1) ----------------
+ * The list endpoint must never carry image payloads. Every other field is kept
+ * so the dashboard, tech list and usage report still render from the list alone;
+ * only inline data: blobs are dropped. Post-migration the images are short
+ * /photos/ URLs, so nothing is stripped and _partial is false.
+ */
+function isInlineBlob(v) { return typeof v === 'string' && v.startsWith('data:'); }
+
+function lightData(data) {
+  if (!data || typeof data !== 'object') return { data: data, stripped: false };
+  let stripped = false;
+  const out = Array.isArray(data) ? [] : {};
+  for (const k of Object.keys(data)) {
+    const v = data[k];
+    if (isInlineBlob(v)) { stripped = true; continue; }
+    if (v && typeof v === 'object') {
+      const inner = lightData(v);
+      if (inner.stripped) stripped = true;
+      out[k] = inner.data;
+    } else out[k] = v;
+  }
+  return { data: out, stripped };
+}
+
+function ticketSummary(t) {
+  const light = lightData(t.data);
+  const s = Object.assign({}, t, { data: light.data });
+  if (light.stripped) s._partial = true;   // client re-fetches the full ticket when opened
+  return s;
+}
+/* Records stock leaving the warehouse for a technician. `qty` is pieces (reels for
+   cable) and `meters` the cable length that represents, so the usage report can
+   compare metres released against metres consumed. */
+function logStock(tech, kind, name, qty, meters, source, by, codes) {
+  const q = parseFloat(qty) || 0;
+  if (!tech || !q) return;
+  db.stockLog.push({
+    id: 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    ts: Date.now(),
+    techId: tech.id, techName: tech.name,
+    kind, name: String(name || '').trim() || (kind === 'connector' ? 'FIC Connector' : ''),
+    qty: q, meters: parseFloat(meters) || 0,
+    codes: Array.isArray(codes) ? codes.slice() : (codes ? [codes] : []),
+    source: source || 'direct', by: by || ''
+  });
+  if (db.stockLog.length > 5000) db.stockLog = db.stockLog.slice(-5000);
+}
+
+function addItemTo(u, name, qty) {
+  u.inv = u.inv || { connectors: 0, cables: [], items: [] };
+  u.inv.items = u.inv.items || [];
+  const n = String(name || '').trim();
+  const q = parseInt(qty) || 0;
+  if (!n || q === 0) return;
+  const ex = u.inv.items.find(i => i.name.toLowerCase() === n.toLowerCase());
+  if (ex) { ex.qty += q; if (ex.qty <= 0) u.inv.items = u.inv.items.filter(i => i !== ex); }
+  else if (q > 0) u.inv.items.push({ name: n, qty: q });
+}
+/* Issues one physical reel to a technician and gives it its code. `existing` carries
+   a remnant being re-issued, so a part-used reel keeps the code already on its tag
+   rather than being reborn as a fresh one. Returns the reel for logging. */
+function addStockTo(u, cableName, cableMeters, connectors, existing, by) {
+  u.inv = u.inv || { connectors: 0, cables: [] };
+  u.inv.cables = u.inv.cables || [];
+  let reel = null;
+  const name = String(cableName || '').trim();
+  const meters = round2(cableMeters);
+  if (name && meters > 0) {
+    reel = existing ? Object.assign({}, existing, { meters }) : {
+      id: 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      code: nextReelCode(name), name, meters, startMeters: meters
+    };
+    reel.state = 'open';
+    reel.issuedAt = Date.now();
+    u.inv.cables.push(reel);
+    logReel(reel, existing ? 'reissued' : 'issued', {
+      techId: u.id, techName: u.name, meters, by: by || ''
+    });
+  }
+  u.inv.connectors = (u.inv.connectors || 0) + (parseInt(connectors) || 0);
+  return reel;
+}
+
+/* ---------------- static files ---------------- */
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.json': 'application/json', '.ico': 'image/x-icon' };
+function serveStatic(req, res, urlPath) {
+  let p = urlPath === '/' ? '/index.html' : urlPath;
+  p = path.normalize(p).replace(/^(\.\.[/\\])+/, '');
+  const file = path.join(PUBLIC, p);
+  if (!file.startsWith(PUBLIC)) { res.writeHead(403); res.end(); return; }
+  fs.readFile(file, (err, data) => {
+    if (err) { res.writeHead(404); res.end('Not found'); return; }
+    sendBody(req, res, 200, data, MIME[path.extname(file)] || 'application/octet-stream');
+  });
+}
+
+/* Stored photos: content-addressed, so they can be cached forever (FIX 3).
+   The 40-hex-character name is the capability — these URLs are unguessable but
+   not session-checked, because <img src> cannot send the Bearer token. */
+function servePhoto(req, res, urlPath) {
+  const name = path.basename(urlPath);
+  if (!/^[A-Za-z0-9._-]+$/.test(name) || name.startsWith('.')) { res.writeHead(404); return res.end('Not found'); }
+  const file = path.join(PHOTO_DIR, name);
+  if (!file.startsWith(PHOTO_DIR)) { res.writeHead(403); return res.end(); }
+  fs.readFile(file, (err, data) => {
+    if (err) { res.writeHead(404); res.end('Not found'); return; }
+    sendBody(req, res, 200, data, MIME[path.extname(file)] || 'application/octet-stream', {
+      'Cache-Control': 'public, max-age=31536000, immutable'
+    });
+  });
+}
+
+/* ---------------- server ---------------- */
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, 'http://x');
+  const p = url.pathname;
+
+  try {
+    if (p.startsWith('/photos/')) return servePhoto(req, res, p);
+    if (!p.startsWith('/api/')) return serveStatic(req, res, p);
+
+    /* ---- login ---- */
+    if (p === '/api/login' && req.method === 'POST') {
+      const { username, password } = await readBody(req);
+      const user = db.users.find(u => u.username === String(username || '').trim().toLowerCase());
+      if (!user || !checkPassword(String(password || ''), user.pass))
+        return json(res, 401, { error: 'Wrong username or password' });
+      const token = crypto.randomBytes(24).toString('hex');
+      db.sessions[token] = user.id; saveDB();
+      return json(res, 200, { token, user: publicUser(user) });
+    }
+
+    /* ---- backup (machine-to-machine, own token, read-only) ----
+       Returns the whole database plus the list of photo files, so a scheduled
+       job can store a dated copy somewhere other than this volume. */
+    if (p === '/api/backup' && (req.method === 'GET' || req.method === 'HEAD')) {
+      if (!BACKUP_TOKEN) return json(res, 503, { error: 'Backups are disabled: set BACKUP_TOKEN on this service.' });
+      const supplied = Buffer.from(String(req.headers['x-api-key'] || ''));
+      const expected = Buffer.from(BACKUP_TOKEN);
+      const ok = supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
+      if (!ok) return json(res, 401, { error: 'Bad or missing API key' });
+
+      let photos = [];
+      try { photos = fs.readdirSync(PHOTO_DIR).filter(n => !n.startsWith('.')); } catch (e) {}
+      return json(res, 200, {
+        takenAt: new Date().toISOString(),
+        counts: {
+          tickets: db.tickets.length,
+          users: db.users.length,
+          requests: db.requests.length,
+          stockLog: db.stockLog.length,
+          photos: photos.length
+        },
+        photos,
+        db
+      });
+    }
+
+    /* ---- everything below requires auth ---- */
+    const session = auth(req);
+    if (!session) return json(res, 401, { error: 'Not logged in' });
+    const me = session.user;
+    const isAdmin = me.role === 'admin';
+
+    if (p === '/api/logout' && req.method === 'POST') {
+      delete db.sessions[session.token]; saveDB();
+      return json(res, 200, { ok: true });
+    }
+    if (p === '/api/me' && req.method === 'GET') return json(res, 200, { user: publicUser(me) });
+
+    /* ---- customer lookup for the ticket screens ----
+       Any logged-in user may search; the key never leaves this server. */
+    if (p === '/api/lookup/customers' && req.method === 'GET') {
+      try {
+        const q = url.searchParams.get('q') || '';
+        return json(res, 200, await monitorLookup('/api/customers?limit=15&q=' + encodeURIComponent(q)));
+      } catch (e) {
+        return json(res, e.code || 500, { error: e.message });
+      }
+    }
+    const lookupOne = p.match(/^\/api\/lookup\/customers\/(.+)$/);
+    if (lookupOne && req.method === 'GET') {
+      try {
+        return json(res, 200, await monitorLookup('/api/customers/' + encodeURIComponent(decodeURIComponent(lookupOne[1]))));
+      } catch (e) {
+        return json(res, e.code || 500, { error: e.message });
+      }
+    }
+
+    /* Retry a push by hand. Safe to press repeatedly: the monitor skips billing
+       that is already on and a plan that already matches, so this cannot move a
+       live due date or text a subscriber twice. */
+    /* Its own binding: `m` is declared further down this scope, so assigning to
+       it here would touch it before initialisation. */
+    const retryMatch = p.match(/^\/api\/tickets\/([\w.]+)\/billing-retry$/);
+    if (retryMatch && req.method === 'POST') {
+      if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+      const t = db.tickets.find(x => x.id === retryMatch[1]);
+      if (!t) return json(res, 404, { error: 'Ticket not found' });
+      if (t.status !== 'completed' || t.type !== 'installation') {
+        return json(res, 400, { error: 'Only a completed installation can be pushed to billing.' });
+      }
+      await pushBilling(t);
+      return json(res, 200, { billingSync: t.billingSync || null });
+    }
+
+    /* ---- the lists billing owns ----
+       Areas and plans are billing's to define, so the ticket offers exactly what
+       billing will accept rather than keeping its own copy that drifts. Cached
+       briefly so a phone opening a job does not hit TaokiNinam every time. */
+    if (p === '/api/billing-catalog' && req.method === 'GET') {
+      const now = Date.now();
+      if (catalogCache.data && now - catalogCache.at < 10 * 60 * 1000) {
+        return json(res, 200, catalogCache.data);
+      }
+      try {
+        const c = await monitorLookup('/api/billing-catalog');
+        catalogCache = { at: now, data: { configured: true, areas: c.areas || [], products: c.products || [] } };
+        return json(res, 200, catalogCache.data);
+      } catch (e) {
+        /* Never block a technician mid-job: fall back to whatever was last seen,
+           and otherwise say plainly that the list could not be loaded. */
+        if (catalogCache.data) return json(res, 200, Object.assign({ stale: true }, catalogCache.data));
+        return json(res, 200, { configured: false, areas: [], products: [], error: e.message });
+      }
+    }
+
+    /* ---- what still has to be typed into billing ----
+       Installations finish during the day; billing is caught up at night. This
+       is that night's worklist, worked out by comparing each completed job with
+       what billing currently holds. It clears itself: once TaokiNinam matches,
+       the row stops appearing. Nothing to tick off. */
+    if (p === '/api/billing-catchup' && req.method === 'GET') {
+      if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+      const installs = db.tickets
+        .filter(t => t.type === 'installation' && t.status === 'completed')
+        .sort((a, b) => (b.completed || 0) - (a.completed || 0));
+
+      /* One lookup per distinct account, a few at a time. */
+      const names = [...new Set(installs.map(t => t.pppoeUsername).filter(Boolean))];
+      const live = new Map();
+      for (let i = 0; i < names.length; i += 6) {
+        await Promise.all(names.slice(i, i + 6).map(async u => {
+          try { live.set(u, (await monitorLookup('/api/customers/' + encodeURIComponent(u))).customer); }
+          catch (e) { live.set(u, null); }
+        }));
+      }
+
+      const rows = [];
+      for (const t of installs) {
+        const d = t.data || {};
+        const row = {
+          ticketId: t.id, number: t.number, completed: t.completed, tech: t.assignedName || '',
+          username: t.pppoeUsername || '',
+          name: subscriberName(d) || t.customer || '',
+          phone: d.cust_phone || t.phone || '',
+          address: d.cust_address || t.address || '',
+          plan: d.cust_plan || '',
+          nap: d.nap_id || '', port: d.nap_port || '',
+          onu: d.modem_serial || '',
+          reasons: []
+        };
+        if (!row.username) {
+          row.reasons.push('no PPPoE account linked to this job');
+        } else {
+          const c = live.get(row.username);
+          if (!c) {
+            row.reasons.push('that PPPoE account is not in billing yet');
+          } else {
+            row.billing = { name: c.customerName || '', accountNo: c.accountNo || '', napBox: c.napBox || '' };
+            const billingName = String(c.customerName || '').trim();
+            if (!billingName || billingName.toLowerCase() === row.username.toLowerCase()) {
+              row.reasons.push('billing still shows the PPPoE username as the name');
+            }
+            if (!String(c.accountNo || '').trim()) row.reasons.push('no account number — not activated yet');
+            if (row.nap && !String(c.napBox || '').trim()) row.reasons.push('NAP and port not recorded in billing');
+          }
+        }
+        if (row.reasons.length) rows.push(row);
+      }
+      /* Pushes that did not land. With the push fully automatic nobody is
+         watching it happen, so the one place an admin looks at billing is the
+         one place these have to surface. */
+      const pushes = db.tickets
+        .filter(t => t.type === 'installation' && t.billingSync &&
+                     ['failed', 'blocked', 'pending'].includes(t.billingSync.state))
+        .sort((a, b) => (b.billingSync.at || 0) - (a.billingSync.at || 0))
+        .slice(0, 50)
+        .map(t => ({
+          ticketId: t.id, number: t.number,
+          customer: subscriberName(t.data) || t.customer || '',
+          username: t.pppoeUsername || '',
+          state: t.billingSync.state,
+          error: t.billingSync.error || '',
+          at: t.billingSync.at || 0,
+          steps: t.billingSync.steps || [],
+        }));
+      return json(res, 200, { rows, checked: installs.length, pushes });
+    }
+
+    /* ---- the FTTH map, for the port picker in step 4 ---- */
+    if (p === '/api/ftth/naps' && req.method === 'GET') {
+      try {
+        const qs = url.searchParams.toString();
+        return json(res, 200, await ftthCall('GET', '/api/nap-candidates' + (qs ? '?' + qs : '')));
+      } catch (e) {
+        return json(res, e.code || 500, { error: e.message });
+      }
+    }
+    if ((p === '/api/ftth/reserve' || p === '/api/ftth/release') && req.method === 'POST') {
+      const rb = await readBody(req);
+      const portId = String(rb.portId || '').trim();
+      const rt = db.tickets.find(x => x.id === rb.ticketId);
+      if (!rt) return json(res, 404, { error: 'Ticket not found' });
+      if (!isAdmin && rt.assignedTo !== me.id) return json(res, 403, { error: 'Not your ticket' });
+      if (!portId) return json(res, 400, { error: 'portId required' });
+      try {
+        const action = p.endsWith('reserve') ? 'reserve' : 'release';
+        return json(res, 200, await ftthCall('POST', `/api/ports/${encodeURIComponent(portId)}/${action}`, { ticketId: rt.id }));
+      } catch (e) {
+        return json(res, e.code || 500, { error: e.message });
+      }
+    }
+
+    /* Jobs that finished but whose map write has not gone through yet. */
+    if (p === '/api/ftth/pending' && req.method === 'GET') {
+      const list = db.tickets
+        .filter(t => t.ftthSync && ['pending', 'blocked', 'manual', 'off'].includes(t.ftthSync.state))
+        .filter(t => isAdmin || t.assignedTo === me.id)
+        .map(t => ({ id: t.id, number: t.number, customer: t.customer, completed: t.completed, ftthSync: t.ftthSync }));
+      return json(res, 200, { pending: list });
+    }
+    const retryOne = p.match(/^\/api\/ftth\/retry\/([\w.]+)$/);
+    if (retryOne && req.method === 'POST') {
+      if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+      const rt = db.tickets.find(x => x.id === retryOne[1]);
+      if (!rt) return json(res, 404, { error: 'Ticket not found' });
+      await pushInstall(rt);
+      return json(res, 200, { ftthSync: rt.ftthSync });
+    }
+
+    if (p === '/api/password' && req.method === 'POST') {
+      const { oldPassword, newPassword } = await readBody(req);
+      if (!checkPassword(String(oldPassword || ''), me.pass)) return json(res, 400, { error: 'Current password is wrong' });
+      if (String(newPassword || '').length < 6) return json(res, 400, { error: 'New password must be at least 6 characters' });
+      me.pass = hashPassword(String(newPassword)); saveDB();
+      return json(res, 200, { ok: true });
+    }
+
+    /* ---- settings (plans) ---- */
+    if (p === '/api/settings' && req.method === 'GET') return json(res, 200, { settings: db.settings });
+    if (p === '/api/settings' && req.method === 'PUT') {
+      if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+      const b = await readBody(req);
+      if (Array.isArray(b.plans)) db.settings.plans = b.plans.map(x => String(x).trim()).filter(Boolean);
+      if (Array.isArray(b.repairIssues)) {
+        db.settings.repairIssues = b.repairIssues.map((x, i) => ({
+          id: (x && x.id) || 'ri' + i + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+          label: String((x && x.label) || '').trim(),
+          flow: (x && REPAIR_FLOWS.includes(x.flow)) ? x.flow : 'generic'
+        })).filter(x => x.label);
+      }
+      saveDB();
+      return json(res, 200, { settings: db.settings });
+    }
+
+    /* ---- warehouse inventory ---- */
+    if (p === '/api/warehouse' && req.method === 'GET') return json(res, 200, { warehouse: db.warehouse });
+    if (p === '/api/warehouse' && req.method === 'POST') {
+      if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+      const b = await readBody(req);
+      const name = String(b.cableName || '').trim();
+      const meters = parseFloat(b.reelMeters) || 0;
+      const qty = parseInt(b.qty) || 0;
+      if (name && meters > 0 && qty !== 0) {
+        const existing = db.warehouse.cables.find(c => c.name.toLowerCase() === name.toLowerCase() && c.meters === meters);
+        if (existing) { existing.qty += qty; if (existing.qty <= 0) db.warehouse.cables = db.warehouse.cables.filter(c => c !== existing); }
+        else if (qty > 0) db.warehouse.cables.push({ id: 'w' + Date.now() + Math.random().toString(36).slice(2, 6), name, meters, qty });
+      }
+      if (b.connectors !== undefined) db.warehouse.connectors = Math.max(0, (db.warehouse.connectors || 0) + (parseInt(b.connectors) || 0));
+      /* generic items (modems, clamps, hooks, patch cords, ...) */
+      const itemName = String(b.itemName || '').trim();
+      const itemQty = parseInt(b.itemQty) || 0;
+      if (itemName && itemQty !== 0) {
+        const ex = db.warehouse.items.find(i => i.name.toLowerCase() === itemName.toLowerCase());
+        if (ex) { ex.qty += itemQty; if (ex.qty <= 0) db.warehouse.items = db.warehouse.items.filter(i => i !== ex); }
+        else if (itemQty > 0) db.warehouse.items.push({ id: 'i' + Date.now() + Math.random().toString(36).slice(2, 6), name: itemName, qty: itemQty });
+      }
+      if (b.removeCable) db.warehouse.cables = db.warehouse.cables.filter(c => c.id !== b.removeCable);
+      if (b.removeItem) db.warehouse.items = db.warehouse.items.filter(i => i.id !== b.removeItem);
+      saveDB();
+      return json(res, 200, { warehouse: db.warehouse });
+    }
+
+    /* ---- material requests ---- */
+    if (p === '/api/requests' && req.method === 'GET') {
+      const list = isAdmin ? db.requests : db.requests.filter(r => r.techId === me.id);
+      return json(res, 200, { requests: list });
+    }
+    if (p === '/api/requests' && req.method === 'POST') {
+      const b = await readBody(req);
+      const kind = String(b.kind || '').trim();       // 'cable' | 'connector' | 'item'
+      const name = String(b.name || b.cableName || '').trim();
+      const qty = parseInt(b.qty || b.cableReels || b.connectors) || 0;
+      if (!['cable', 'connector', 'item'].includes(kind)) return json(res, 400, { error: 'Select an item to request' });
+      if (qty <= 0) return json(res, 400, { error: 'Enter a quantity greater than zero' });
+      let cableMeters = 0;
+      if (kind === 'cable') {
+        const wh = db.warehouse.cables.find(c => c.name.toLowerCase() === name.toLowerCase());
+        if (!wh) return json(res, 400, { error: 'That cable type is not in the warehouse inventory' });
+        cableMeters = qty * wh.meters;
+      }
+      if (kind === 'item') {
+        const wh = db.warehouse.items.find(i => i.name.toLowerCase() === name.toLowerCase());
+        if (!wh) return json(res, 400, { error: 'That item is not in the warehouse inventory' });
+      }
+      const r = {
+        id: 'q' + Date.now() + Math.random().toString(36).slice(2, 6),
+        techId: me.id, techName: me.name,
+        kind, name: kind === 'connector' ? 'FIC Connector' : name, qty, cableMeters,
+        note: String(b.note || '').trim(),
+        status: 'pending', created: Date.now()
+      };
+      db.requests.push(r); saveDB();
+      return json(res, 200, { request: r });
+    }
+    let m = p.match(/^\/api\/requests\/([\w.]+)$/);
+    if (m && req.method === 'PUT') {
+      const r = db.requests.find(x => x.id === m[1]);
+      if (!r) return json(res, 404, { error: 'Request not found' });
+      const b = await readBody(req);
+      const action = b.action;
+      if (action === 'cancel') {
+        if (r.techId !== me.id && !isAdmin) return json(res, 403, { error: 'Not your request' });
+        if (r.status !== 'pending') return json(res, 400, { error: 'Only pending requests can be cancelled' });
+        r.status = 'cancelled';
+      } else {
+        if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+        if (action === 'approve') {
+          if (r.status !== 'pending') return json(res, 400, { error: 'Only pending requests can be approved' });
+          r.status = 'approved';
+        } else if (action === 'reject') {
+          if (!['pending', 'approved'].includes(r.status)) return json(res, 400, { error: 'Already processed' });
+          r.status = 'rejected';
+        } else if (action === 'release') {
+          if (!['pending', 'approved'].includes(r.status)) return json(res, 400, { error: 'Already processed' });
+          const tech = db.users.find(u => u.id === r.techId);
+          if (!tech) return json(res, 400, { error: 'Technician no longer exists' });
+          /* take the items out of warehouse stock and move to the technician */
+          const kind = r.kind || (r.cableName ? 'cable' : 'connector');       // legacy support
+          const name = r.name || r.cableName;
+          const qty = r.qty || r.cableReels || r.connectors || 0;
+          if (kind === 'cable' && name && qty > 0) {
+            const wh = db.warehouse.cables.find(c => c.name.toLowerCase() === name.toLowerCase());
+            if (!wh) return json(res, 400, { error: 'No "' + name + '" cable in warehouse inventory. Add it first (Requests tab > Warehouse Inventory).' });
+            if (wh.qty < qty) return json(res, 400, { error: 'Not enough stock: request needs ' + qty + ' reel(s) of ' + wh.name + ' (' + wh.meters + ' m/reel) but warehouse has only ' + wh.qty + '.' });
+            wh.qty -= qty;
+            if (wh.qty <= 0) db.warehouse.cables = db.warehouse.cables.filter(c => c !== wh);
+            const issued = [];
+            for (let i = 0; i < qty; i++) {
+              const reel = addStockTo(tech, wh.name, wh.meters, 0, null, me.name);
+              if (reel) issued.push(reel.code);
+            }
+            r.reelCodes = issued;
+            logStock(tech, 'cable', wh.name, qty, qty * wh.meters, 'request', me.name, issued);
+          } else if (kind === 'connector' && qty > 0) {
+            if ((db.warehouse.connectors || 0) < qty) return json(res, 400, { error: 'Not enough FIC connectors in warehouse: requested ' + qty + ', available ' + (db.warehouse.connectors || 0) + '.' });
+            db.warehouse.connectors -= qty;
+            addStockTo(tech, '', 0, qty);
+            logStock(tech, 'connector', 'FIC Connector', qty, 0, 'request', me.name);
+          } else if (kind === 'item' && name && qty > 0) {
+            const wh = db.warehouse.items.find(i => i.name.toLowerCase() === name.toLowerCase());
+            if (!wh) return json(res, 400, { error: 'No "' + name + '" in warehouse inventory. Add it first.' });
+            if (wh.qty < qty) return json(res, 400, { error: 'Not enough stock: requested ' + qty + ' of ' + wh.name + ' but warehouse has only ' + wh.qty + '.' });
+            wh.qty -= qty;
+            if (wh.qty <= 0) db.warehouse.items = db.warehouse.items.filter(i => i !== wh);
+            addItemTo(tech, wh.name, qty);
+            logStock(tech, 'item', wh.name, qty, 0, 'request', me.name);
+          }
+          /* legacy combined requests (cable + connectors in one) */
+          if (!r.kind && r.cableName && r.connectors > 0) {
+            if ((db.warehouse.connectors || 0) < r.connectors) return json(res, 400, { error: 'Not enough FIC connectors in warehouse.' });
+            db.warehouse.connectors -= r.connectors;
+            addStockTo(tech, '', 0, r.connectors);
+            logStock(tech, 'connector', 'FIC Connector', r.connectors, 0, 'request', me.name);
+          }
+          r.status = 'released'; r.released = Date.now();
+        } else return json(res, 400, { error: 'Unknown action' });
+        r.decidedBy = me.name;
+      }
+      r.updated = Date.now();
+      saveDB();
+      return json(res, 200, { request: r });
+    }
+
+    /* ---- stock ledger: what was released to whom ---- */
+    if (p === '/api/stocklog' && req.method === 'GET') {
+      const list = isAdmin ? db.stockLog : db.stockLog.filter(s => s.techId === me.id);
+      return json(res, 200, { stockLog: list });
+    }
+
+    /* ---- users (admin) ---- */
+    if (p === '/api/users' && req.method === 'GET') {
+      if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+      return json(res, 200, { users: db.users.map(publicUser) });
+    }
+    if (p === '/api/users' && req.method === 'POST') {
+      if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+      const b = await readBody(req);
+      const username = String(b.username || '').trim().toLowerCase();
+      const name = String(b.name || '').trim();
+      const password = String(b.password || '');
+      if (!username || !name || password.length < 6)
+        return json(res, 400, { error: 'Name, username and a password of 6+ characters are required' });
+      if (db.users.some(u => u.username === username)) return json(res, 400, { error: 'Username already taken' });
+      const u = { id: 'u' + Date.now() + Math.random().toString(36).slice(2, 6), username, name, role: b.role === 'admin' ? 'admin' : 'tech', pass: hashPassword(password), inv: { connectors: 0, cables: [], items: [] } };
+      db.users.push(u); saveDB();
+      return json(res, 200, { user: publicUser(u) });
+    }
+    m = p.match(/^\/api\/users\/([\w.]+)$/);
+    if (m && req.method === 'DELETE') {
+      if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+      if (m[1] === me.id) return json(res, 400, { error: 'You cannot delete your own account' });
+      db.users = db.users.filter(u => u.id !== m[1]);
+      Object.keys(db.sessions).forEach(t => { if (db.sessions[t] === m[1]) delete db.sessions[t]; });
+      saveDB();
+      return json(res, 200, { ok: true });
+    }
+    m = p.match(/^\/api\/users\/([\w.]+)\/inventory$/);
+    if (m && req.method === 'POST') {
+      if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+      const b = await readBody(req);
+      const u = db.users.find(x => x.id === m[1]);
+      if (!u) return json(res, 404, { error: 'User not found' });
+      const directReel = addStockTo(u, b.cableName, b.cableMeters, b.connectors, null, me.name);
+      /* stock handed over directly (not through a request) still belongs in the ledger */
+      if (String(b.cableName || '').trim() && (parseFloat(b.cableMeters) || 0) > 0)
+        logStock(u, 'cable', b.cableName, 1, b.cableMeters, 'direct', me.name, directReel ? [directReel.code] : []);
+      if ((parseInt(b.connectors) || 0) > 0)
+        logStock(u, 'connector', 'FIC Connector', parseInt(b.connectors), 0, 'direct', me.name);
+      if (b.itemName !== undefined && b.itemQty !== undefined) {
+        addItemTo(u, b.itemName, b.itemQty);
+        if ((parseInt(b.itemQty) || 0) > 0) logStock(u, 'item', b.itemName, parseInt(b.itemQty), 0, 'direct', me.name);
+      }
+      /* Re-issuing a remnant keeps the code already written on its physical tag,
+         so its history stays in one thread instead of restarting as a new reel. */
+      if (b.issueRemnantId) {
+        const rem = (db.warehouse.remnants || []).find(r => r.id === b.issueRemnantId);
+        if (!rem) return json(res, 400, { error: 'That remnant is no longer in the office stock.' });
+        db.warehouse.remnants = db.warehouse.remnants.filter(r => r.id !== rem.id);
+        addStockTo(u, rem.name, rem.meters, 0, rem, me.name);
+        logStock(u, 'cable', rem.name, 1, rem.meters, 'remnant', me.name, [rem.code]);
+      }
+      /* Removing or re-typing a reel's metres by hand is exactly the move that
+         would hide a missing reel, so both leave a row in the register. */
+      if (b.removeReel) {
+        const gone = (u.inv.cables || []).find(r => r.id === b.removeReel);
+        if (gone) logReel(gone, 'removed', {
+          techId: u.id, techName: u.name, meters: gone.meters, by: me.name,
+          note: String(b.reason || '').trim() || 'Removed from the technician\'s stock by an admin.'
+        });
+        u.inv.cables = (u.inv.cables || []).filter(r => r.id !== b.removeReel);
+      }
+      if (b.setReelId && b.setReelMeters !== undefined) {
+        const reel = (u.inv.cables || []).find(r => r.id === b.setReelId);
+        if (reel) {
+          const before = round2(reel.meters);
+          reel.meters = Math.max(0, round2(b.setReelMeters));
+          logReel(reel, 'adjusted', {
+            techId: u.id, techName: u.name, before, after: reel.meters,
+            variance: round2(reel.meters - before), by: me.name,
+            note: String(b.reason || '').trim() || 'Metres set by an admin.'
+          });
+          if (reel.meters > REEL_EMPTY_M && reel.state === 'empty') reel.state = 'open';
+          if (reel.meters <= REEL_EMPTY_M && reel.state === 'open') reel.state = 'empty';
+        }
+      }
+      saveDB();
+      return json(res, 200, { user: publicUser(u) });
+    }
+
+    /* ---- reel register ----
+     * The point of this block is that a reel can only leave the system through a
+     * door that records who opened it. */
+    if (p === '/api/reels' && req.method === 'GET') {
+      const rows = [];
+      db.users.forEach(u => {
+        if (isAdmin || u.id === me.id) {
+          ((u.inv && u.inv.cables) || []).forEach(r => rows.push(Object.assign({}, r, {
+            holder: 'tech', techId: u.id, techName: u.name,
+            low: r.state === 'open' && r.meters <= REEL_LOW_M
+          })));
+        }
+      });
+      if (isAdmin) {
+        (db.warehouse.remnants || []).forEach(r => rows.push(Object.assign({}, r, { holder: 'office' })));
+      }
+      return json(res, 200, {
+        reels: rows,
+        log: isAdmin ? db.reelLog.slice(-500).reverse() : [],
+        thresholds: { empty: REEL_EMPTY_M, low: REEL_LOW_M }
+      });
+    }
+
+    m = p.match(/^\/api\/reels\/([\w.]+)\/(return|receive|reconcile|writeoff)$/);
+    if (m && req.method === 'POST') {
+      const b = await readBody(req);
+      const action = m[2];
+      let owner = null, reel = null;
+      db.users.forEach(u => {
+        const hit = ((u.inv && u.inv.cables) || []).find(r => r.id === m[1]);
+        if (hit) { owner = u; reel = hit; }
+      });
+      const remnant = (db.warehouse.remnants || []).find(r => r.id === m[1]);
+
+      if (action === 'return') {
+        /* The technician hands a reel back. It leaves their job list straight away
+           so they cannot keep drawing from it, but it stays on their record as
+           "returning" until an admin confirms it physically arrived — that gap is
+           the whole point, and it is what a quietly kept reel shows up as. */
+        if (!reel) return json(res, 404, { error: 'Reel not found' });
+        if (!isAdmin && owner.id !== me.id) return json(res, 403, { error: 'That reel is not issued to you' });
+        if (reel.state === 'returning') return json(res, 400, { error: 'That reel is already marked for return' });
+        reel.state = 'returning';
+        reel.returnedAt = Date.now();
+        logReel(reel, 'return_started', {
+          techId: owner.id, techName: owner.name, meters: reel.meters, by: me.name,
+          note: String(b.reason || '').trim() || 'Technician is returning the reel to the office.'
+        });
+        saveDB();
+        return json(res, 200, { ok: true, reel });
+      }
+
+      if (action === 'receive') {
+        if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+        if (!reel) return json(res, 404, { error: 'Reel not found' });
+        /* Received metres are counted at the office, not assumed from the app. */
+        const counted = b.counted === undefined || b.counted === '' ? round2(reel.meters) : Math.max(0, round2(b.counted));
+        const expected = round2(reel.meters);
+        reel.meters = counted;
+        reel.state = counted <= REEL_EMPTY_M ? 'spent' : 'office';
+        reel.holderNote = '';
+        logReel(reel, 'received', {
+          techId: owner.id, techName: owner.name, expected, counted,
+          variance: round2(counted - expected), by: me.name
+        });
+        owner.inv.cables = owner.inv.cables.filter(r => r.id !== reel.id);
+        if (counted > REEL_EMPTY_M) db.warehouse.remnants.push(reel);
+        saveDB();
+        return json(res, 200, { ok: true, reel });
+      }
+
+      if (action === 'reconcile') {
+        /* A physical count. The counted figure is never auto-filled from what the
+           system expected — an admin who just taps through would otherwise record
+           agreement that nobody actually checked. */
+        const target = reel || remnant;
+        if (!target) return json(res, 404, { error: 'Reel not found' });
+        if (!isAdmin && (!owner || owner.id !== me.id)) return json(res, 403, { error: 'That reel is not issued to you' });
+        if (b.counted === undefined || b.counted === null || b.counted === '') {
+          return json(res, 400, { error: 'Enter the metres actually measured on the reel.' });
+        }
+        const counted = Math.max(0, round2(b.counted));
+        const expected = round2(target.meters);
+        target.meters = counted;
+        target.lastCountAt = Date.now();
+        if (counted <= REEL_EMPTY_M && target.state === 'open') target.state = 'empty';
+        if (counted > REEL_EMPTY_M && target.state === 'empty') target.state = 'open';
+        logReel(target, 'reconciled', {
+          techId: owner ? owner.id : '', techName: owner ? owner.name : 'Office',
+          expected, counted, variance: round2(counted - expected), by: me.name,
+          note: String(b.note || '').trim()
+        });
+        saveDB();
+        return json(res, 200, { ok: true, reel: target, expected, counted, variance: round2(counted - expected) });
+      }
+
+      if (action === 'writeoff') {
+        if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+        const target = reel || remnant;
+        if (!target) return json(res, 404, { error: 'Reel not found' });
+        if (!String(b.reason || '').trim()) return json(res, 400, { error: 'A write-off needs a reason.' });
+        target.state = 'written_off';
+        logReel(target, 'written_off', {
+          techId: owner ? owner.id : '', techName: owner ? owner.name : 'Office',
+          meters: round2(target.meters), by: me.name, note: String(b.reason).trim()
+        });
+        if (owner) owner.inv.cables = owner.inv.cables.filter(r => r.id !== target.id);
+        db.warehouse.remnants = (db.warehouse.remnants || []).filter(r => r.id !== target.id);
+        saveDB();
+        return json(res, 200, { ok: true });
+      }
+    }
+
+    m = p.match(/^\/api\/users\/([\w.]+)\/password$/);
+    if (m && req.method === 'POST') {
+      if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+      const b = await readBody(req);
+      const u = db.users.find(x => x.id === m[1]);
+      if (!u) return json(res, 404, { error: 'User not found' });
+      if (String(b.newPassword || '').length < 6) return json(res, 400, { error: 'Password must be at least 6 characters' });
+      u.pass = hashPassword(String(b.newPassword)); saveDB();
+      return json(res, 200, { ok: true });
+    }
+
+    /* ---- tickets ---- */
+    if (p === '/api/tickets' && req.method === 'GET') {
+      const list = isAdmin ? db.tickets : db.tickets.filter(t => t.assignedTo === me.id);
+      /* summaries only, and a 304 when nothing has changed since the last poll */
+      return jsonCached(req, res, { tickets: list.map(ticketSummary) });
+    }
+    if (p === '/api/tickets' && req.method === 'POST') {
+      const b = await readBody(req);
+      if (!b.subject || !b.customer) return json(res, 400, { error: 'Subject and customer are required' });
+      const seq = String(db.tickets.length + 1).padStart(4, '0');
+      /* Technicians may raise their own jobs, but only ever for themselves —
+         they cannot assign work to a colleague, and they cannot delete anything. */
+      const assignee = isAdmin ? db.users.find(u => u.id === b.assignedTo) : me;
+      const t = {
+        id: 'id' + Date.now() + Math.random().toString(36).slice(2, 6),
+        number: String(b.number || '').trim() || `TKT-${new Date().getFullYear()}-${seq}`,
+        type: ['repair', 'nap_install'].includes(b.type) ? b.type : 'installation',
+        priority: [1, 2, 3].includes(parseInt(b.priority)) ? parseInt(b.priority) : 3,
+        subject: String(b.subject).trim(),
+        customer: String(b.customer).trim(),
+        phone: String(b.phone || '').trim(),
+        address: String(b.address || '').trim(),
+        message: String(b.message || '').trim(),
+        /* Set when the customer was picked from billing rather than typed.
+           pppoeUsername is the key everything else joins on. */
+        accountNo: String(b.accountNo || '').trim(),
+        pppoeUsername: String(b.pppoeUsername || '').trim().toLowerCase(),
+        assignedTo: assignee ? assignee.id : null,
+        assignedName: assignee ? assignee.name : null,
+        status: 'open',
+        created: Date.now(),
+        started: null,
+        completed: null,
+        data: {},
+        step: 0,
+        createdBy: me.name,
+        createdByRole: me.role
+      };
+      /* a repair carries the reported issue, which decides the technician's steps */
+      if (t.type === 'repair') {
+        const issue = (db.settings.repairIssues || []).find(x => x.id === b.issueId || x.label === b.issue);
+        t.issueId = issue ? issue.id : null;
+        t.issue = issue ? issue.label : String(b.issue || '').trim();
+        t.issueFlow = issue ? issue.flow : 'generic';
+      }
+      if (t.type === 'installation') {
+        /* The name typed at creation is a label for this job, nothing more. It
+           used to pre-fill First/Last at Step 9, which meant a placeholder like
+           "Walk-in Brgy 3" could be tapped past and land on the subscriber's
+           invoices. Step 9 now starts empty, so the technician standing with the
+           customer is the one who supplies the name that reaches billing.
+
+           Address and phone are different: they are dispatch details the office
+           genuinely knows up front, and they are not identity. */
+        t.data.cust_address = t.address; t.data.cust_phone = t.phone;
+        if (t.accountNo) t.data.cust_account = t.accountNo;
+      }
+      db.tickets.push(t); saveDB();
+      return json(res, 200, { ticket: t });
+    }
+    m = p.match(/^\/api\/tickets\/([\w.]+)$/);
+    if (m) {
+      const t = db.tickets.find(x => x.id === m[1]);
+      if (!t) return json(res, 404, { error: 'Ticket not found' });
+      if (!isAdmin && t.assignedTo !== me.id) return json(res, 403, { error: 'Not your ticket' });
+
+      if (req.method === 'GET') return json(res, 200, { ticket: t });
+
+      if (req.method === 'PUT') {
+        const b = await readBody(req);
+        if (isAdmin) {
+          ['subject', 'customer', 'phone', 'address', 'message', 'number'].forEach(k => { if (b[k] !== undefined) t[k] = String(b[k]).trim(); });
+          if (b.assignedTo !== undefined) {
+            const a = db.users.find(u => u.id === b.assignedTo);
+            t.assignedTo = a ? a.id : null; t.assignedName = a ? a.name : null;
+          }
+          if (b.priority !== undefined && [1, 2, 3].includes(parseInt(b.priority))) t.priority = parseInt(b.priority);
+          /* re-classifying a repair swaps in that issue's step list */
+          if (b.issueId !== undefined && t.type === 'repair') {
+            const issue = (db.settings.repairIssues || []).find(x => x.id === b.issueId);
+            const wasFlow = t.issueFlow;
+            t.issueId = issue ? issue.id : null;
+            t.issue = issue ? issue.label : '';
+            t.issueFlow = issue ? issue.flow : 'generic';
+            if (t.issueFlow !== wasFlow && t.status !== 'completed') t.step = 0;
+          }
+        }
+        /* The technician programs the PPPoE credentials into the modem, so the
+           technician is who knows the account. Linking it is theirs to do — the
+           office is asleep while the work happens. */
+        if (b.pppoeUsername !== undefined) t.pppoeUsername = String(b.pppoeUsername).trim().toLowerCase();
+        if (b.accountNo !== undefined) t.accountNo = String(b.accountNo).trim();
+
+        if (b.data !== undefined) {
+          /* a client that is still holding a summary must not be able to blank out
+             photos it never received */
+          const incoming = b.data && typeof b.data === 'object' ? b.data : {};
+          externalizePhotos(incoming);                       // base64 -> /photos/ URL (FIX 3)
+          const prev = t.data || {};
+          Object.keys(prev).forEach(k => {
+            const pv = prev[k], nv = incoming[k];
+            if (pv && typeof pv === 'object' && pv.img && nv && typeof nv === 'object' && nv.img === undefined) nv.img = pv.img;
+          });
+          t.data = incoming;
+        }
+        if (b.step !== undefined) t.step = b.step;
+        if (b.status !== undefined && ['open', 'in_progress', 'completed'].includes(b.status)) {
+          t.status = b.status;
+          /* ---- job clock ----
+             starts the moment the technician picks the job up, so the closing
+             remark measures actual work time, not how long it sat in the queue */
+          if (b.status !== 'open' && !t.started) t.started = b.started || Date.now();
+          t.completed = b.status === 'completed' ? (b.completed || Date.now()) : null;
+          if (b.status === 'completed') {
+            const startTs = t.started || t.created;
+            t.durationMs = Math.max(0, t.completed - startTs);
+            t.durationText = humanDuration(t.durationMs);
+            t.data = t.data || {};
+            t.data.auto_remark = 'Completed in ' + t.durationText + ' from the time the technician started work.';
+          } else {
+            /* reopened — the old closing figures no longer describe this job */
+            delete t.durationMs; delete t.durationText;
+            if (t.data) delete t.data.auto_remark;
+          }
+          /* Keep the single-name field in step with the split ones, so reports,
+             the FTTH push and older screens all read the same subscriber. */
+          if (b.status === 'completed' && t.data) {
+            const n = subscriberName(t.data);
+            if (n) t.data.cust_name = n;
+          }
+
+          /* Deduct materials from the technician's inventory once, on first completion */
+          if (b.status === 'completed' && !t.invApplied && t.assignedTo) {
+            const tech = db.users.find(u => u.id === t.assignedTo);
+            if (tech) {
+              tech.inv = tech.inv || { connectors: 0, cables: [] };
+              tech.inv.cables = tech.inv.cables || [];
+              let cableUsed = 0;
+              if (t.data && t.data.cable_start !== undefined && t.data.cable_end !== undefined) {
+                cableUsed = (parseFloat(t.data.cable_start) || 0) - (parseFloat(t.data.cable_end) || 0);
+                if (cableUsed < 0) cableUsed = 0;
+                t.data.cable_used = Math.round(cableUsed * 100) / 100;
+              } else if (t.data && t.data.cable_length) {
+                cableUsed = parseFloat(t.data.cable_length) || 0;
+                t.data.cable_used = Math.round(cableUsed * 100) / 100;
+              }
+              /* Deduct from the specific reel the technician selected.
+                 A reel can never go below zero: before the floor was added an
+                 over-draw made `meters` negative, which dropped the reel out of
+                 every "meters > 0" list — so the reel and its remaining cable
+                 disappeared from stock instead of raising a question. Now the
+                 draw is capped at what the reel actually held and the excess is
+                 recorded as a shortfall for the admin to settle. */
+              if (cableUsed > 0 && t.data && t.data.cable_reel) {
+                const reel = tech.inv.cables.find(r => r.id === t.data.cable_reel);
+                if (reel) {
+                  const before = round2(reel.meters);
+                  const drawn = Math.min(cableUsed, before);
+                  reel.meters = round2(before - drawn);
+                  reel.lastUsedAt = Date.now();
+                  t.data.cable_reel_name = reel.name;
+                  t.data.cable_reel_code = reel.code;
+                  t.data.cable_drawn = round2(drawn);
+                  logReel(reel, 'drawn', {
+                    techId: tech.id, techName: tech.name, ticketId: t.id, ticketRef: t.ref || '',
+                    meters: round2(drawn), before, after: reel.meters
+                  });
+                  if (cableUsed > before + 0.001) {
+                    const short = round2(cableUsed - before);
+                    reel.shortfall = round2((reel.shortfall || 0) + short);
+                    t.data.cable_shortfall = short;
+                    t.data.cable_review =
+                      'This job recorded ' + round2(cableUsed) + ' m but reel ' + reel.code +
+                      ' only held ' + before + ' m. ' + short + ' m is unaccounted — check whether a' +
+                      ' second reel was used, or the meter reading was misread.';
+                    t.needsStockReview = true;
+                    logReel(reel, 'shortfall', {
+                      techId: tech.id, techName: tech.name, ticketId: t.id, ticketRef: t.ref || '',
+                      meters: short, note: t.data.cable_review
+                    });
+                  }
+                  if (reel.meters <= REEL_EMPTY_M && reel.state === 'open') {
+                    reel.state = 'empty';
+                    logReel(reel, 'emptied', { techId: tech.id, techName: tech.name, after: reel.meters });
+                  }
+                }
+              }
+              /* Connectors were unfloored too: issuing 10 and reporting 12 used
+                 left a negative count that read as stock owed back rather than
+                 as a discrepancy. */
+              const connUsed = parseInt(t.data && t.data.connectors) || 0;
+              if (connUsed > 0) {
+                const connHeld = parseInt(tech.inv.connectors) || 0;
+                tech.inv.connectors = Math.max(0, connHeld - connUsed);
+                if (connUsed > connHeld) {
+                  t.data.connector_shortfall = connUsed - connHeld;
+                  t.needsStockReview = true;
+                }
+              }
+              /* issued items (modems, clamps, patch cords, ...) consumed on this job */
+              const usedItems = Array.isArray(t.data && t.data.items_used) ? t.data.items_used : [];
+              const cleanItems = [];
+              usedItems.forEach(it => {
+                const name = String((it && it.name) || '').trim();
+                const q = parseInt(it && it.qty) || 0;
+                if (!name || q <= 0) return;
+                addItemTo(tech, name, -q);
+                cleanItems.push({ name, qty: q });
+              });
+              if (cleanItems.length) t.data.items_used = cleanItems;
+              t.invApplied = true;
+            }
+          }
+        }
+        t.updated = Date.now(); t.updatedBy = me.name;
+        saveDB();
+        /* A finished installation belongs on the map. The technician is not kept
+           waiting for it: the reply goes back now and the write is queued. */
+        if (t.status === 'completed' && t.type === 'installation' &&
+            (!t.ftthSync || !['done', 'manual'].includes(t.ftthSync.state))) {
+          pushInstall(t).catch(e => console.error('[ftth] push failed:', e.message));
+        }
+        /* A finished NAP installation becomes a box on the map, with the cable
+           run back to whatever feeds it. */
+        if (t.status === 'completed' && t.type === 'nap_install' &&
+            (!t.ftthSync || !['done', 'manual'].includes(t.ftthSync.state))) {
+          pushNapInstall(t).catch(e => console.error('[ftth] NAP push failed:', e.message));
+        }
+        /* And into billing, on the same terms: queued, never blocking the phone.
+           A push that already succeeded is not repeated — the monitor would skip
+           the work anyway, but not asking at all is cheaper and keeps the
+           ticket's record of what happened intact. */
+        if (t.status === 'completed' && t.type === 'installation' &&
+            (!t.billingSync || !['done', 'manual'].includes(t.billingSync.state))) {
+          pushBilling(t).catch(e => console.error('[billing] push failed:', e.message));
+        }
+        return json(res, 200, { ticket: t });
+      }
+      if (req.method === 'DELETE') {
+        if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+        db.tickets = db.tickets.filter(x => x.id !== m[1]); saveDB();
+        return json(res, 200, { ok: true });
+      }
+    }
+
+    return json(res, 404, { error: 'Unknown endpoint' });
+  } catch (e) {
+    return json(res, 500, { error: e.message });
+  }
+});
+
+server.listen(PORT, () => {
+  const nets = require('os').networkInterfaces();
+  console.log('StarLine Field Ops server running:');
+  console.log(`  Local:   http://localhost:${PORT}`);
+  for (const name of Object.keys(nets))
+    for (const net of nets[name])
+      if (net.family === 'IPv4' && !net.internal)
+        console.log(`  Network: http://${net.address}:${PORT}   <- technicians on the same Wi-Fi/LAN use this`);
+});
