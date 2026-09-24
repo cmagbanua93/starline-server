@@ -450,6 +450,78 @@ function installPayload(t) {
   };
 }
 
+/* ---- a new NAP box onto the map ----
+ * The technician recorded where the box is, how big it is and which port feeds
+ * it. Without this the office retyped all of that onto the map, or nobody did,
+ * and the box stayed invisible to the port picker and to outage tracing. */
+function napInstallPayload(t) {
+  const d = t.data || {};
+  const loc = d.location || {};
+  const name = String(d.nap_id || '').trim();
+  return {
+    ticketId: t.id,
+    nap: {
+      name,
+      area: name,                       // one value names the box and its billing area
+      lat: loc.lat, lng: loc.lng,
+      port_count: parseInt(d.nap_ports, 10) || 0,
+      address: String(d.main_nap || '').trim(),
+      notes: [
+        d.nap_reading !== undefined && d.nap_reading !== '' ? 'Reading at install: ' + d.nap_reading + ' dBm' : '',
+        String(d.final_notes || '').trim(),
+        'Installed on job ' + t.number,
+      ].filter(Boolean).join(' · '),
+    },
+    feeder: d.feeder_port_id ? {
+      from_port_id: d.feeder_port_id,
+      fiber_color: d.fiber_color && d.fiber_color !== 'No Color' ? d.fiber_color : '',
+      cable_length_m: d.cable_used,
+    } : null,
+  };
+}
+
+async function pushNapInstall(t) {
+  const d = t.data || {};
+  const loc = d.location || {};
+  if (!FTTH_URL || !FTTH_TOKEN) {
+    t.ftthSync = { state: 'off', message: 'The FTTH map is not connected', at: Date.now() };
+    return saveDB();
+  }
+  /* Say exactly what is missing rather than retrying something that cannot
+     succeed — these are the technician's to fix, not the network's. */
+  const missing = [];
+  if (!String(d.nap_id || '').trim()) missing.push('the new box has no name');
+  if (loc.lat == null || loc.lng == null) missing.push('no GPS coordinates were captured');
+  if (![4, 8, 12, 16].includes(parseInt(d.nap_ports, 10))) missing.push('the box size is not set');
+  if (missing.length) {
+    t.ftthSync = { state: 'manual', message: 'Not placed on the map — ' + missing.join('; '), at: Date.now() };
+    return saveDB();
+  }
+
+  const prior = t.ftthSync || {};
+  t.ftthSync = { state: 'pending', attempts: (prior.attempts || 0) + 1, lastTry: Date.now() };
+  saveDB();
+  try {
+    const r = await ftthCall('POST', '/api/nap-installs', napInstallPayload(t));
+    const dev = r.device || {};
+    t.ftthSync = {
+      state: 'done', at: Date.now(), deviceId: dev.id, deviceName: dev.name,
+      created: r.created !== false,
+      linked: !!r.link,
+      message: (r.created === false ? 'Already on the map' : 'Placed on the map')
+        + (r.link ? ' and connected to its feeding box' : ' — cable run not drawn, no feeding port was picked'),
+    };
+  } catch (e) {
+    const permanent = e.code === 400;
+    t.ftthSync = {
+      state: permanent ? 'blocked' : 'pending', at: Date.now(),
+      attempts: t.ftthSync.attempts, error: e.message,
+    };
+    console.error(`[ftth] NAP job ${t.number} not placed: ${e.message}`);
+  }
+  saveDB();
+}
+
 async function pushInstall(t) {
   const d = t.data || {};
   if (!d.nap_port_id) {
@@ -575,7 +647,10 @@ setInterval(() => {
 const FTTH_RETRY_MS = 5 * 60 * 1000;
 setInterval(() => {
   const waiting = db.tickets.filter(t => t.ftthSync && t.ftthSync.state === 'pending');
-  waiting.slice(0, 5).forEach(t => { pushInstall(t); });
+  waiting.slice(0, 5).forEach(t => {
+    if (t.type === 'nap_install') pushNapInstall(t);
+    else pushInstall(t);
+  });
 }, FTTH_RETRY_MS).unref?.();
 
 let catalogCache = { at: 0, data: null };
@@ -1532,6 +1607,12 @@ const server = http.createServer(async (req, res) => {
         if (t.status === 'completed' && t.type === 'installation' &&
             (!t.ftthSync || !['done', 'manual'].includes(t.ftthSync.state))) {
           pushInstall(t).catch(e => console.error('[ftth] push failed:', e.message));
+        }
+        /* A finished NAP installation becomes a box on the map, with the cable
+           run back to whatever feeds it. */
+        if (t.status === 'completed' && t.type === 'nap_install' &&
+            (!t.ftthSync || !['done', 'manual'].includes(t.ftthSync.state))) {
+          pushNapInstall(t).catch(e => console.error('[ftth] NAP push failed:', e.message));
         }
         /* And into billing, on the same terms: queued, never blocking the phone.
            A push that already succeeded is not repeated — the monitor would skip
