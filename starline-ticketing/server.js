@@ -489,7 +489,11 @@ function napInstallMissing(t) {
   const missing = [];
   if (!String(d.nap_id || '').trim()) missing.push('the new box has no name');
   if (loc.lat == null || loc.lng == null) missing.push('no GPS coordinates were captured');
-  if (![4, 8, 12, 16].includes(parseInt(d.nap_ports, 10))) missing.push('the box size is not set');
+  /* The box size is NOT required. Only a name and a location are, because those
+     are the two things that cannot be recovered later from the office — the
+     pole is in the field. Jobs finished before the size field existed are placed
+     with no ports and the size is set on the map afterwards; a box at the right
+     pole is worth far more than no box at all. */
   return missing;
 }
 
@@ -513,12 +517,20 @@ async function pushNapInstall(t) {
   try {
     const r = await ftthCall('POST', '/api/nap-installs', napInstallPayload(t));
     const dev = r.device || {};
+    /* Spell out what the box still needs by hand. A box placed from an old job
+       carries its pole and its name but nothing else, and the office has no way
+       of knowing that unless the job says so. */
+    const sized = [4, 8, 12, 16].includes(parseInt((t.data || {}).nap_ports, 10));
+    const todo = [];
+    if (!sized) todo.push('set its size — it was placed with no ports');
+    if (!r.link) todo.push('draw the cable run from its feeding box');
     t.ftthSync = {
       state: 'done', at: Date.now(), deviceId: dev.id, deviceName: dev.name,
       created: r.created !== false,
       linked: !!r.link,
-      message: (r.created === false ? 'Already on the map' : 'Placed on the map')
-        + (r.link ? ' and connected to its feeding box' : ' — cable run not drawn, no feeding port was picked'),
+      sized,
+      message: (r.created === false ? 'Already on the map' : 'Placed on the map at the recorded GPS')
+        + (todo.length ? ' — still to do on the map: ' + todo.join('; ') : ' and connected to its feeding box'),
     };
   } catch (e) {
     const permanent = e.code === 400;
