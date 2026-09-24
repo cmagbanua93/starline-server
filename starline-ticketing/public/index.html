@@ -637,12 +637,15 @@
       <label>Assign to Technician <span class="req">*</span></label>
       <select id="nAssign"></select>
     </div>
-    <label>Find Customer in Billing</label>
-    <input id="nSearch" placeholder="Name, account number, contact number or PPPoE username" oninput="searchCustomers()" autocomplete="off">
-    <div id="nSearchOut" class="lookup-out"></div>
-    <div id="nLinked" class="linked-chip hidden"></div>
+    <div id="nFindWrap">
+      <label>Find Customer in Billing</label>
+      <input id="nSearch" placeholder="Name, account number, contact number or PPPoE username" oninput="searchCustomers()" autocomplete="off">
+      <div id="nSearchOut" class="lookup-out"></div>
+      <div id="nLinked" class="linked-chip hidden"></div>
+    </div>
     <label>Customer / Site Name <span class="req">*</span></label>
     <input id="nCustomer" placeholder="Subscriber name, or site name for NAP installation">
+    <div class="tmeta" id="nCustomerHint" style="margin-top:5px"></div>
     <label>Contact Number</label>
     <input id="nPhone" inputmode="tel">
     <label>Address</label>
@@ -728,10 +731,11 @@
 <div id="sigOverlay" class="hidden">
   <div class="sig-modal">
     <div class="step-title" style="font-size:16px">Customer Signature</div>
-    <div class="step-desc">Hand the phone to the customer: sign in the box below with your finger, then type your full name.</div>
+    <div class="step-desc">Hand the phone over: sign in the box below with a finger, then check the name.</div>
     <canvas id="sigCanvas"></canvas>
-    <label>Full Name</label>
+    <label>Name of person accepting the work</label>
     <input id="sigTyped" placeholder="e.g. Juan Dela Cruz">
+    <div class="tmeta" id="sigWho" style="margin-top:5px"></div>
     <div class="wizard-btns">
       <button class="btn btn-ghost" onclick="sigClear()">Clear</button>
       <button class="btn btn-warn" onclick="closeSigModal()">Cancel</button>
@@ -2803,7 +2807,21 @@ let sigKey=null, sigDrawn=false;
 function openSigModal(key){
   sigKey=key; sigDrawn=false;
   collectStep();
-  document.getElementById('sigTyped').value='';
+  /* Pre-filled with the subscriber from Step 9, because most of the time that
+     is who signs and retyping it is pure friction. It stays editable because
+     often enough it is not: a spouse, a parent or a tenant accepts the work
+     while the account holder is out, and the signature is worth nothing later
+     if it does not say who actually signed. This name is for the job record —
+     it is never what gets pushed to billing. */
+  const t0 = byId(currentId);
+  const sub = t0 ? [ (t0.data&&t0.data.cust_fname)||'', (t0.data&&t0.data.cust_lname)||'' ]
+    .map(s=>String(s).trim()).filter(Boolean).join(' ') : '';
+  const box = document.getElementById('sigTyped');
+  box.value = sub;
+  const who = document.getElementById('sigWho');
+  if(who) who.textContent = sub
+    ? 'Subscriber on this job is ' + sub + '. If someone else is signing, type their name instead.'
+    : 'Type the name of whoever is signing.';
   document.getElementById('sigOverlay').classList.remove('hidden');
   const c = document.getElementById('sigCanvas');
   const dpr = window.devicePixelRatio||1;
@@ -2828,7 +2846,9 @@ function openSigModal(key){
 function closeSigModal(){ document.getElementById('sigOverlay').classList.add('hidden'); sigKey=null; }
 function sigClear(){
   sigDrawn=false;
-  document.getElementById('sigTyped').value='';
+  /* Clear redraws the signature box. It deliberately leaves the name alone —
+     a wobbly first attempt is common, and wiping the name each time would make
+     the technician retype it. */
   const c = document.getElementById('sigCanvas');
   const ctx = c.getContext && c.getContext('2d');
   if(ctx){
@@ -2843,7 +2863,7 @@ function sigSubmit(){
   if(!t || !sigKey) return;
   const typed = document.getElementById('sigTyped').value.trim();
   if(!sigDrawn){ alert('Please ask the customer to sign in the box.'); return; }
-  if(!typed){ alert('Please ask the customer to type their full name below the signature.'); return; }
+  if(!typed){ alert('Please enter the name of the person signing.'); return; }
   const c = document.getElementById('sigCanvas');
   let dataUrl = null;
   try{ dataUrl = c.toDataURL('image/png'); }catch(e){}
@@ -3681,6 +3701,29 @@ function onNewTypeChange(){
   const wrap = document.getElementById('nIssueWrap');
   if(!wrap) return;
   wrap.classList.toggle('hidden', type!=='repair');
+  /* Billing lookup belongs to repairs only. A brand-new subscriber is not in
+     billing yet, so on an installation the search can only fail — or, worse,
+     match someone with a similar name and quietly attach this job to their
+     account. The real identity is captured at Step 9 and pushed from there. */
+  const find = document.getElementById('nFindWrap');
+  if(find){
+    const forRepair = type === 'repair';
+    find.classList.toggle('hidden', !forRepair);
+    if(!forRepair){
+      /* Switching away from repair must not leave a stale link behind. */
+      if(typeof clearPicked === 'function' && PICKED) clearPicked();
+      const s = document.getElementById('nSearch');
+      const o = document.getElementById('nSearchOut');
+      if(s) s.value = '';
+      if(o) o.innerHTML = '';
+    }
+  }
+  const chint = document.getElementById('nCustomerHint');
+  if(chint){
+    chint.textContent = type === 'installation'
+      ? 'Used to label this job in your lists. The name that reaches billing is the one the technician enters at Step 9.'
+      : '';
+  }
   const hint = document.getElementById('nIssueHint');
   const sel = document.getElementById('nIssue');
   if(type==='repair' && hint && sel){
