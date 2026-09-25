@@ -887,7 +887,11 @@ const WORKFLOWS = {
       desc:'Record the NAP box the subscriber is connected to and the exact port used, then take a photo of the NAP box cassette. Time and GPS location are stamped on the photo automatically.',
       fields:[
         {k:'nap_pick', type:'nap_picker', label:'Pick the box and port from the map'},
-        {k:'nap_id', type:'area_select', label:'NAP Box / Area (from billing)', req:true},
+        /* allowNew:false — this value IS the Area written to billing. A box a
+           subscriber is being hung off already exists, so it is already one of
+           billing's areas; anything else is a typo that billing rejects hours
+           later, long after the technician has left the pole. */
+        {k:'nap_id', type:'area_select', label:'NAP Box / Area (from billing)', req:true, allowNew:false},
         {k:'nap_port', type:'text', label:'Port Number Connected', req:true, placeholder:'e.g. Port 5 of 8'},
         {k:'nap_photo', type:'photo', label:'Photo of NAP Box Cassette', req:true, autogps:true},
         {k:'nap_reading', type:'number', label:'Reading at NAP (dBm, optional)', step:'0.1'}
@@ -1127,7 +1131,7 @@ const REPAIR_FLOWS = {
     { key:'napcheck', title:'2. NAP Box Inspection',
       desc:'Open the NAP box the subscriber is fed from, take the reading at the port, and photograph the cassette.',
       fields:[
-        {k:'nap_id', type:'area_select', label:'NAP Box / Area (from billing)', req:true},
+        {k:'nap_id', type:'area_select', label:'NAP Box / Area (from billing)', req:true, allowNew:false},
         {k:'nap_port', type:'text', label:'Port Number in Use', req:true, placeholder:'e.g. Port 5 of 8'},
         {k:'nap_reading', type:'number', label:'Reading at the NAP Port (dBm)', req:true, step:'0.1'},
         {k:'nap_photo', type:'photo', label:'Photo of the NAP Box Cassette', req:true, autogps:true},
@@ -1998,12 +2002,37 @@ function renderTicket(){
   renderSummary(t, 'summaryArea');
 }
 function gotoStep(i){ const t=byId(currentId); collectStep(); t.step=i; persist(t); renderTicket(); }
+/* An area that billing will not accept, caught while the technician is still on
+   the job rather than hours later in a failed push. Only applies where the value
+   is written to billing (allowNew:false) — a NAP being installed today may well
+   not be in billing yet, and must stay nameable. Silent when billing's list
+   could not be loaded: a lookup outage must not strand anyone at a pole. */
+function badArea(t, step){
+  const areas = CATALOG.areas || [];
+  if(!areas.length) return null;
+  for(const f of (step.fields || [])){
+    if(f.type !== 'area_select' || f.allowNew !== false) continue;
+    const v = String((t.data || {})[f.k] || '').trim();
+    if(!v || areas.includes(v)) continue;
+    const near = areas.filter(a => {
+      const A = a.toUpperCase(), V = v.toUpperCase();
+      return A.includes(V) || V.includes(A) || A.split(/[^A-Z0-9]+/).some(w => w.length > 2 && V.includes(w));
+    }).slice(0, 6);
+    return '"' + v + '" is not one of billing\'s areas, so this job cannot reach billing.\n\n'
+      + 'Pick the box from the list on this step.'
+      + (near.length ? '\n\nClosest matches:\n• ' + near.join('\n• ') : '');
+  }
+  return null;
+}
+
 function nextStep(){
   const t = byId(currentId);
   collectStep();
   const s = getWorkflow(t)[t.step];
   const missing = s.fields.filter(f=>f.req && !hasValue(t,f)).map(f=>f.label);
   if(missing.length){ alert('Required before continuing:\n• '+missing.join('\n• ')); persist(t); renderTicket(); return; }
+  const strayArea = badArea(t, s);
+  if(strayArea){ alert(strayArea); persist(t); renderTicket(); return; }
   if(s.key==='materials' && t.type==='installation'){
     const start = parseFloat(t.data.cable_start), end = parseFloat(t.data.cable_end);
     if(!isNaN(start) && !isNaN(end)){
@@ -2055,6 +2084,8 @@ function finishTicket(){
   const missing = [];
   steps.forEach(s=>s.fields.forEach(f=>{ if(f.req&&!hasValue(t,f)) missing.push(s.title.replace(/&amp;/g,'&')+': '+f.label); }));
   if(missing.length){ alert('Still missing:\n• '+missing.join('\n• ')); renderTicket(); return; }
+  /* Last gate before the job closes and the push fires. */
+  for(const s of steps){ const bad = badArea(t, s); if(bad){ alert(bad); renderTicket(); return; } }
   /* Not a blocker — sometimes the account genuinely is not ready — but the
      office should not find this out weeks later. */
   if(t.type==='installation' && !t.pppoeUsername){
@@ -2227,13 +2258,14 @@ function renderField(t,f){
        must still be nameable. */
     const known = areas.includes(v);
     return `<label>${f.label}${reqMark}</label>
-      <input type="text" id="f_${f.k}" list="areas_${f.k}" value="${esc(v||'')}"
+      <input type="text" id="f_${f.k}" list="areas_${f.k}" value="${esc(v||'')}" data-allow-new="${allowNew}"
              placeholder="${allowNew?'pick one, or type a new box name':'pick from billing'}" oninput="areaPicked('${f.k}')" onchange="areaPicked('${f.k}')">
       <datalist id="areas_${f.k}">
         ${areas.map(a=>`<option value="${esc(a)}"></option>`).join('')}
       </datalist>
-      <p class="hint" id="areahint_${f.k}">${v&&!known
-        ? (allowNew?esc(v)+' is not in billing yet — it will be saved as typed.':'⚠ '+esc(v)+' is not one of billing\'s areas.')
+      <p class="hint" id="areahint_${f.k}" ${v&&!known&&!allowNew?'style="color:var(--danger)"':''}>${v&&!known
+        ? (allowNew?esc(v)+' is not in billing yet — it will be saved as typed.'
+                   :'⚠ '+esc(v)+' is not one of billing\'s areas — pick from the list, or this job cannot reach billing.')
         : 'This is the NAP box and the billing area — one name for both, so an outage SMS reaches exactly this box.'}</p>`;
   }
   const type = f.type==='number'?'number':'text';
@@ -2506,6 +2538,12 @@ function areaPicked(key){
   const areas = CATALOG.areas||[];
   if(!v){ hint.textContent = 'This is the NAP box and the billing area — one name for both.'; hint.style.color=''; return; }
   if(areas.includes(v)){ hint.textContent = '✓ '+v+' is an area billing already knows.'; hint.style.color=''; }
+  else if(el.dataset.allowNew === 'false'){
+    /* Said plainly and in red while the field is still in front of them, rather
+       than as a push failure the office finds later. */
+    hint.textContent = '⚠ '+v+' is not one of billing\'s areas — pick from the list, or this job cannot reach billing.';
+    hint.style.color = 'var(--danger)';
+  }
   else { hint.textContent = v+' is not in billing yet — it will be saved as typed.'; hint.style.color=''; }
 }
 
