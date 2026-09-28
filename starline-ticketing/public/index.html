@@ -4051,20 +4051,36 @@ function napMapPanel(t){
     ${s && s.error?`<div class="tmeta" style="color:var(--danger)">${esc(s.error)}</div>`:''}
     ${!s?`<div class="tmeta">This job finished before it could be written to the map.</div>`:''}
     ${blockNote}
-    <div class="tmeta" style="margin-top:6px">Placing again is safe: a box this job already placed is found rather than planted twice.</div>
+    ${napAreaLine(t)}
+    <div class="tmeta" style="margin-top:6px">Placing again is safe: a box this job already placed is found rather than planted twice, and an area billing already has is not added again.</div>
     <div class="wizard-btns">
       <button class="btn btn-ghost btn-sm" ${missing.length?'disabled':''} onclick="retryNapMap('${esc(t.id)}','${esc(t.number)}')">Place on the map</button>
     </div>
   </div>`;
 }
 
+/* Whether this box's name reached billing's area list. Shown next to the map
+   line because the two together are what "this box exists" means: a box on the
+   map nobody can file a subscriber under is only half installed. */
+function napAreaLine(t){
+  const a = t.areaSync;
+  if(!a) return '<div class="tmeta" style="margin-top:6px">🧾 Billing area: not registered yet.</div>';
+  if(a.state==='done')   return `<div class="sync-ok">🧾 ${esc(a.message||'Registered as a billing area')}</div>`;
+  if(a.state==='off')    return '<div class="tmeta" style="margin-top:6px">🧾 Billing is not connected, so the area was not registered.</div>';
+  if(a.state==='failed') return `<div class="ctx-warn">🧾 Not added to billing's areas — ${esc(a.error||'')}. It keeps retrying on its own.</div>`;
+  return '';
+}
+
 async function retryNapMap(id, number){
   try{
     const d = await api('/api/ftth/retry/'+id, 'POST', {});
-    const s = d.ftthSync || {};
-    alert(s.state==='done'
+    const s = d.ftthSync || {}, a = d.areaSync || null;
+    const areaLine = a
+      ? '\n\nBilling area: ' + (a.state==='done' ? (a.message||'registered') : (a.error||a.state))
+      : '';
+    alert((s.state==='done'
       ? 'Job '+number+': '+(s.message||'placed on the map')+'.'
-      : 'Job '+number+' was not placed — '+(s.message||s.error||s.state||'unknown reason'));
+      : 'Job '+number+' was not placed — '+(s.message||s.error||s.state||'unknown reason')) + areaLine);
     await refreshTickets(); openReport(id);
   }catch(e){ alert('Could not place it on the map: '+e.message); }
 }
