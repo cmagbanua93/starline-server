@@ -497,6 +497,49 @@ function napInstallMissing(t) {
   return missing;
 }
 
+/* ---- the new box, registered as a billing Area ----
+ * A box put up today does not exist in billing, so the first subscriber hung
+ * off it cannot be filed under it — the area picker has no such entry, and the
+ * push refuses to write an area billing does not know. Someone had to remember
+ * to add it by hand; when they forgot, it surfaced hours later as a failed push
+ * with the technician long gone.
+ *
+ * Deliberately separate from placing the box on the map: they are different
+ * systems, and one being down must not cost the other. Idempotent at the
+ * billing end, so a re-completed job re-registers nothing. */
+async function registerBillingArea(t) {
+  const name = String((t.data || {}).nap_id || '').trim();
+  if (!name) return;
+  if (!MONITOR_URL || !MONITOR_TOKEN) {
+    t.areaSync = { state: 'off', message: 'Billing is not connected', at: Date.now() };
+    return saveDB();
+  }
+  try {
+    const r = await fetch(MONITOR_URL + '/api/billing-area', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': MONITOR_TOKEN },
+      body: JSON.stringify({ area: name }),
+      signal: AbortSignal.timeout(45000),
+    });
+    const out = await r.json().catch(() => ({}));
+    if (r.ok && out.ok) {
+      t.areaSync = {
+        state: 'done', at: Date.now(), area: out.area, created: !!out.created,
+        message: out.created
+          ? '"' + out.area + '" added to billing\'s area list'
+          : '"' + out.area + '" was already one of billing\'s areas',
+      };
+    } else {
+      t.areaSync = { state: 'failed', at: Date.now(), error: out.error || ('billing returned HTTP ' + r.status) };
+      console.error(`[area] NAP job ${t.number} (${name}) not registered: ${t.areaSync.error}`);
+    }
+  } catch (e) {
+    t.areaSync = { state: 'failed', at: Date.now(), error: e.name === 'TimeoutError' ? 'billing did not answer in time' : e.message };
+    console.error(`[area] NAP job ${t.number} (${name}) not registered: ${t.areaSync.error}`);
+  }
+  saveDB();
+}
+
 async function pushNapInstall(t) {
   const d = t.data || {};
   if (!FTTH_URL || !FTTH_TOKEN) {
@@ -685,6 +728,14 @@ setInterval(() => {
     if (t.type === 'nap_install') pushNapInstall(t);
     else pushInstall(t);
   });
+  /* An area that did not register is retried on the same heartbeat — billing
+     being briefly unreachable should cost a few minutes, not a manual entry
+     nobody remembers to make. */
+  db.tickets
+    .filter(t => t.status === 'completed' && t.type === 'nap_install' &&
+                 t.areaSync && t.areaSync.state === 'failed')
+    .slice(0, 5)
+    .forEach(t => { registerBillingArea(t); });
 }, FTTH_RETRY_MS).unref?.();
 
 let catalogCache = { at: 0, data: null };
@@ -1071,9 +1122,13 @@ const server = http.createServer(async (req, res) => {
          are different writes. Sending a NAP job through the subscriber push made
          it fail on a missing drop port and report "NAP entered by hand", which
          is both wrong and unfixable from the office. */
-      if (rt.type === 'nap_install') await pushNapInstall(rt);
-      else await pushInstall(rt);
-      return json(res, 200, { ftthSync: rt.ftthSync });
+      if (rt.type === 'nap_install') {
+        /* Both halves of "this box now exists": on the map, and in billing's
+           area list. Run together so the office presses one button. */
+        await pushNapInstall(rt);
+        await registerBillingArea(rt);
+      } else await pushInstall(rt);
+      return json(res, 200, { ftthSync: rt.ftthSync, areaSync: rt.areaSync || null });
     }
 
     if (p === '/api/password' && req.method === 'POST') {
@@ -1667,6 +1722,14 @@ const server = http.createServer(async (req, res) => {
         if (t.status === 'completed' && t.type === 'nap_install' &&
             (!t.ftthSync || !['done', 'manual'].includes(t.ftthSync.state))) {
           pushNapInstall(t).catch(e => console.error('[ftth] NAP push failed:', e.message));
+        }
+        /* …and the box's name registered as a billing Area, so the first
+           subscriber on it can be filed under it without anyone adding it by
+           hand. Independent of the map write: one being down must not cost the
+           other. */
+        if (t.status === 'completed' && t.type === 'nap_install' &&
+            (!t.areaSync || t.areaSync.state !== 'done')) {
+          registerBillingArea(t).catch(e => console.error('[area] register failed:', e.message));
         }
         /* And into billing, on the same terms: queued, never blocking the phone.
            A push that already succeeded is not repeated — the monitor would skip
