@@ -507,8 +507,24 @@ function napInstallMissing(t) {
  * Deliberately separate from placing the box on the map: they are different
  * systems, and one being down must not cost the other. Idempotent at the
  * billing end, so a re-completed job re-registers nothing. */
+/* Which name this box's billing Area should carry.
+ *
+ * The job names the box when it is installed, because at that moment the box
+ * exists nowhere else. From then on the MAP owns the name: it is where boxes get
+ * renamed when the tagging is corrected, and a job is a record of one day's work
+ * rather than a register of what the box is called today.
+ *
+ * So once the box is on the map, its map name wins. Without this, correcting a
+ * name on the map left billing holding the name typed at installation, and the
+ * two drifted apart silently — with a rename every few months, permanently. */
+function napAreaName(t) {
+  const s = t.ftthSync || {};
+  const onMap = s.state === 'done' ? String(s.deviceName || '').trim() : '';
+  return onMap || String((t.data || {}).nap_id || '').trim();
+}
+
 async function registerBillingArea(t) {
-  const name = String((t.data || {}).nap_id || '').trim();
+  const name = napAreaName(t);
   if (!name) return;
   if (!MONITOR_URL || !MONITOR_TOKEN) {
     t.areaSync = { state: 'off', message: 'Billing is not connected', at: Date.now() };
@@ -730,12 +746,17 @@ setInterval(() => {
   });
   /* An area that did not register is retried on the same heartbeat — billing
      being briefly unreachable should cost a few minutes, not a manual entry
-     nobody remembers to make. */
+     nobody remembers to make. The map write runs first where the box is already
+     placed, so the name sent to billing is the one the map holds now. */
   db.tickets
     .filter(t => t.status === 'completed' && t.type === 'nap_install' &&
                  t.areaSync && t.areaSync.state === 'failed')
     .slice(0, 5)
-    .forEach(t => { registerBillingArea(t); });
+    .forEach(t => {
+      const placed = t.ftthSync && t.ftthSync.state === 'done';
+      (placed ? pushNapInstall(t).catch(() => {}) : Promise.resolve())
+        .then(() => registerBillingArea(t));
+    });
 }, FTTH_RETRY_MS).unref?.();
 
 let catalogCache = { at: 0, data: null };
@@ -1721,14 +1742,18 @@ const server = http.createServer(async (req, res) => {
            run back to whatever feeds it. */
         if (t.status === 'completed' && t.type === 'nap_install' &&
             (!t.ftthSync || !['done', 'manual'].includes(t.ftthSync.state))) {
-          pushNapInstall(t).catch(e => console.error('[ftth] NAP push failed:', e.message));
-        }
-        /* …and the box's name registered as a billing Area, so the first
-           subscriber on it can be filed under it without anyone adding it by
-           hand. Independent of the map write: one being down must not cost the
-           other. */
-        if (t.status === 'completed' && t.type === 'nap_install' &&
-            (!t.areaSync || t.areaSync.state !== 'done')) {
+          /* …then the box's name registered as a billing Area, so the first
+             subscriber on it can be filed under it without anyone adding it by
+             hand. Run after the map write rather than beside it: the map write
+             brings back the box's current name, which is the name billing should
+             get. A failure to place the box still lets the area be registered
+             from the job's own name. */
+          pushNapInstall(t)
+            .catch(e => console.error('[ftth] NAP push failed:', e.message))
+            .then(() => registerBillingArea(t))
+            .catch(e => console.error('[area] register failed:', e.message));
+        } else if (t.status === 'completed' && t.type === 'nap_install' &&
+                   (!t.areaSync || t.areaSync.state !== 'done')) {
           registerBillingArea(t).catch(e => console.error('[area] register failed:', e.message));
         }
         /* And into billing, on the same terms: queued, never blocking the phone.
