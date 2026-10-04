@@ -947,6 +947,76 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
+    /* ---- StarLine Billing link (machine-to-machine, own token) ----
+       The billing app shows a subscriber's tickets on their profile and can raise
+       a repair ticket from there. BILLING_TOKEN must match TICKETING_TOKEN on the
+       billing service. Only these three calls are open to it. */
+    if (p.startsWith('/api/billing-link/')) {
+      const BILLING_TOKEN = process.env.BILLING_TOKEN || '';
+      if (!BILLING_TOKEN) return json(res, 503, { error: 'Billing link is disabled: set BILLING_TOKEN on this service.' });
+      const supplied = Buffer.from(String(req.headers['x-api-key'] || ''));
+      const expected = Buffer.from(BILLING_TOKEN);
+      if (!(supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected)))
+        return json(res, 401, { error: 'Bad or missing API key' });
+
+      const brief = t => ({
+        id: t.id, number: t.number, type: t.type, subject: t.subject, status: t.status, priority: t.priority,
+        issue: t.issue || '', message: t.message || '', assignedName: t.assignedName || '', createdBy: t.createdBy || '',
+        created: t.created, started: t.started, completed: t.completed,
+        accountNo: t.accountNo || '', pppoeUsername: t.pppoeUsername || ''
+      });
+
+      if (p === '/api/billing-link/tickets' && req.method === 'GET') {
+        const u = String(url.searchParams.get('pppoe') || '').trim().toLowerCase();
+        const a = String(url.searchParams.get('account') || '').trim();
+        if (!u && !a) return json(res, 400, { error: 'pppoe or account is required' });
+        const list = db.tickets
+          .filter(t => (u && (t.pppoeUsername || '').toLowerCase() === u) ||
+                       (a && (t.accountNo === a || (t.data && t.data.cust_account === a))))
+          .sort((x, y) => (y.created || 0) - (x.created || 0))
+          .map(brief);
+        return json(res, 200, { tickets: list });
+      }
+      if (p === '/api/billing-link/meta' && req.method === 'GET') {
+        return json(res, 200, {
+          technicians: db.users.filter(u => u.role !== 'admin').map(u => ({ id: u.id, name: u.name })),
+          repairIssues: (db.settings.repairIssues || []).map(x => ({ id: x.id, label: x.label }))
+        });
+      }
+      if (p === '/api/billing-link/tickets' && req.method === 'POST') {
+        const b = await readBody(req);
+        if (!b.subject || !b.customer) return json(res, 400, { error: 'Subject and customer are required' });
+        const seq = String(db.tickets.length + 1).padStart(4, '0');
+        const assignee = db.users.find(u => u.id === b.assignedTo) || null;
+        const issue = (db.settings.repairIssues || []).find(x => x.id === b.issueId);
+        const t = {
+          id: 'id' + Date.now() + Math.random().toString(36).slice(2, 6),
+          number: `TKT-${new Date().getFullYear()}-${seq}`,
+          type: 'repair',
+          priority: [1, 2, 3].includes(parseInt(b.priority)) ? parseInt(b.priority) : 2,
+          subject: String(b.subject).trim(),
+          customer: String(b.customer).trim(),
+          phone: String(b.phone || '').trim(),
+          address: String(b.address || '').trim(),
+          message: String(b.message || '').trim(),
+          accountNo: String(b.accountNo || '').trim(),
+          pppoeUsername: String(b.pppoeUsername || '').trim().toLowerCase(),
+          assignedTo: assignee ? assignee.id : null,
+          assignedName: assignee ? assignee.name : null,
+          status: 'open', created: Date.now(), started: null, completed: null,
+          data: {}, step: 0,
+          createdBy: 'Billing: ' + String(b.createdBy || 'staff').trim(),
+          createdByRole: 'admin',
+          issueId: issue ? issue.id : null,
+          issue: issue ? issue.label : String(b.issue || '').trim(),
+          issueFlow: issue ? issue.flow : 'generic'
+        };
+        db.tickets.push(t); saveDB();
+        return json(res, 200, { ticket: brief(t) });
+      }
+      return json(res, 404, { error: 'Not found' });
+    }
+
     /* ---- everything below requires auth ---- */
     const session = auth(req);
     if (!session) return json(res, 401, { error: 'Not logged in' });
