@@ -362,6 +362,17 @@
     .card{box-shadow:none;border:1px solid #ccc}
   }
 </style>
+<link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+<script src="/vendor/leaflet/leaflet.js"></script>
+<style>
+  .plan-map{height:300px;border-radius:12px;border:1px solid var(--border);margin:6px 0 8px}
+  .plan-row{display:flex;align-items:center;gap:8px;justify-content:space-between;background:#f8fafc;border:1px solid var(--border);border-radius:10px;padding:8px 10px;margin-bottom:6px}
+  .plan-row b{font-size:13px} .plan-row .tmeta{font-size:11px}
+  .plan-row .acts{display:flex;gap:6px;flex-shrink:0}
+  .me-dot{width:14px;height:14px;border-radius:50%;background:#2563eb;border:3px solid #fff;box-shadow:0 0 0 2px #2563eb55}
+  .plan-pin{background:#f59e0b;color:#111;font-weight:800;font-size:10px;border-radius:8px;padding:2px 6px;white-space:nowrap;border:2px solid #fff;box-shadow:0 1px 3px #0005}
+  .plan-pin.sel{background:#16a34a;color:#fff}
+</style>
 </head>
 <body>
 
@@ -964,7 +975,7 @@ const WORKFLOWS = {
     { key:'napbox', title:'3. New NAP Box &amp; Reading',
       desc:'Install the new NAP box on the post, take a photo of it with its tagging, and record its optical reading.',
       fields:[
-        {k:'nap_id', type:'area_select', label:'New NAP Box Name / Area', req:true},
+        {k:'nap_id', type:'planned_nap', label:'Which planned NAP box are you installing?', req:true},
         {k:'nap_ports', type:'select', label:'Box Size (ports)', req:true, options:['4','8','12','16']},
         {k:'nap_box_photo', type:'photo', label:'Photo of New NAP Box with Tagging', req:true, autogps:true},
         {k:'nap_reading', type:'number', label:'NAP Box Reading (dBm)', req:true, placeholder:'e.g. -18.5', step:'0.1'},
@@ -1999,6 +2010,7 @@ function renderTicket(){
       ${isLast&&!allDone?'<div class="tmeta" style="margin-top:8px;color:var(--danger)">Finish all required (*) items in every step to complete the job.</div>':''}
     </div>`;
   if(document.getElementById('napPickWrap')) loadNapPicker();
+  if(document.getElementById('planMap')) loadPlannedMap();
   if(document.getElementById('feederPickWrap')) loadFeederPicker();
   renderSummary(t, 'summaryArea');
 }
@@ -2089,6 +2101,12 @@ function finishTicket(){
   for(const s of steps){ const bad = badArea(t, s); if(bad){ alert(bad); renderTicket(); return; } }
   /* Not a blocker — sometimes the account genuinely is not ready — but the
      office should not find this out weeks later. */
+  if(t.type==='nap_install' && t.data.nap_planned_id && t.data.location && t.data.location.lat!=null){
+    const pl = plannedOf(t);
+    if(pl){ const m = metres(pl, t.data.location);
+      if(m>150 && !confirm('The post GPS is '+fmtDist(m)+' away from where '+t.data.nap_id+' was planned.\n\nIf this really is '+t.data.nap_id+', the map will move it to your GPS. Complete the job?')){ renderTicket(); return; } }
+  }
+  if(t.type==='nap_install' && t.data.nap_unplanned && t.data.nap_id) t.data.nap_id = String(t.data.nap_id).trim().toUpperCase();
   if(t.type==='repair' && t.data.modem_action===SWAP_ACTION && !t.data.swap_pppoe){
     alert('You chose "'+SWAP_ACTION+'".\n\nSearch and pick the PPPoE account programmed in the replacement modem (Step 3), so billing can move it to this subscriber.');
     renderTicket(); return;
@@ -2124,6 +2142,28 @@ function renderField(t,f){
       ${chosen}
       <input id="swapSearch" placeholder="e.g. sl132" oninput="searchSwap()" autocomplete="off">
       <div id="swapOut" class="lookup-out"></div>`;
+  }
+  if(f.type==='planned_nap'){
+    const d = t.data;
+    if(d.nap_planned_id && v){
+      return `<label>${f.label}${reqMark}</label>
+        <div class="linked-chip"><span>📍 ${esc(v)} · planned on the map</span>
+          <button type="button" class="linked-x" title="Choose another box" onclick="clearPlannedNap()">✕</button></div>
+        <div class="tmeta" id="planDist"></div>
+        <div id="planMap" class="plan-map"></div>
+        <div class="tmeta">When you save the post's GPS in Step 4, the box on the map moves to where you actually installed it.</div>`;
+    }
+    if(d.nap_unplanned){
+      return `<label>${f.label}${reqMark}</label>
+        <div class="ctx-warn">This box is <b>not on the office's plan</b>. Type a name in the format <b>BARANGAY - NAP number</b> (e.g. TUNGKIL - NAP 4). The office approves the name before it is added to billing.</div>
+        <input type="text" id="f_${f.k}" value="${esc(v||'')}" placeholder="e.g. TUNGKIL - NAP 4" style="text-transform:uppercase">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="usePlannedList()">‹ Pick from the map instead</button>`;
+    }
+    return `<label>${f.label}${reqMark}</label>
+      <div class="tmeta">Orange pins are boxes the office planned. Your position is the blue dot. Tap a box (or use the list) to choose it; <b>Directions</b> opens Google Maps.</div>
+      <div id="planMap" class="plan-map"></div>
+      <div id="planList"><div class="tmeta">Loading planned boxes from the FTTH map…</div></div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="markUnplanned()">The box I am installing is not on the map</button>`;
   }
   if(f.type==='nap_picker'){
     const chosen = t.data.nap_port_id
@@ -2394,6 +2434,102 @@ async function renderBillingCatchup(){
    The office may be asleep when the job happens, and a brand-new account often
    still carries the PPPoE name in billing. The technician is the one who put the
    credentials into the modem, so the technician links it. */
+/* ---- planned NAP boxes on a map (NAP installation, Step 3) ----
+   The office names and pins planned boxes on the FTTH map. The technician sees
+   them here with their own position, picks the one being installed, and the map
+   later moves that box to the GPS captured at the post. */
+let _planMap = null, _planData = null, _meMarker = null, _meWatch = null, _mePos = null;
+function metres(a, b){
+  const R=6371000, r=x=>x*Math.PI/180, dLat=r(b.lat-a.lat), dLng=r(b.lng-a.lng);
+  const h=Math.sin(dLat/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dLng/2)**2;
+  return Math.round(2*R*Math.asin(Math.sqrt(h)));
+}
+const fmtDist = m => m==null ? '' : (m >= 1000 ? (m/1000).toFixed(1)+' km' : m+' m');
+const dirUrl = p => 'https://www.google.com/maps/dir/?api=1&destination='+p.lat+','+p.lng;
+async function loadPlannedMap(){
+  const t = byId(currentId); if(!t) return;
+  const el = document.getElementById('planMap'); if(!el || typeof L==='undefined') return;
+  if(_planMap){ try{ _planMap.remove(); }catch(e){} _planMap=null; }
+  _planMap = L.map(el, { zoomControl:true }).setView([10.245, 123.79], 15);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19, attribution:'&copy; OpenStreetMap' }).addTo(_planMap);
+  try{ _planData = await api('/api/ftth/planned'); }
+  catch(e){ const pl=document.getElementById('planList'); if(pl) pl.innerHTML='<div class="ctx-warn">Could not load the map: '+esc(e.message)+'</div>'; return; }
+  const bounds = [];
+  (_planData.existing||[]).forEach(x=>{
+    L.circleMarker([x.lat,x.lng],{radius:5,color:'#475569',weight:1,fillColor:'#94a3b8',fillOpacity:.9}).addTo(_planMap).bindTooltip(esc(x.name));
+  });
+  const selId = t.data.nap_planned_id;
+  (_planData.planned||[]).forEach((x,i)=>{
+    if(selId && x.id!==selId) return;
+    const icon = L.divIcon({ className:'', html:`<div class="plan-pin ${x.id===selId?'sel':''}">📍 ${esc(x.name)}</div>`, iconSize:null, iconAnchor:[12,12] });
+    L.marker([x.lat,x.lng],{icon}).addTo(_planMap).on('click',()=>{ if(!selId) pickPlanned(i); });
+    bounds.push([x.lat,x.lng]);
+  });
+  const loc = t.data.location;
+  if(selId && loc && loc.lat!=null){
+    L.circleMarker([loc.lat,loc.lng],{radius:7,color:'#16a34a',fillColor:'#22c55e',fillOpacity:1}).addTo(_planMap).bindTooltip('Post GPS (Step 4)');
+    bounds.push([loc.lat,loc.lng]);
+  }
+  if(bounds.length) _planMap.fitBounds(bounds,{padding:[30,30],maxZoom:17});
+  renderPlanList();
+  startMyPosition();
+  updatePlanDistance();
+}
+function startMyPosition(){
+  if(!navigator.geolocation) return;
+  if(_meWatch!=null){ navigator.geolocation.clearWatch(_meWatch); _meWatch=null; }
+  _meWatch = navigator.geolocation.watchPosition(p=>{
+    _mePos = { lat:p.coords.latitude, lng:p.coords.longitude, acc:p.coords.accuracy };
+    if(!_planMap) return;
+    const ll=[_mePos.lat,_mePos.lng];
+    if(!_meMarker || !_planMap.hasLayer(_meMarker)) _meMarker = L.marker(ll,{icon:L.divIcon({className:'',html:'<div class="me-dot"></div>',iconAnchor:[7,7]})}).addTo(_planMap).bindTooltip('You');
+    else _meMarker.setLatLng(ll);
+    renderPlanList(); updatePlanDistance();
+  }, ()=>{}, { enableHighAccuracy:true, maximumAge:10000, timeout:20000 });
+}
+function renderPlanList(){
+  const box = document.getElementById('planList'); if(!box || !_planData) return;
+  const list = (_planData.planned||[]).map((x,i)=>({ ...x, i, dist: _mePos ? metres(_mePos, x) : null }))
+    .sort((a,b)=> (a.dist==null?1e12:a.dist) - (b.dist==null?1e12:b.dist));
+  if(!list.length){ box.innerHTML='<div class="ctx-warn">There are no planned boxes on the map. Ask the office to plan this box first, or use "not on the map" below.</div>'; return; }
+  box.innerHTML = list.map(x=>`<div class="plan-row"><div><b>${esc(x.name)}</b>
+      <div class="tmeta">${x.dist!=null?fmtDist(x.dist)+' from you':'locating you…'}${x.notes?' · '+esc(x.notes):''}</div></div>
+      <div class="acts"><a class="btn btn-ghost btn-sm" href="${dirUrl(x)}" target="_blank" rel="noopener">Directions</a>
+      <button type="button" class="btn btn-primary btn-sm" onclick="pickPlanned(${x.i})">This one</button></div></div>`).join('');
+}
+function plannedOf(t){ return (_planData && (_planData.planned||[]).find(x=>x.id===t.data.nap_planned_id)) || (t.data.nap_planned_lat!=null ? {lat:t.data.nap_planned_lat,lng:t.data.nap_planned_lng} : null); }
+function updatePlanDistance(){
+  const el = document.getElementById('planDist'); const t = byId(currentId); if(!el || !t) return;
+  const pl = plannedOf(t); if(!pl) return;
+  const loc = t.data.location;
+  if(loc && loc.lat!=null){ const m = metres(pl, loc); el.innerHTML = 'Post GPS is <b>'+fmtDist(m)+'</b> from the planned spot'+(m>150?' — <span style="color:var(--danger)">far: make sure this is the right box</span>':' — the map will move the box there.'); }
+  else if(_mePos){ el.innerHTML = 'You are <b>'+fmtDist(metres(pl,_mePos))+'</b> from the planned spot · <a href="'+dirUrl(pl)+'" target="_blank" rel="noopener">Directions</a>'; }
+}
+async function pickPlanned(i){
+  const x = _planData && _planData.planned[i]; const t = byId(currentId); if(!x || !t) return;
+  if(_mePos){ const m = metres(_mePos, x); if(m>300 && !confirm(x.name+' is '+fmtDist(m)+' from where you are now.\n\nChoose it anyway?')) return; }
+  collectStep();
+  t.data.nap_planned_id = x.id; t.data.nap_id = x.name; t.data.nap_planned_lat = x.lat; t.data.nap_planned_lng = x.lng;
+  delete t.data.nap_unplanned;
+  if(x.port_count && !t.data.nap_ports) t.data.nap_ports = String(x.port_count);
+  await persist(t); renderTicket();
+}
+async function clearPlannedNap(){
+  const t = byId(currentId); if(!t) return; collectStep();
+  ['nap_planned_id','nap_planned_lat','nap_planned_lng','nap_id'].forEach(k=>delete t.data[k]);
+  await persist(t); renderTicket();
+}
+async function markUnplanned(){
+  const t = byId(currentId); if(!t) return;
+  if(!confirm('Only use this if the office did NOT plan this box on the map.\n\nYou will type the name and the office must approve it before it reaches billing. Continue?')) return;
+  collectStep(); ['nap_planned_id','nap_planned_lat','nap_planned_lng','nap_id'].forEach(k=>delete t.data[k]);
+  t.data.nap_unplanned = true; await persist(t); renderTicket();
+}
+async function usePlannedList(){
+  const t = byId(currentId); if(!t) return; collectStep();
+  delete t.data.nap_unplanned; delete t.data.nap_id; await persist(t); renderTicket();
+}
+
 /* ---- re-used modems ----
    A modem pulled out from a subscriber who stopped paying still holds that
    subscriber's PPPoE account. Billing says whether the account may move:
@@ -4161,9 +4297,20 @@ function napAreaLine(t){
   if(a.state==='done')   return `<div class="sync-ok">🧾 ${esc(a.message||'Registered as a billing area')}</div>`;
   if(a.state==='off')    return '<div class="tmeta" style="margin-top:6px">🧾 Billing is not connected, so the area was not registered.</div>';
   if(a.state==='failed') return `<div class="ctx-warn">🧾 Not added to billing's areas — ${esc(a.error||'')}. It keeps retrying on its own.</div>`;
+  if(a.state==='review') return `<div class="ctx-warn">🧾 ${esc(a.message||'Name waiting for approval')}
+      ${USER && USER.role==='admin' ? `<div class="wizard-btns"><button class="btn btn-primary btn-sm" onclick="approveNapName('${esc(t.id)}','${esc((t.data||{}).nap_id||'')}')">Approve / correct name</button></div>` : ''}</div>`;
   return '';
 }
 
+async function approveNapName(id, current){
+  const name = prompt('Name for this NAP box (format: BARANGAY - NAP number).\nIt is renamed on the map and added to billing as an area.', current||'');
+  if(name===null) return;
+  try{
+    await api('/api/tickets/'+id+'/approve-nap-name','POST',{ name: name.trim().toUpperCase() });
+    alert('Approved: '+name.trim().toUpperCase());
+    await refreshTickets(); openReport(id);
+  }catch(e){ alert(e.message); }
+}
 async function retryNapMap(id, number){
   try{
     const d = await api('/api/ftth/retry/'+id, 'POST', {});

@@ -460,6 +460,8 @@ function napInstallPayload(t) {
   const name = String(d.nap_id || '').trim();
   return {
     ticketId: t.id,
+    /* Picked from the office's planned boxes: the map finishes that box (its name, moved to this GPS). */
+    plannedId: d.nap_planned_id || undefined,
     nap: {
       name,
       area: name,                       // one value names the box and its billing area
@@ -526,6 +528,13 @@ function napAreaName(t) {
 async function registerBillingArea(t) {
   const name = napAreaName(t);
   if (!name) return;
+  /* A box the technician named in the field (not on the office's plan) only reaches
+     billing once an admin has approved — or corrected — its name. */
+  const d0 = t.data || {};
+  if (d0.nap_unplanned && !d0.nap_name_approved) {
+    t.areaSync = { state: 'review', at: Date.now(), message: `New box "${name}" was not on the map's plan — its name is waiting for the office to approve` };
+    return saveDB();
+  }
   if (!MONITOR_URL || !MONITOR_TOKEN) {
     t.areaSync = { state: 'off', message: 'Billing is not connected', at: Date.now() };
     return saveDB();
@@ -588,7 +597,9 @@ async function pushNapInstall(t) {
       created: r.created !== false,
       linked: !!r.link,
       sized,
-      message: (r.created === false ? 'Already on the map' : 'Placed on the map at the recorded GPS')
+      movedMeters: r.planned ? r.movedMeters : undefined,
+      message: (r.planned ? `Planned box finished on the map — pin moved ${r.movedMeters} m to the actual post`
+        : r.created === false ? 'Already on the map' : 'Placed on the map at the recorded GPS')
         + (todo.length ? ' — still to do on the map: ' + todo.join('; ') : ' and connected to its feeding box'),
     };
   } catch (e) {
@@ -1210,6 +1221,40 @@ const server = http.createServer(async (req, res) => {
           steps: t.billingSync.steps || [],
         }));
       return json(res, 200, { rows, checked: installs.length, pushes });
+    }
+
+    /* ---- planned NAP boxes + the network around them, for the technician's map ---- */
+    if (p === '/api/ftth/planned' && req.method === 'GET') {
+      try {
+        return json(res, 200, await ftthCall('GET', '/api/planned-naps'));
+      } catch (e) {
+        return json(res, e.code || 500, { error: e.message });
+      }
+    }
+    /* Approve (or correct) the name of a box that was installed without being planned. */
+    const approveNap = p.match(/^\/api\/tickets\/([\w.]+)\/approve-nap-name$/);
+    if (approveNap && req.method === 'POST') {
+      if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+      const t = db.tickets.find(x => x.id === approveNap[1]);
+      if (!t || t.type !== 'nap_install') return json(res, 404, { error: 'NAP installation ticket not found' });
+      const ab = await readBody(req);
+      const name = String(ab.name || '').trim();
+      if (!name) return json(res, 400, { error: 'name required' });
+      t.data = t.data || {};
+      t.data.nap_id = name;
+      t.data.nap_name_approved = true;
+      /* Rename the box on the map too, so map, ticket and billing say the same thing. */
+      if (t.ftthSync && t.ftthSync.deviceId) {
+        try {
+          await ftthCall('PATCH', '/api/devices/' + encodeURIComponent(t.ftthSync.deviceId), { name, area: name });
+          t.ftthSync.deviceName = name;
+        } catch (e) {
+          return json(res, e.code || 502, { error: 'Could not rename the box on the map: ' + e.message });
+        }
+      }
+      saveDB();
+      await registerBillingArea(t);
+      return json(res, 200, { ticket: t });
     }
 
     /* ---- the FTTH map, for the port picker in step 4 ---- */
