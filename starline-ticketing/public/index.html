@@ -1052,7 +1052,8 @@ const REPAIR_FLOWS = {
     { key:'work', title:'3. Repair or Replacement',
       desc:'Record exactly what you did to the unit. If you swapped it, fill in the details of the replacement modem.',
       fields:[
-        {k:'modem_action', type:'select', label:'Action Taken', req:true, options:['Reset / reconfigured','Firmware or settings fix','Power adapter replaced','Modem replaced with a new unit','Patch cord replaced']},
+        {k:'modem_action', type:'select', label:'Action Taken', req:true, options:['Reset / reconfigured','Firmware or settings fix','Power adapter replaced','Modem replaced with a new unit','Replaced with a modem from a deactivated account','Patch cord replaced']},
+        {k:'swap_pppoe', type:'pppoe_swap', label:'PPPoE Account in the Replacement Modem (only if you used a modem from a deactivated account)'},
         {k:'modem_serial', type:'text', label:'New Modem Serial Number (if replaced)', placeholder:'Leave blank if the same unit was kept'},
         {k:'modem_model', type:'text', label:'Modem Model', placeholder:'e.g. Huawei EG8145V5'},
         {k:'modem_mac', type:'text', label:'MAC Address (optional)'},
@@ -2088,6 +2089,10 @@ function finishTicket(){
   for(const s of steps){ const bad = badArea(t, s); if(bad){ alert(bad); renderTicket(); return; } }
   /* Not a blocker — sometimes the account genuinely is not ready — but the
      office should not find this out weeks later. */
+  if(t.type==='repair' && t.data.modem_action===SWAP_ACTION && !t.data.swap_pppoe){
+    alert('You chose "'+SWAP_ACTION+'".\n\nSearch and pick the PPPoE account programmed in the replacement modem (Step 3), so billing can move it to this subscriber.');
+    renderTicket(); return;
+  }
   if(t.type==='installation' && !t.pppoeUsername){
     if(!confirm('This job is not linked to a PPPoE account.\n\nWithout it the subscriber cannot be matched to billing, and the office will have to find and link it by hand.\n\nComplete anyway?')) return;
   }
@@ -2109,6 +2114,16 @@ function renderField(t,f){
       ${linked}
       <input id="pppoeSearch" placeholder="e.g. sl132" oninput="searchPppoe()" autocomplete="off">
       <div id="pppoeOut" class="lookup-out"></div>`;
+  }
+  if(f.type==='pppoe_swap'){
+    const chosen = t.data.swap_pppoe
+      ? `<div class="linked-chip"><span>🔁 ${esc(t.data.swap_pppoe)}${t.data.swap_from?' · from '+esc(t.data.swap_from):''}</span>
+           <button type="button" class="linked-x" title="Remove" onclick="clearSwap()">✕</button></div>`
+      : `<div class="tmeta">Pick this only if Action Taken is <b>${esc(SWAP_ACTION)}</b>. Search the PPPoE username programmed in the modem you brought. Billing moves that account to this subscriber, archives the old owner (their balance stays), and switches off the account in the defective modem.</div>`;
+    return `<label>${f.label}</label>
+      ${chosen}
+      <input id="swapSearch" placeholder="e.g. sl132" oninput="searchSwap()" autocomplete="off">
+      <div id="swapOut" class="lookup-out"></div>`;
   }
   if(f.type==='nap_picker'){
     const chosen = t.data.nap_port_id
@@ -2379,6 +2394,78 @@ async function renderBillingCatchup(){
    The office may be asleep when the job happens, and a brand-new account often
    still carries the PPPoE name in billing. The technician is the one who put the
    credentials into the modem, so the technician links it. */
+/* ---- re-used modems ----
+   A modem pulled out from a subscriber who stopped paying still holds that
+   subscriber's PPPoE account. Billing says whether the account may move:
+   free / placeholder (never billed) / reusable (disconnected, deactivated or
+   archived) / in_use (someone active and paying — never take it). */
+const SWAP_ACTION = 'Replaced with a modem from a deactivated account';
+async function pppoeStatus(username){
+  try{ return await api('/api/lookup/pppoe-status/'+encodeURIComponent(username)); }
+  catch(e){ return { state:'unknown' }; }
+}
+function ownerText(o){
+  if(!o) return '';
+  const bal = Number(o.balance||0);
+  return (o.name||'a former subscriber') + (o.account_no?' (account '+o.account_no+')':'') + (bal>0?', owes ₱'+bal.toFixed(2):'');
+}
+/* Confirms a pick with the technician. Returns false to stop. */
+async function confirmReuse(username, forName){
+  const st = await pppoeStatus(username);
+  if(st.state==='in_use'){
+    alert('⛔ '+username+' belongs to '+ownerText(st.owner)+', who is still ACTIVE and paying.\n\nThis cannot be used. Check the PPPoE username inside the modem, or use a modem from a disconnected/deactivated account.');
+    return { ok:false };
+  }
+  if(st.state==='reusable'){
+    const ok = confirm('This modem belonged to '+ownerText(st.owner)+'.\n\nIf you continue, billing will archive that account (their unpaid balance stays on their record) and move PPPoE '+username+' to '+(forName||'this subscriber')+'.\n\nContinue?');
+    return { ok, from: ownerText(st.owner) };
+  }
+  return { ok:true };
+}
+
+let _swapHits = [], _swapTimer = null, _swapSeq = 0;
+function searchSwap(){
+  clearTimeout(_swapTimer);
+  const el = document.getElementById('swapSearch'), out = document.getElementById('swapOut');
+  if(!el || !out) return;
+  const q = el.value.trim();
+  if(q.length < 2){ out.innerHTML = ''; return; }
+  _swapTimer = setTimeout(async ()=>{
+    const seq = ++_swapSeq;
+    out.innerHTML = '<div class="tmeta">Searching…</div>';
+    try{
+      const d = await api('/api/lookup/customers?q='+encodeURIComponent(q));
+      if(seq !== _swapSeq) return;
+      _swapHits = d.customers || [];
+      if(!_swapHits.length){ out.innerHTML = '<div class="tmeta">No PPPoE account by that name on the router.</div>'; return; }
+      out.innerHTML = _swapHits.map((c,i)=>`
+        <button type="button" class="lookup-row" onclick="pickSwap(${i})">
+          <span class="lr-name">${esc(c.username)}</span>
+          <span class="tmeta">${esc(c.customerName && c.customerName!==c.username ? c.customerName : 'no name in billing')}${c.accountNo?' · '+esc(c.accountNo):''} · ${esc(c.status||'')}</span>
+        </button>`).join('');
+    }catch(e){ if(seq === _swapSeq) out.innerHTML = `<div class="tmeta">Lookup unavailable — ${esc(e.message)}</div>`; }
+  }, 300);
+}
+async function pickSwap(i){
+  const c = _swapHits[i], t = byId(currentId);
+  if(!c || !t) return;
+  collectStep();
+  if(t.pppoeUsername && c.username.toLowerCase()===t.pppoeUsername.toLowerCase()){ alert('That is this subscriber\'s current account — pick the account in the replacement modem.'); return; }
+  const chk = await confirmReuse(c.username, t.customer);
+  if(!chk.ok) return;
+  t.data.swap_pppoe = c.username;
+  t.data.swap_from = chk.from || (c.customerName && c.customerName!==c.username ? c.customerName : '');
+  t.data.modem_action = SWAP_ACTION;
+  await persist(t);
+  renderTicket();
+}
+async function clearSwap(){
+  const t = byId(currentId); if(!t) return;
+  collectStep();
+  delete t.data.swap_pppoe; delete t.data.swap_from;
+  await persist(t); renderTicket();
+}
+
 let _pppoeHits = [], _pppoeTimer = null, _pppoeSeq = 0;
 
 function searchPppoe(){
@@ -2409,10 +2496,16 @@ function searchPppoe(){
 }
 
 async function pickPppoe(i){
-  const c = _pppoeHits[i];
+  let c = _pppoeHits[i];
   const t = byId(currentId);
   if(!c || !t) return;
   collectStep();                                   // keep what is already typed on this step
+  /* An installation on a pulled-out modem: say whose account it was before linking. */
+  if(t.type==='installation'){
+    const chk = await confirmReuse(c.username, t.customer);
+    if(!chk.ok) return;
+    if(chk.from){ c = Object.assign({}, c, { accountNo:'' }); t.data.reused_from = chk.from; }
+  }
   try{
     await api('/api/tickets/'+t.id, 'PUT', { pppoeUsername: c.username, accountNo: c.accountNo || '' });
   }catch(e){ alert('Could not link that account: '+e.message); return; }
@@ -3972,7 +4065,7 @@ async function openReport(id){
       <button class="btn btn-ghost btn-sm" onclick="window.print()">🖨 Print</button>
       <button class="btn btn-ghost btn-sm" onclick="exportJSON()">⬇ JSON</button>
     </div>
-    ${t.status==='completed' && t.type==='installation' ? billingSyncPanel(t) : ''}
+    ${t.status==='completed' && (t.type==='installation' || (t.type==='repair' && t.data && t.data.swap_pppoe)) ? billingSyncPanel(t) : ''}
     ${t.status==='completed' && t.type==='nap_install' ? napMapPanel(t) : ''}
     <div class="wizard-btns">
       ${t.status==='completed'?'<button class="btn btn-ghost btn-sm" onclick="reopenTicket()">Reopen</button>':''}

@@ -651,8 +651,52 @@ async function pushInstall(t) {
  * nobody is reviewing these and a silent failure would be worse than the typing
  * it replaces. The monitor holds the billing credentials and does the actual
  * three-step write; this only decides when and with what. */
+/* A repair where the technician replaced the modem with one pulled out from a
+   disconnected / deactivated subscriber. The PPPoE account lives in the modem, so
+   billing moves that account to this subscriber and switches off the old one
+   (still inside the defective unit). Same fire-and-record rules as installs. */
+const SWAP_ACTION = 'Replaced with a modem from a deactivated account';
+function isModemSwap(t) {
+  return t && t.type === 'repair' && t.data && t.data.modem_action === SWAP_ACTION && String(t.data.swap_pppoe || '').trim();
+}
+async function pushModemSwap(t) {
+  const d = t.data || {};
+  const who = String(t.pppoeUsername || t.accountNo || '').trim();
+  if (!who) {
+    t.billingSync = { state: 'blocked', at: Date.now(),
+      error: 'This repair is not linked to a subscriber in billing, so the replacement modem cannot be moved to anyone. Link the customer, then send it again.' };
+    saveDB();
+    return;
+  }
+  t.billingSync = { state: 'pending', at: Date.now() };
+  saveDB();
+  try {
+    const r = await fetch(MONITOR_URL + '/api/billing-modem-swap', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': MONITOR_TOKEN },
+      body: JSON.stringify({ customer: String(t.pppoeUsername || '').trim(), account: String(t.accountNo || '').trim(), newUsername: String(d.swap_pppoe).trim().toLowerCase(), ticket: t.number, serial: d.modem_serial || '' }),
+      signal: AbortSignal.timeout(60000),
+    });
+    const out = await r.json().catch(() => ({}));
+    if (r.ok && out.ok) {
+      t.billingSync = { state: 'done', at: Date.now(), recordId: out.recordId, steps: out.steps || [] };
+      /* From now on this subscriber is reached through the new account. */
+      t.pppoeUsername = String(d.swap_pppoe).trim().toLowerCase();
+    } else {
+      const bad = (out.steps || []).find(x => x.status === 'failed');
+      t.billingSync = { state: 'failed', at: Date.now(), steps: out.steps || [],
+        error: out.error || (bad && (bad.detail || `the ${bad.step} step failed`)) || `billing returned HTTP ${r.status}` };
+      console.error(`[billing] ticket ${t.number} modem swap not recorded: ${t.billingSync.error}`);
+    }
+  } catch (e) {
+    t.billingSync = { state: 'failed', at: Date.now(), error: e.name === 'TimeoutError' ? 'billing did not answer in time' : e.message };
+  }
+  saveDB();
+}
+
 async function pushBilling(t) {
   if (!MONITOR_URL || !MONITOR_TOKEN) return;
+  if (isModemSwap(t)) return pushModemSwap(t);
   if (t.type !== 'installation') return;
   const d = t.data || {};
   const username = String(t.pppoeUsername || '').trim();
@@ -1039,6 +1083,15 @@ const server = http.createServer(async (req, res) => {
         return json(res, e.code || 500, { error: e.message });
       }
     }
+    /* Can this PPPoE account go into another modem? (warns the technician before linking) */
+    const statusOne = p.match(/^\/api\/lookup\/pppoe-status\/(.+)$/);
+    if (statusOne && req.method === 'GET') {
+      try {
+        return json(res, 200, await monitorLookup('/api/billing-pppoe-status/' + encodeURIComponent(decodeURIComponent(statusOne[1]))));
+      } catch (e) {
+        return json(res, 200, { state: 'unknown', error: e.message });
+      }
+    }
     const lookupOne = p.match(/^\/api\/lookup\/customers\/(.+)$/);
     if (lookupOne && req.method === 'GET') {
       try {
@@ -1058,8 +1111,8 @@ const server = http.createServer(async (req, res) => {
       if (!isAdmin) return json(res, 403, { error: 'Admin only' });
       const t = db.tickets.find(x => x.id === retryMatch[1]);
       if (!t) return json(res, 404, { error: 'Ticket not found' });
-      if (t.status !== 'completed' || t.type !== 'installation') {
-        return json(res, 400, { error: 'Only a completed installation can be pushed to billing.' });
+      if (t.status !== 'completed' || (t.type !== 'installation' && !isModemSwap(t))) {
+        return json(res, 400, { error: 'Only a completed installation or modem replacement can be pushed to billing.' });
       }
       await pushBilling(t);
       return json(res, 200, { billingSync: t.billingSync || null });
@@ -1143,7 +1196,7 @@ const server = http.createServer(async (req, res) => {
          watching it happen, so the one place an admin looks at billing is the
          one place these have to surface. */
       const pushes = db.tickets
-        .filter(t => t.type === 'installation' && t.billingSync &&
+        .filter(t => (t.type === 'installation' || isModemSwap(t)) && t.billingSync &&
                      ['failed', 'blocked', 'pending'].includes(t.billingSync.state))
         .sort((a, b) => (b.billingSync.at || 0) - (a.billingSync.at || 0))
         .slice(0, 50)
@@ -1830,7 +1883,7 @@ const server = http.createServer(async (req, res) => {
            A push that already succeeded is not repeated — the monitor would skip
            the work anyway, but not asking at all is cheaper and keeps the
            ticket's record of what happened intact. */
-        if (t.status === 'completed' && t.type === 'installation' &&
+        if (t.status === 'completed' && (t.type === 'installation' || isModemSwap(t)) &&
             (!t.billingSync || !['done', 'manual'].includes(t.billingSync.state))) {
           pushBilling(t).catch(e => console.error('[billing] push failed:', e.message));
         }
