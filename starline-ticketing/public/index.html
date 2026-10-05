@@ -4,15 +4,19 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>StarLine Field Ops</title>
+<link rel="icon" href="/icon.png"><link rel="apple-touch-icon" href="/icon.png">
+<meta name="theme-color" content="#12304a">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
   :root{
-    --primary:#0e2f55; --primary-dark:#081c34; --gold:#f2c230;
+    --primary:#12304a; --primary-dark:#0b2236; --gold:#d9b345;
     --bg:#e7ecf3; --card:#ffffff; --text:#0f172a; --muted:#64748b;
     --ok:#16a34a; --danger:#dc2626; --border:#e2e8f0; --radius:14px;
   }
   *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
   body{background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:calc(84px + env(safe-area-inset-bottom))}
-  header{background:linear-gradient(135deg,#12406e,var(--primary-dark));color:#fff;padding:12px 16px;position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:10px;box-shadow:0 2px 8px rgba(0,0,0,.15);border-bottom:3px solid var(--gold)}
+  header{background:linear-gradient(135deg,#1b4166,var(--primary-dark));color:#fff;padding:12px 16px;position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:10px;box-shadow:0 2px 8px rgba(0,0,0,.15);border-bottom:3px solid var(--gold)}
   header .logo{width:38px;height:38px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
   header .logo svg{width:38px;height:38px}
   header h1 .brand-star{color:var(--gold)}
@@ -58,7 +62,7 @@
 
   /* login */
   .login-wrap{max-width:380px;margin:8vh auto 0;padding:20px}
-  .login-logo{width:84px;height:84px;background:linear-gradient(135deg,#12406e,var(--primary-dark));border-radius:20px;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;box-shadow:0 8px 20px rgba(14,47,85,.35)}
+  .login-logo{width:84px;height:84px;background:linear-gradient(135deg,#1b4166,var(--primary-dark));border-radius:20px;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;box-shadow:0 8px 20px rgba(14,47,85,.35)}
   .login-logo svg{width:58px;height:58px}
   .login-title .brand-star{color:#b8860b}
   .login-title{text-align:center;font-size:20px;font-weight:800;margin-bottom:2px}
@@ -82,8 +86,8 @@
   .tstat .l{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;opacity:.9;margin-top:2px}
   .tstat-today{background:linear-gradient(135deg,#16a34a,#15803d);transform:scale(1.06);box-shadow:0 6px 18px rgba(22,163,74,.45)}
   .tstat-today .n{font-size:38px}
-  .tstat-week{background:linear-gradient(135deg,#12406e,#0e2f55)}
-  .tstat-month{background:linear-gradient(135deg,#f2c230,#d99f0b);color:#0e2f55}
+  .tstat-week{background:linear-gradient(135deg,#1b4166,#12304a)}
+  .tstat-month{background:linear-gradient(135deg,#d9b345,#c49a2c);color:#12304a}
   .tstat-month .l{opacity:.75}
   .split{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
   .split .stat{text-align:left;display:flex;justify-content:space-between;align-items:center}
@@ -91,7 +95,7 @@
   .kpi-row .kpi:nth-child(2){background:linear-gradient(135deg,#f0fdf4,#ffffff);border-color:#bbf7d0}
   #cbdPanelAdmin,#cbdPanelTech{border-top:4px solid var(--primary)}
   #trendPanelAdmin,#trendPanelTech{border-top:4px solid var(--gold)}
-  #techPerfPanel{border-top:4px solid #0e2f55}
+  #techPerfPanel{border-top:4px solid #12304a}
   #prioPanel{border-top:4px solid #dc2626}
   #invPanel{border-top:4px solid #16a34a}
 
@@ -165,7 +169,7 @@
   .sig-modal canvas{width:100%;height:220px;border:1.5px dashed var(--border);border-radius:12px;touch-action:none;background:#fff;display:block}
 
   /* loading splash */
-  #splash{position:fixed;inset:0;z-index:300;background:linear-gradient(150deg,#12406e,#081c34);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;transition:opacity .35s}
+  #splash{position:fixed;inset:0;z-index:300;background:linear-gradient(150deg,#1b4166,#0b2236);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;transition:opacity .35s}
   #splash.splash-hide{opacity:0;pointer-events:none}
   #splash svg{width:74px;height:74px;animation:pulse 1.4s ease-in-out infinite}
   #splash .sp-title{color:#fff;font-size:20px;font-weight:800}
@@ -249,8 +253,8 @@
   .ministat .l{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;opacity:.92}
   .ministat.on{outline:3px solid rgba(255,255,255,.65);outline-offset:-4px}
   .ms-today{background:linear-gradient(135deg,#16a34a,#15803d)}
-  .ms-week{background:linear-gradient(135deg,#12406e,#0e2f55)}
-  .ms-month{background:linear-gradient(135deg,#f2c230,#d99f0b);color:#0e2f55}
+  .ms-week{background:linear-gradient(135deg,#1b4166,#12304a)}
+  .ms-month{background:linear-gradient(135deg,#d9b345,#c49a2c);color:#12304a}
 
   /* chips */
   .chip{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;padding:3px 8px;border-radius:99px;background:#f1f5f9;color:var(--muted);white-space:nowrap}
@@ -319,12 +323,12 @@
   .dleg .pct{font-size:11px;font-weight:700;color:var(--muted);width:36px;text-align:right}
 
   /* ---------- next job up ---------- */
-  .nextup{background:linear-gradient(135deg,#12406e,#0e2f55);border:none;color:#fff}
+  .nextup{background:linear-gradient(135deg,#1b4166,#12304a);border:none;color:#fff}
   .nextup .nu-cap{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;opacity:.72}
   .nextup .nu-num{font-size:15px;font-weight:800;color:var(--gold)}
   .nextup .nu-sub{font-size:14px;font-weight:700;margin-top:2px}
   .nextup .nu-meta{font-size:12.5px;opacity:.85;margin-top:3px}
-  .nextup .btn{margin-top:11px;background:var(--gold);color:#0e2f55}
+  .nextup .btn{margin-top:11px;background:var(--gold);color:#12304a}
   .nextup .badge{background:rgba(255,255,255,.16);color:#fff}
 
   /* ---------- grouped column chart (created vs completed) ---------- */
@@ -353,7 +357,7 @@
   @media (min-width:820px){
     .wrap{max-width:880px;padding:18px 20px 8px}
     .bottomnav{justify-content:center;gap:8px}
-    .navbtn{flex:0 0 150px}
+    .navbtn{flex:0 1 150px;min-width:0}
   }
 
   @media print{
@@ -373,22 +377,101 @@
   .plan-pin{background:#f59e0b;color:#111;font-weight:800;font-size:10px;border-radius:8px;padding:2px 6px;white-space:nowrap;border:2px solid #fff;box-shadow:0 1px 3px #0005}
   .plan-pin.sel{background:#16a34a;color:#fff}
 </style>
+<style>
+  /* ===== StarLine brand theme — same look as the payment page and subscriber portal ===== */
+  :root{
+    --primary:#12304a; --primary-dark:#0b2236; --gold:#d9b345; --navy-2:#1b4166;
+    --bg:#f3f5f8; --card:#ffffff; --text:#1f2937; --muted:#6b7280;
+    --border:#e5e7eb; --radius:10px;
+  }
+  *{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+  body{background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;font-size:15px}
+  /* top bar */
+  header{background:var(--primary);box-shadow:0 1px 0 rgba(0,0,0,.05);padding:10px 16px;border-bottom:3px solid var(--gold);gap:12px}
+  header .hdr-logo{height:40px;width:auto;flex-shrink:0}
+  header .hdr-txt{border-left:1px solid rgba(255,255,255,.3);padding-left:12px;min-width:0}
+  header h1{font-size:13px;font-weight:600;color:#e6ebf2;letter-spacing:.04em;text-transform:uppercase}
+  header .sub{font-size:12px;color:#c7d2e1;opacity:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  header .hbtn{background:transparent;border:1px solid rgba(255,255,255,.35);border-radius:6px;font-weight:600;padding:6px 12px;font-size:12.5px}
+  header .hbtn:hover{background:rgba(255,255,255,.1)}
+  .tabs,.offline-banner{top:63px}
+  @media (max-width:420px){ header .hdr-logo{height:34px} header .hdr-txt{padding-left:9px} }
+  /* splash */
+  #splash{background:var(--primary)}
+  #splash .sp-logo{width:220px;max-width:62vw;height:auto;animation:pulse 1.6s ease-in-out infinite}
+  #splash .sp-title{font-size:13px;font-weight:600;letter-spacing:.12em;color:#c7d2e1}
+  #splash .sp-sub{color:#9fb3c8}
+  /* login — navy band with the logo, white card with a gold top edge */
+  .login-wrap{max-width:none;margin:0;min-height:100vh;padding:24px 16px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:linear-gradient(180deg,var(--primary) 0,var(--primary) 42%,var(--bg) 42%)}
+  .login-wrap>*{width:100%;max-width:420px}
+  .login-brand{text-align:center;margin-bottom:18px}
+  .login-brand img{width:230px;max-width:70%;height:auto;margin-bottom:6px}
+  .login-brand p{font-size:14px;font-weight:600;color:#e6ebf2;letter-spacing:.08em}
+  #viewLogin .card{border-top:4px solid var(--gold);padding:24px;box-shadow:0 10px 30px rgba(16,24,40,.12)}
+  .login-h{font-size:19px;font-weight:700;color:var(--text)}
+  .login-sub{text-align:left;font-size:13px;color:var(--muted);margin:2px 0 6px}
+  #viewLogin label{text-transform:none;letter-spacing:0;font-size:13px;font-weight:600;color:#374151}
+  #viewLogin input{height:46px;font-size:16px}
+  /* cards, forms, buttons */
+  .card{border-radius:var(--radius);box-shadow:0 1px 2px rgba(16,24,40,.04)}
+  .stat,.kpi,.tstat{border-radius:var(--radius)}
+  label{font-weight:600;letter-spacing:.04em}
+  input,select,textarea{border:1px solid #cfd6e0;border-radius:6px}
+  input:focus,select:focus,textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(18,48,74,.12)}
+  .btn{border-radius:6px;font-weight:600}
+  .btn-primary{background:var(--primary)} .btn-primary:hover{background:var(--navy-2)}
+  .btn-ghost{border-width:1px}
+  .icon-btn{border-radius:8px}
+  .seg{border-radius:8px} .seg button{border-radius:6px;font-weight:600}
+  .pill,.ttab,.tab{font-weight:600}
+  .page-title{font-weight:700} .step-title{font-weight:700} .tnum{font-weight:700}
+  .summary-table td:first-child{font-weight:600}
+  .photo-box{border-radius:8px;border-width:1.5px}
+  .plan-map{border-radius:8px}
+  .locked-num{background:#f3f5f8!important;color:var(--text);font-weight:600}
+  .hint.reel-warn{color:#92400e;background:#fef3c7;border:1px solid #fcd34d;padding:9px 10px;border-radius:6px}
+  .disc-row{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap;padding:10px;margin-bottom:8px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px}
+  .disc-row .acts{display:flex;gap:6px;flex-shrink:0}
+  .pill.red{background:#dc2626;border-color:#dc2626;color:#fff}
+  .alert-row.red{color:#991b1b;background:#fef2f2;border-color:#fca5a5}
+  .alert-row.red .dot{width:9px;height:9px;border-radius:50%;background:#dc2626;flex:none;box-shadow:0 0 0 3px #fecaca}
+  .hint.reel-block{color:#991b1b;background:#fef2f2;border:1px solid #fecaca;padding:9px 10px;border-radius:6px}
+  /* materials used per technician */
+  #byTech{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .bytech{min-width:520px}
+  .bytech td:first-child{width:auto;color:var(--text);font-weight:400}
+  .bytech tr.hd td{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);background:#fafbfc}
+  .bytech tr:not(.hd):not(.tot){cursor:pointer}
+  .bytech tr:not(.hd):not(.tot):hover{background:#f8fafc}
+  .bytech tr.sel{background:#fbf5e3!important;box-shadow:inset 3px 0 0 var(--gold)}
+  .bytech tr.tot td{font-weight:700;border-top:2px solid var(--border);background:#fafbfc;color:var(--text)}
+  .bytech td.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+  /* bottom navigation: navy active item with a gold marker */
+  .navbtn{font-weight:600}
+  .navbtn.on{color:var(--primary)}
+  .navbtn.on::before{background:var(--gold);height:3px}
+  /* section accent edges follow the brand */
+  #cbdPanelAdmin,#cbdPanelTech,#techPerfPanel{border-top-color:var(--primary)}
+  #trendPanelAdmin,#trendPanelTech{border-top-color:var(--gold)}
+  .nextup .btn{color:var(--primary)}
+</style>
 </head>
 <body>
 
 <!-- ============ LOADING SPLASH ============ -->
 <div id="splash">
-  <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><polygon points="50,6 62.4,38.2 96,38.2 68.8,58.6 80.9,92 50,71.8 19.1,92 31.2,58.6 4,38.2 37.6,38.2" fill="#f2c230"/></svg>
-  <div class="sp-title"><span>Star</span>Line Internet</div>
+  <img src="/logo.png" alt="StarLine Internet" class="sp-logo">
+  <div class="sp-title">FIELD OPS</div>
   <div class="spinner"></div>
   <div class="sp-sub">Loading, please wait…</div>
 </div>
 
 <header id="hdr" class="hidden">
   <button class="hbtn" id="backBtn" onclick="goBack()" style="display:none">‹ Back</button>
-  <div class="logo"><svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><polygon points="50,6 62.4,38.2 96,38.2 68.8,58.6 80.9,92 50,71.8 19.1,92 31.2,58.6 4,38.2 37.6,38.2" fill="#f2c230"/></svg></div>
-  <div>
-    <h1 id="hdrTitle"><span class="brand-star">Star</span>Line Internet</h1>
+  <img src="/logo.png" alt="StarLine Internet" class="hdr-logo">
+  <div class="hdr-txt">
+    <h1 id="hdrTitle">Field Ops</h1>
     <div class="sub" id="hdrSub"></div>
   </div>
   <div class="spacer"></div>
@@ -399,10 +482,13 @@
 
 <!-- ============ LOGIN ============ -->
 <div class="login-wrap" id="viewLogin">
-  <div class="login-logo"><svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><polygon points="50,6 62.4,38.2 96,38.2 68.8,58.6 80.9,92 50,71.8 19.1,92 31.2,58.6 4,38.2 37.6,38.2" fill="#f2c230"/></svg></div>
-  <div class="login-title"><span class="brand-star">Star</span>Line Internet</div>
-  <div class="login-sub">Field Ops — FTTH Installation &amp; Repair Ticketing</div>
+  <div class="login-brand">
+    <img src="/logo.png" alt="StarLine Internet">
+    <p>FIELD OPS</p>
+  </div>
   <div class="card">
+    <div class="login-h">Sign in</div>
+    <div class="login-sub">FTTH installation &amp; repair ticketing</div>
     <label>Username</label>
     <input id="lUser" autocomplete="username" autocapitalize="none">
     <label>Password</label>
@@ -425,6 +511,17 @@
   <div class="card compact" id="techStockPanel" onclick="go('materials')" style="cursor:pointer"></div>
   <div class="pills no-print" id="techStatusPills"></div>
   <div class="type-tabs no-print" id="techTypeTabs"></div>
+  <div class="filter-row no-print">
+    <select id="tSort" onchange="setTechSort(this.value)">
+      <option value="priority">Sort: priority (most urgent first)</option>
+      <option value="newest">Sort: newest first</option>
+      <option value="oldest">Sort: oldest first</option>
+      <option value="longest">Sort: longest running</option>
+      <option value="type">Sort: job type</option>
+      <option value="customer">Sort: customer name A–Z</option>
+      <option value="completed">Sort: recently completed</option>
+    </select>
+  </div>
   <div id="techList"></div>
 </div>
 
@@ -505,6 +602,27 @@
 
   <!-- usage: released vs used -->
   <div id="matUsage" class="hidden">
+    <div class="card" id="byTechCard">
+      <div class="sec-head"><div class="sec-title">👷 Used by each technician</div></div>
+      <div class="step-desc">What every technician's completed jobs consumed. Tap a technician to see only their items in the tables below.</div>
+      <div class="filter-row no-print">
+        <select id="btPeriod" onchange="renderByTech()">
+          <option value="month">This month</option>
+          <option value="lastmonth">Last month</option>
+          <option value="30">Last 30 days</option>
+          <option value="all">All time</option>
+        </select>
+        <select id="btSort" onchange="renderByTech()">
+          <option value="cable">Sort: most cable used</option>
+          <option value="conn">Sort: most connectors used</option>
+          <option value="items">Sort: most other items used</option>
+          <option value="jobs">Sort: most jobs</option>
+          <option value="name">Sort: name A–Z</option>
+        </select>
+      </div>
+      <div id="byTech"></div>
+    </div>
+    <div class="filter-note no-print hidden" id="usageTechNote"></div>
     <div class="card">
       <div class="sec-head"><div class="sec-title">Released vs used</div></div>
       <div class="step-desc">Every item issued to a technician, how much of it completed jobs consumed, and what is still on their hands.</div>
@@ -890,6 +1008,7 @@ const WORKFLOWS = {
     { key:'cable_start', title:'3. Fiber Cable — Starting Meter',
       desc:'Select which cable from your stock you will use for this installation, then check the meter marking on the reel, record how many meters are LEFT before lining, and take a photo of the actual cable showing that meter mark.',
       fields:[
+        {k:'cable_estimate', type:'number', label:'Estimated Cable Needed for This Run (m)', req:true, step:'1', placeholder:'e.g. 250', reelCheck:true},
         {k:'cable_reel', type:'reel_select', label:'Cable Type Used (from your stock)', req:true},
         {k:'cable_start', type:'number', label:'Cable Meters Left on Reel — BEFORE Lining (m)', req:true, placeholder:'e.g. 850', step:'0.1'},
         {k:'cable_start_photo', type:'photo', label:'Photo of Actual Cable Showing Meter Mark (Before)', req:true, autogps:true}
@@ -959,6 +1078,7 @@ const WORKFLOWS = {
     { key:'cable_start', title:'1. Fiber Cable — Starting Meter',
       desc:'Select which cable from your stock you will use for this NAP installation, then check the meter marking on the reel, record how many meters are left, and take a photo of the actual cable showing the exact meter mark.',
       fields:[
+        {k:'cable_estimate', type:'number', label:'Estimated Cable Needed for This Run (m)', req:true, step:'1', placeholder:'e.g. 250', reelCheck:true},
         {k:'cable_reel', type:'reel_select', label:'Cable Type Used (from your stock)', req:true},
         {k:'cable_start', type:'number', label:'Cable Meters Left on Reel — BEFORE the Job (m)', req:true, placeholder:'e.g. 1200', step:'0.1'},
         {k:'cable_start_photo', type:'photo', label:'Photo of Cable Showing Meter Mark (Before)', req:true, autogps:true}
@@ -1197,6 +1317,7 @@ const REPAIR_FLOWS = {
     { key:'cable_start', title:'3. Fiber Cable — Starting Meter',
       desc:'Select the cable you will pull from, record the meters left on the reel, and photograph the actual meter mark.',
       fields:[
+        {k:'cable_estimate', type:'number', label:'Estimated Cable Needed for This Run (m)', req:true, step:'1', placeholder:'e.g. 250', reelCheck:true},
         {k:'cable_reel', type:'reel_select', label:'Cable Type Used (from your stock)', req:true},
         {k:'cable_start', type:'number', label:'Cable Meters Left on Reel — BEFORE (m)', req:true, step:'0.1', placeholder:'e.g. 850'},
         {k:'cable_start_photo', type:'photo', label:'Photo of Cable Showing Meter Mark (Before)', req:true, autogps:true}
@@ -1315,7 +1436,7 @@ function doLogout(silent){
 }
 async function enterApp(){
   document.getElementById('hdr').classList.remove('hidden');
-  document.getElementById('hdrTitle').innerHTML = '<span class="brand-star">Star</span>Line Internet';
+  document.getElementById('hdrTitle').textContent = 'Field Ops';
   document.getElementById('hdrSub').textContent = (USER.role==='admin'?'Admin':'Technician')+' — '+USER.name;
   document.getElementById('bottomNav').classList.remove('hidden');
   await loadSettings();
@@ -1453,12 +1574,25 @@ const NAV = {
   ]
 };
 let currentTab = 'dash';
+/* Completed jobs whose cable or stock did not add up and the office has not reviewed yet. */
+function stockDiscrepancies(){
+  return tickets.filter(t=>t.status==='completed' && t.needsStockReview && !t.stockReviewed);
+}
+async function markStockReviewed(id){
+  const t = tickets.find(x=>x.id===id); if(!t) return;
+  const note = prompt('What did you find? (e.g. "Recounted reel — 250 m, meter misread" or "2nd reel used")', '');
+  if(note===null) return;
+  try{ await api('/api/tickets/'+id+'/stock-reviewed','POST',{ note }); await refreshTickets(); await loadReels(); renderMaterials(); }
+  catch(e){ alert(e.message); }
+}
 function renderNav(){
   if(!USER) return;
   const items = NAV[USER.role==='admin'?'admin':'tech'];
   const pending = USER.role==='admin' ? REQUESTS.filter(r=>r.status==='pending').length : 0;
+  const discN = USER.role==='admin' ? stockDiscrepancies().length : 0;
   document.getElementById('bottomNav').innerHTML = items.map(n=>{
-    const badge = (n.tab==='materials' && pending) ? `<span class="nbadge">${pending}</span>` : '';
+    const badge = (n.tab==='materials' && pending) ? `<span class="nbadge">${pending}</span>`
+      : (n.tab==='dash' && discN) ? `<span class="nbadge" title="Cable discrepancies to review">${discN}</span>` : '';
     return `<button class="navbtn ${currentTab===n.tab?'on':''}" onclick="go('${n.tab}')">
       <span class="ico">${n.ico}</span>${n.label}${badge}</button>`;
   }).join('');
@@ -1738,9 +1872,23 @@ function trendClickTech(ts){
   techStatus = techTrendDay!=null ? 'completed' : 'active';
   go('jobs');
 }
+/* The technician's own sort for My Jobs, remembered on this phone. */
+let techSort = (()=>{ try{ return localStorage.getItem('sl_tsort') || 'priority'; }catch(e){ return 'priority'; } })();
+function setTechSort(v){ techSort = v || 'priority'; try{ localStorage.setItem('sl_tsort', techSort); }catch(e){} renderTechList(); }
+function applyTechSort(list){
+  const by = (f)=>list.slice().sort(f);
+  const custName = t => String(t.customer||t.subject||'').toLowerCase();
+  if(techSort==='newest') return by((a,b)=>(b.created||0)-(a.created||0));
+  if(techSort==='oldest') return by((a,b)=>(a.created||0)-(b.created||0));
+  if(techSort==='longest') return by((a,b)=>(jobElapsed(b)||0)-(jobElapsed(a)||0));
+  if(techSort==='type') return by((a,b)=>String(a.type).localeCompare(String(b.type)) || (a.created||0)-(b.created||0));
+  if(techSort==='customer') return by((a,b)=>custName(a).localeCompare(custName(b)));
+  if(techSort==='completed') return by((a,b)=>(b.completed||0)-(a.completed||0));
+  return sortTickets(list);
+}
 function techFiltered(){
   const { dayStart, weekStart, monthStart } = periodStarts();
-  let list = sortTickets(tickets);
+  let list = applyTechSort(tickets);
   if(techType) list = list.filter(t=>t.type===techType);
   if(techTrendDay!=null) list = list.filter(t=>t.status==='completed' && t.completed && t.completed>=techTrendDay && t.completed<techTrendDay+86400000);
   else if(techPeriod){
@@ -1810,6 +1958,7 @@ function renderTechList(){
     `<button class="pill ${techStatus===v&&!techPeriod&&techTrendDay==null?'on':''}" onclick="setTechStatus('${v}')">${l}<span class="cnt">${c}</span></button>`).join('');
 
   renderTypeTabs('techTypeTabs', techType, 'setTechType');
+  const ts = document.getElementById('tSort'); if(ts) ts.value = techSort;
   const list = techFiltered();
   const el = document.getElementById('techList');
   if(!list.length){
@@ -2048,6 +2197,14 @@ function nextStep(){
   if(missing.length){ alert('Required before continuing:\n• '+missing.join('\n• ')); persist(t); renderTicket(); return; }
   const strayArea = badArea(t, s);
   if(strayArea){ alert(strayArea); persist(t); renderTicket(); return; }
+  const cableBad = cableProblem(t, s.fields);
+  if(cableBad){ persist(t); blockForCable(t, cableBad); return; }
+  if(s.fields.some(f=>f.k==='cable_start') && t.data.cable_start_override){
+    const reel = jobReel(t), st = parseFloat(t.data.cable_start);
+    if(reel && !isNaN(st) && reel.meters - st > REEL_TOL_M &&
+       !confirm('The system has '+reel.meters+' m on reel '+(reel.code||'')+', but you read '+st+' m.\n\n'+
+                Math.round((reel.meters-st)*100)/100+' m will be reported to the office as a discrepancy. Your meter-mark photo is the proof.\n\nContinue?')){ renderTicket(); return; }
+  }
   if(s.key==='materials' && t.type==='installation'){
     const start = parseFloat(t.data.cable_start), end = parseFloat(t.data.cable_end);
     if(!isNaN(start) && !isNaN(end)){
@@ -2097,10 +2254,13 @@ function finishTicket(){
   collectStep();
   const steps = getWorkflow(t);
   const missing = [];
-  steps.forEach(s=>s.fields.forEach(f=>{ if(f.req&&!hasValue(t,f)) missing.push(s.title.replace(/&amp;/g,'&')+': '+f.label); }));
+  /* Jobs that were already past the cable step when the estimate field was added do not need it. */
+  const optionalNow = f => f.k==='cable_estimate' && t.data.cable_start!==undefined && t.data.cable_start!=='';
+  steps.forEach(s=>s.fields.forEach(f=>{ if(f.req&&!optionalNow(f)&&!hasValue(t,f)) missing.push(s.title.replace(/&amp;/g,'&')+': '+f.label); }));
   if(missing.length){ alert('Still missing:\n• '+missing.join('\n• ')); renderTicket(); return; }
   /* Last gate before the job closes and the push fires. */
   for(const s of steps){ const bad = badArea(t, s); if(bad){ alert(bad); renderTicket(); return; } }
+  for(const s of steps){ const bad = cableProblem(t, s.fields); if(bad){ blockForCable(t, bad); return; } }
   /* Not a blocker — sometimes the account genuinely is not ready — but the
      office should not find this out weeks later. */
   if(t.type==='nap_install' && t.data.nap_planned_id && t.data.location && t.data.location.lat!=null){
@@ -2269,12 +2429,13 @@ function renderField(t,f){
     const ordered = [];
     Object.keys(byType).sort().forEach(k=> byType[k].forEach(r=>ordered.push(r)) );
     const sel = ordered.find(r=>r.id===v);
+    const est = cableEstimate(t);
     return `<label>${f.label}${reqMark}</label>
       <select id="f_${f.k}" onchange="onReelChange()">
         <option value="">— select cable —</option>
-        ${ordered.map(r=>`<option value="${esc(r.id)}" ${r.id===v?'selected':''}>${esc(r.code||'')} · ${esc(r.name)} — ${r.meters} m${activeIds[r.id]?' · USE THIS ONE':''}</option>`).join('')}
+        ${ordered.map(r=>`<option value="${esc(r.id)}" data-m="${r.meters}" data-base="${esc((r.code||'')+' · '+r.name+' — '+r.meters+' m'+(activeIds[r.id]?' · USE THIS ONE':''))}" ${r.id===v?'selected':''} ${est>r.meters&&r.id!==v?'disabled':''}>${esc(r.code||'')} · ${esc(r.name)} — ${r.meters} m${est>r.meters?' · TOO SHORT':activeIds[r.id]?' · USE THIS ONE':''}</option>`).join('')}
       </select>
-      ${reelPickerNote(sel, activeIds)}`;
+      ${reelPickerNote(sel, activeIds, est)}`;
   }
   if(f.type==='select'){
     if(!v && t.type==='nap_install'){
@@ -2341,8 +2502,26 @@ function renderField(t,f){
                    :'⚠ '+esc(v)+' is not one of billing\'s areas — pick from the list, or this job cannot reach billing.')
         : 'This is the NAP box and the billing area — one name for both, so an outage SMS reaches exactly this box.'}</p>`;
   }
+  if(f.k==='cable_start'){
+    const reel = jobReel(t);
+    if(reel && !t.data.cable_start_override){
+      /* Filled from the reel register and locked: the figure the system holds is the
+         starting point. A different meter mark goes through "My reading is different". */
+      return `<label>${f.label}${reqMark}</label>
+        <input type="number" id="f_${f.k}" value="${reel.meters}" readonly class="locked-num">
+        <p class="hint">Filled in from reel <b>${esc(reel.code||'')}</b> (${reel.meters} m on record). The meter-mark photo below must show this number.</p>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="startReadingDiffers(true)">My reading is different</button>`;
+    }
+    if(reel && t.data.cable_start_override){
+      return `<label>${f.label}${reqMark}</label>
+        <input type="number" step="0.1" id="f_${f.k}" value="${esc(v===undefined?'':v)}" placeholder="meters shown on the reel">
+        <p class="hint reel-warn">The system has <b>${reel.meters} m</b> on reel <b>${esc(reel.code||'')}</b>. Enter what the meter mark actually shows.
+          A lower reading is reported to the office as a <b>discrepancy</b>; a higher reading is not accepted until the office recounts the reel.</p>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="startReadingDiffers(false)">Use the system figure (${reel.meters} m)</button>`;
+    }
+  }
   const type = f.type==='number'?'number':'text';
-  const calc = f.cableCalc ? ` oninput="updateCableCalc()"` : '';
+  const calc = f.cableCalc ? ` oninput="updateCableCalc()"` : f.reelCheck ? ` inputmode="numeric" oninput="refreshReelOptions()"` : '';
   const calcBox = f.cableCalc ? `<div class="gps-out" id="cableCalcOut" style="margin-top:8px">${cableCalcText(t)}</div>` : '';
   return `<label>${f.label}${reqMark}</label>
     <input type="${type}" ${f.step?'step="'+f.step+'"':''} id="f_${f.k}" placeholder="${f.placeholder||''}" value="${esc(v||'')}"${calc}>${calcBox}`;
@@ -2986,8 +3165,10 @@ const REEL_EMPTY_M = 2, REEL_LOW_M = 100;
    short for today's run" problem BEFORE the cable is pulled — that is the moment
    a technician would otherwise improvise a mid-span joint, which StarLine does not
    allow, or quietly open a second reel that nobody records. */
-function reelPickerNote(sel, activeIds){
-  if(!sel) return `<p class="hint">Pick the cable type you need — the reel marked <b>USE THIS ONE</b> is the oldest of that type and should be finished first.</p>`;
+function reelPickerNote(sel, activeIds, est){
+  if(!sel) return `<p class="hint">Pick the cable type you need — the reel marked <b>USE THIS ONE</b> is the oldest of that type and should be finished first.${est>0?` Reels with less than <b>${est} m</b> are greyed out (TOO SHORT).`:''}</p>`;
+  if(est>0 && est>sel.meters) return `<p class="hint reel-block">⛔ <b>Not allowed:</b> reel <b>${esc(sel.code||'')}</b> has only <b>${sel.meters} m</b> left, but this run needs about <b>${est} m</b>.
+    Choose another reel with at least ${est} m, or request a fresh reel. Do not join two reels mid-span.</p>`;
   const bits = [];
   if(!activeIds[sel.id]) bits.push(`<b>${esc(sel.code||'')}</b> is not the oldest reel of this cable. Finish the one marked USE THIS ONE first, unless it is not on the truck.`);
   if(sel.meters<=REEL_LOW_M) bits.push(`<b>${esc(sel.code||'')} has only ${sel.meters} m left.</b> If today's run is longer than that, do <u>not</u> join mid-span — start a fresh reel for the whole run and keep this one for a short drop.`);
@@ -2995,6 +3176,82 @@ function reelPickerNote(sel, activeIds){
   const warn = sel.meters<=REEL_LOW_M;
   return `<p class="hint"${warn?' style="color:#92400e;background:#fef3c7;border:1px solid #fcd34d;padding:8px;border-radius:8px"':''}>${bits.join('<br>')}</p>`;
 }
+/* ---- "is this reel long enough?" ----
+   A reel can only be used for a run it can cover: StarLine does not join reels
+   mid-span. Example: a 1,000 m reel with 100 m left cannot be used for a 500 m run.
+   Checked when the reel is picked (against the estimate), when the BEFORE reading is
+   entered, and again with the real figure when the AFTER reading is entered. */
+const REEL_TOL_M = 5;     // reading slack between the meter mark and the tracked figure
+function cableEstimate(t){
+  const el = document.getElementById('f_cable_estimate');
+  const v = parseFloat(el ? el.value : (t && t.data ? t.data.cable_estimate : ''));
+  return v > 0 ? Math.round(v) : 0;
+}
+function jobReel(t){
+  return ((USER&&USER.inv&&USER.inv.cables)||[]).find(r=>r.id===(t.data||{}).cable_reel) || null;
+}
+function refreshReelOptions(){
+  const sel = document.getElementById('f_cable_reel'); if(!sel) return;
+  const t = byId(currentId), est = cableEstimate(t);
+  [...sel.options].forEach(o=>{
+    if(!o.value) return;
+    const m = parseFloat(o.dataset.m), short = est>0 && m<est;
+    o.disabled = short && !o.selected;
+    o.textContent = o.dataset.base.replace(' · USE THIS ONE','') + (short ? ' · TOO SHORT' : (o.dataset.base.includes('USE THIS ONE') ? ' · USE THIS ONE' : ''));
+  });
+  const note = sel.parentElement && sel.parentElement.querySelector('.hint');
+  const reel = ((USER&&USER.inv&&USER.inv.cables)||[]).find(r=>r.id===sel.value);
+  if(note){
+    const mine = ((USER&&USER.inv&&USER.inv.cables)||[]).filter(r=>r.meters>REEL_EMPTY_M && r.state!=='returning' && r.state!=='written_off');
+    const oldest = {}; mine.forEach(r=>{ if(!oldest[r.name] || (r.issuedAt||0) < (oldest[r.name].issuedAt||0)) oldest[r.name] = r; });
+    const activeIds = {}; Object.keys(oldest).forEach(k=>{ activeIds[oldest[k].id] = true; });
+    const tmp = document.createElement('div'); tmp.innerHTML = reelPickerNote(reel||null, activeIds, est);
+    note.replaceWith(tmp.firstElementChild);
+  }
+}
+/* Returns a message when the cable on this step cannot come from the chosen reel, else null. */
+function cableProblem(t, fields){
+  const d = t.data || {}, has = k => fields.some(f=>f.k===k);
+  const reel = jobReel(t);
+  if(!reel) return null;                         // reel not in this user's stock (e.g. office finishing a job)
+  const name = (reel.code||'') + ' (' + reel.name + ')';
+  const left = reel.meters;
+  const est = parseFloat(d.cable_estimate) || 0;
+  if(has('cable_reel') && has('cable_estimate') && est > left)
+    return `Reel ${name} has only ${left} m left, but this run needs about ${est} m.\n\nYou are not allowed to use this reel for this run — StarLine does not join two reels mid-span.\n\nChoose another reel with at least ${est} m, or request a fresh reel from the office.`;
+  const start = parseFloat(d.cable_start);
+  if(has('cable_start') && !isNaN(start) && start > left + REEL_TOL_M)
+    return `You entered ${start} m left on reel ${name}, but the system shows only ${left} m on it.\n\nRe-check the meter mark. If the reel really has more, ask the office to recount it (Materials → Reels) before you use it.`;
+  if(has('cable_end')){
+    const end = parseFloat(d.cable_end);
+    if(!isNaN(start) && !isNaN(end) && start - end > left + REEL_TOL_M)
+      return `This run used ${Math.round((start-end)*100)/100} m, but reel ${name} only had ${left} m.\n\nThis reel is lacking — you are not allowed to use it for this run. Go back to the "Fiber Cable — Starting Meter" step and choose a reel with enough cable.`;
+  }
+  if(has('cable_length')){
+    const len = parseFloat(d.cable_length);
+    if(len > left + REEL_TOL_M)
+      return `This job used ${len} m, but reel ${name} only has ${left} m.\n\nThis reel is lacking — choose a reel with enough cable in the "Cable Used" picker.`;
+  }
+  return null;
+}
+function startReadingDiffers(on){
+  const t = byId(currentId); if(!t) return;
+  collectStep();
+  const reel = jobReel(t);
+  if(on){ t.data.cable_start_override = true; t.data.cable_start = ''; }
+  else { delete t.data.cable_start_override; if(reel) t.data.cable_start = reel.meters; }
+  persist(t); renderTicket();
+}
+/* Shows the problem and, when the fix is on an earlier step, offers to go there. */
+function blockForCable(t, msg){
+  const steps = getWorkflow(t);
+  const at = steps.findIndex(s=>s.fields.some(f=>f.k==='cable_reel'));
+  if(at>=0 && at!==t.step && /Starting Meter/.test(msg)){
+    if(confirm(msg + '\n\nGo to that step now?')){ t.step = at; persist(t); }
+  } else alert(msg);
+  renderTicket();
+}
+
 /* Handing a reel back. It leaves the job picker straight away so no further cable
    can be drawn from it, but it stays on the technician's record until the office
    confirms it physically arrived — that gap is the accountability. */
@@ -3016,7 +3273,14 @@ function onReelChange(){
   const startEl = document.getElementById('f_cable_start');
   if(!sel) return;
   const reel = ((USER&&USER.inv&&USER.inv.cables)||[]).find(r=>r.id===sel.value);
-  if(reel && startEl && !startEl.value) startEl.value = reel.meters;
+  const tt = byId(currentId);
+  if(tt && startEl){
+    /* The BEFORE figure follows the chosen reel: re-draw the step so it shows locked. */
+    collectStep();
+    tt.data.cable_reel = sel.value;
+    if(!tt.data.cable_start_override) tt.data.cable_start = reel ? reel.meters : '';
+    persist(tt); renderTicket(); return;
+  }
   /* Refresh the note under the picker so the short-reel warning appears the
      moment a reel is chosen, not after the next re-render. */
   const note = sel.parentElement && sel.parentElement.querySelector('.hint');
@@ -3028,7 +3292,7 @@ function onReelChange(){
     const activeIds = {};
     Object.keys(oldest).forEach(k=>{ activeIds[oldest[k].id] = true; });
     const tmp = document.createElement('div');
-    tmp.innerHTML = reelPickerNote(reel, activeIds);
+    tmp.innerHTML = reelPickerNote(reel, activeIds, cableEstimate(byId(currentId)));
     note.replaceWith(tmp.firstElementChild);
   }
 }
@@ -3177,7 +3441,7 @@ function openSigModal(key){
     if(!ctx) return;
     ctx.scale(dpr,dpr);
     ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,c.offsetWidth,220);
-    ctx.lineWidth=2.5; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#0e2f55';
+    ctx.lineWidth=2.5; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#12304a';
     let drawing=false;
     const pos = ev => {
       const r=c.getBoundingClientRect();
@@ -3201,7 +3465,7 @@ function sigClear(){
     ctx.clearRect(0,0,c.width,c.height);
     ctx.fillStyle='#ffffff';
     ctx.fillRect(0,0,c.width,c.height);
-    ctx.fillStyle='#0e2f55';
+    ctx.fillStyle='#12304a';
   }
 }
 function sigSubmit(){
@@ -3489,6 +3753,8 @@ function renderDash(){
   const lowStock = users.filter(u=>u.role==='tech' && (((u.inv||{}).connectors||0)<5 || !((u.inv||{}).cables||[]).some(r=>r.meters>50)));
   const pendingReq = REQUESTS.filter(r=>r.status==='pending').length;
   const alerts = [];
+  const disc = stockDiscrepancies();
+  if(disc.length) alerts.push([`<span class="dot"></span>${disc.length} cable/stock discrepanc${disc.length===1?'y':'ies'} to review`, `matTab='reels';go('materials')`, 'red']);
   if(urgent.length) alerts.push([`⚡ ${urgent.length} urgent job${urgent.length===1?'':'s'} still open`, `dashPriority=1;go('tickets')`]);
   if(stale.length) alerts.push([`🕒 ${stale.length} job${stale.length===1?' has':'s have'} been running over 24 hours`, `dashStatus='in_progress';go('tickets')`]);
   if(unassigned.length) alerts.push([`👤 ${unassigned.length} unassigned job${unassigned.length===1?'':'s'}`, `dashStatus='';go('tickets')`]);
@@ -3498,7 +3764,7 @@ function renderDash(){
   alertEl.classList.toggle('hidden', !alerts.length);
   if(alerts.length){
     alertEl.innerHTML = `<div class="sec-head"><div class="sec-title">Needs attention</div></div>
-      ${alerts.map(([txt,act])=>`<div class="alert-row" style="cursor:pointer" onclick="${act}">${txt}<span style="margin-left:auto">›</span></div>`).join('')}`;
+      ${alerts.map(([txt,act,cls])=>`<div class="alert-row ${cls||''}" style="cursor:pointer" onclick="${act}">${txt}<span style="margin-left:auto">›</span></div>`).join('')}`;
   }
 
   const typeSel = t => dashType===t ? 'outline:3px solid var(--primary);outline-offset:-4px;' : '';
@@ -3733,9 +3999,56 @@ function renderInvPanel(){
 
 /* =================== ADMIN: MATERIAL USAGE (separate tab) =================== */
 let usageType = '';
+/* ---- admin: materials used per technician ---- */
+let usageTech = '';      // technician id the usage tables are narrowed to ('' = everyone)
+function setUsageTech(id){ usageTech = (usageTech===id) ? '' : id; renderMaterials(); }
+function byTechPeriod(){
+  const v = (document.getElementById('btPeriod')||{}).value || 'month';
+  const now = new Date(), m0 = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  if(v==='month') return [m0, Infinity, 'this month'];
+  if(v==='lastmonth') return [new Date(now.getFullYear(), now.getMonth()-1, 1).getTime(), m0, 'last month'];
+  if(v==='30') return [Date.now()-30*86400000, Infinity, 'the last 30 days'];
+  return [0, Infinity, 'all time'];
+}
+function renderByTech(){
+  const el = document.getElementById('byTech'); if(!el) return;
+  const [from, to, label] = byTechPeriod();
+  const per = {};
+  const row = (id, name) => per[id] || (per[id] = { id, name: name||'Unassigned', jobs:new Set(), cable:0, conn:0, items:{}, itemQty:0, short:0, reels:new Set() });
+  usageEvents(tickets).forEach(e=>{
+    if(!(e.ts>=from && e.ts<to)) return;
+    const t = e.ticket, r = row(t.assignedTo||'', t.assignedName);
+    r.jobs.add(t.id);
+    if(e.kind==='cable'){ r.cable += e.qty; if(t.data.cable_reel_code) r.reels.add(t.data.cable_reel_code); }
+    else if(e.kind==='connector') r.conn += e.qty;
+    else { r.items[e.name] = (r.items[e.name]||0) + e.qty; r.itemQty += e.qty; }
+  });
+  tickets.forEach(t=>{ const ts = t.completed||0; if(t.data && t.data.cable_shortfall && ts>=from && ts<to) row(t.assignedTo||'', t.assignedName).short += parseFloat(t.data.cable_shortfall)||0; });
+  (users||[]).filter(u=>u.role==='tech').forEach(u=>row(u.id, u.name));   // technicians with nothing used still show
+  const sort = (document.getElementById('btSort')||{}).value || 'cable';
+  const rows = Object.values(per).sort((a,b)=>
+    sort==='name' ? a.name.localeCompare(b.name)
+    : sort==='conn' ? b.conn-a.conn || a.name.localeCompare(b.name)
+    : sort==='items' ? b.itemQty-a.itemQty || a.name.localeCompare(b.name)
+    : sort==='jobs' ? b.jobs.size-a.jobs.size || a.name.localeCompare(b.name)
+    : b.cable-a.cable || a.name.localeCompare(b.name));
+  const r2 = n => Math.round(n*100)/100;
+  const tot = rows.reduce((s,r)=>({cable:s.cable+r.cable, conn:s.conn+r.conn, items:s.items+r.itemQty, jobs:s.jobs+r.jobs.size}), {cable:0,conn:0,items:0,jobs:0});
+  el.innerHTML = rows.length ? `<table class="summary-table bytech">
+    <tr class="hd"><td>Technician</td><td class="n">Jobs</td><td class="n">🧵 Cable</td><td class="n">🔌 FIC</td><td>📦 Other items</td></tr>
+    ${rows.map(r=>`<tr class="${usageTech===r.id?'sel':''}" onclick="setUsageTech('${esc(r.id)}')">
+      <td><b>${esc(r.name)}</b>${r.reels.size?`<div class="tmeta">Reels: ${[...r.reels].map(esc).join(', ')}</div>`:''}${r.short?`<div class="tmeta" style="color:var(--danger);font-weight:700">${r2(r.short)} m unaccounted</div>`:''}</td>
+      <td class="n">${r.jobs.size}</td>
+      <td class="n"><b>${r2(r.cable)} m</b></td>
+      <td class="n"><b>${r.conn}</b> pcs</td>
+      <td>${Object.keys(r.items).length ? Object.entries(r.items).sort((a,b)=>b[1]-a[1]).map(([n,q])=>`<span class="chip" style="margin:0 4px 4px 0">${esc(n)} × ${q}</span>`).join('') : '<span class="tmeta">—</span>'}</td>
+    </tr>`).join('')}
+    <tr class="tot"><td>Total — ${esc(label)}</td><td class="n">${tot.jobs}</td><td class="n">${r2(tot.cable)} m</td><td class="n">${tot.conn} pcs</td><td>${tot.items} pcs</td></tr>
+  </table>` : '<div class="tmeta">No technicians yet.</div>';
+}
 function setUsageType(v){ usageType = (usageType===v && v!=='') ? '' : v; renderUsage(); }
 function renderUsage(){
-  const used = tickets.filter(t=>t.invApplied && ((t.data&&t.data.cable_used)||(t.data&&parseInt(t.data.connectors))));
+  const used = (usageTech ? tickets.filter(t=>(t.assignedTo||'')===usageTech) : tickets).filter(t=>t.invApplied && ((t.data&&t.data.cable_used)||(t.data&&parseInt(t.data.connectors))));
   const splitRows = CBD_TYPES.map(([type,label])=>{
     const list = used.filter(t=>t.type===type);
     const meters = Math.round(list.reduce((s,t)=>s+(parseFloat(t.data.cable_used)||0),0)*100)/100;
@@ -3858,7 +4171,7 @@ async function loadReels(){
 /* What an admin actually has to act on: a reel promised back that has not arrived,
    a job that drew more than the reel held, or a reel too short to trust for a run. */
 function reelNeedsAttention(r){
-  return r.state==='returning' || (r.shortfall>0) || (r.holder==='tech' && r.state==='open' && r.meters<=REEL_LOW_M);
+  return r.state==='returning' || (r.shortfall>0) || (r.discrepancy>0) || (r.holder==='tech' && r.state==='open' && r.meters<=REEL_LOW_M);
 }
 function reelStateLabel(r){
   if(r.state==='returning') return ['Waiting to be handed in','#92400e','#fef3c7'];
@@ -3870,15 +4183,31 @@ function reelStateLabel(r){
 }
 function renderReels(){
   const alerts = REELS.filter(reelNeedsAttention);
-  document.getElementById('reelAlerts').innerHTML = alerts.length ? alerts.map(r=>{
+  const disc = stockDiscrepancies();
+  const discHtml = disc.map(t=>{
+    const d = t.data||{};
+    const what = d.cable_discrepancy ? `reel ${esc(d.cable_reel_code||'')} was ${d.cable_discrepancy} m short before the job (system ${d.cable_start_system} m, technician read ${d.cable_start} m)`
+      : d.cable_shortfall ? `the job used ${d.cable_shortfall} m more than reel ${esc(d.cable_reel_code||'')} held`
+      : d.connector_shortfall ? `${d.connector_shortfall} connector(s) more than the technician held` : 'stock did not add up';
+    return `<div class="disc-row">
+      <div><b style="color:#991b1b">🔴 ${esc(t.number)}</b> · ${esc(t.assignedName||'—')} · ${esc(new Date(t.completed||t.updated||Date.now()).toLocaleDateString())}
+        <div class="tmeta" style="color:#7f1d1d">${what}.</div>
+        ${d.cable_review?`<div class="tmeta">${esc(d.cable_review)}</div>`:''}</div>
+      <div class="acts"><button class="pill" onclick="openReport('${esc(t.id)}')">Open job</button>
+        <button class="pill red" onclick="markStockReviewed('${esc(t.id)}')">Mark reviewed</button></div>
+    </div>`;
+  }).join('');
+  document.getElementById('reelAlerts').innerHTML = discHtml + (alerts.length ? alerts.map(r=>{
     const why = r.state==='returning'
         ? `${esc(r.techName||'A technician')} marked it for return with ${r.meters} m on it — confirm when it physically arrives.`
       : r.shortfall>0
         ? `A job drew ${r.shortfall} m more than this reel held. Find out whether a second reel was used or the meter was misread.`
+      : r.discrepancy>0
+        ? `${r.discrepancy} m missing — a technician's BEFORE reading was lower than the system figure. Count the reel.`
         : `Only ${r.meters} m left with ${esc(r.techName||'the technician')} — not enough for a full run.`;
     return `<div class="tmeta" style="padding:8px 0;border-bottom:1px solid var(--line)">
       <b>${esc(r.code||'')}</b> · ${esc(r.name)} — ${why}</div>`;
-  }).join('') : '<div class="tmeta">Nothing to chase. Every reel is accounted for.</div>';
+  }).join('') : (disc.length ? '' : '<div class="tmeta">Nothing to chase. Every reel is accounted for.</div>'));
 
   /* One card per reel rather than a wide table: on a phone a six-column table
      pushes the action buttons off-screen, and the office often does this count
@@ -3900,6 +4229,7 @@ function renderReels(){
         · held by ${esc(r.holder==='office'?'the office':(r.techName||'—'))}
       </div>
       ${r.shortfall>0?`<div class="tmeta" style="color:var(--danger);font-weight:700">${r.shortfall} m unaccounted for on this reel</div>`:''}
+      ${r.discrepancy>0?`<div class="tmeta" style="color:var(--danger);font-weight:700">${r.discrepancy} m missing — technician's reading was lower than the system figure</div>`:''}
       <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
         <button class="pill" style="padding:3px 10px;font-size:12px" onclick="countReel('${esc(r.id)}','${esc(r.code||'')}',${r.meters})">Count it</button>
         ${r.state==='returning'?`<button class="pill" style="padding:3px 10px;font-size:12px" onclick="receiveReel('${esc(r.id)}','${esc(r.code||'')}',${r.meters})">Confirm received</button>`:''}
@@ -3927,7 +4257,7 @@ function renderReels(){
 }
 function reelEventLabel(e){
   return ({ issued:'Issued to technician', reissued:'Remnant re-issued', drawn:'Cable drawn on a job',
-    shortfall:'Drew more than the reel held', shortfall_recovered:'Negative balance repaired',
+    shortfall:'Drew more than the reel held', reading_discrepancy:'Reading lower than the system figure', reviewed:'Discrepancy reviewed by the office', shortfall_recovered:'Negative balance repaired',
     emptied:'Reel run down to empty', return_started:'Technician marked it for return',
     received:'Received back at the office', reconciled:'Physically counted',
     adjusted:'Metres changed by an admin', removed:'Removed from stock', written_off:'Written off' })[e] || e;
@@ -3990,9 +4320,16 @@ function renderMaterials(){
   document.getElementById('matStock').classList.toggle('hidden', matTab!=='stock');
   if(matTab==='requests') renderRequests();
   if(matTab==='usage'){
-    document.getElementById('usageRecon').innerHTML = reconTable(tickets, STOCKLOG);
+    renderByTech();
+    const tName = usageTech ? ((users||[]).find(u=>u.id===usageTech)||{}).name || (tickets.find(t=>t.assignedTo===usageTech)||{}).assignedName || 'this technician' : '';
+    const note = document.getElementById('usageTechNote');
+    note.classList.toggle('hidden', !usageTech);
+    if(usageTech) note.innerHTML = `<span>Showing only <b>${esc(tName)}</b> in the tables below</span><button onclick="setUsageTech('${esc(usageTech)}')">Show everyone</button>`;
+    const myTickets = usageTech ? tickets.filter(t=>(t.assignedTo||'')===usageTech) : tickets;
+    const myLog = usageTech ? STOCKLOG.filter(s=>(s.techId||'')===usageTech) : STOCKLOG;
+    document.getElementById('usageRecon').innerHTML = reconTable(myTickets, myLog);
     renderUsage();
-    const log = STOCKLOG.slice().sort((a,b)=>b.ts-a.ts).slice(0,80);
+    const log = myLog.slice().sort((a,b)=>b.ts-a.ts).slice(0,80);
     document.getElementById('releaseLog').innerHTML = log.length ? `<table class="summary-table">
       <tr><td style="width:24%">Released</td><td>Item</td><td>Qty</td><td>To</td></tr>
       ${log.map(s=>`<tr>

@@ -130,6 +130,8 @@ db.warehouse.remnants = db.warehouse.remnants || [];
  * starting a long run on a nearly-empty reel is what forces a mid-span joint. */
 const REEL_EMPTY_M = 2;
 const REEL_LOW_M = 100;
+/* Slack between a meter-mark reading and the system figure before it counts as a discrepancy. */
+const READING_TOL_M = 5;
 db.reelSeq = db.reelSeq || 0;
 /* Append-only audit trail: issued, drawn, shortfall, returned, received, reconciled.
    Nothing edits a reel's metres without leaving a row here. */
@@ -1255,6 +1257,30 @@ const server = http.createServer(async (req, res) => {
       }
     }
     /* Approve (or correct) the name of a box that was installed without being planned. */
+    /* The office has looked into a job's cable/stock discrepancy: it leaves the red alert. */
+    const stockRev = p.match(/^\/api\/tickets\/([\w.]+)\/stock-reviewed$/);
+    if (stockRev && req.method === 'POST') {
+      if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+      const t = db.tickets.find(x => x.id === stockRev[1]);
+      if (!t) return json(res, 404, { error: 'Ticket not found' });
+      const rb = await readBody(req);
+      const note = String(rb.note || '').trim();
+      t.stockReviewed = { at: Date.now(), by: me.name, note };
+      /* Settle the reel's open figures for this job too, so its "Needs attention" line clears. */
+      const code = (t.data || {}).cable_reel_code;
+      const reels = [];
+      db.users.forEach(u => ((u.inv && u.inv.cables) || []).forEach(r => reels.push(r)));
+      (db.warehouse.remnants || []).forEach(r => reels.push(r));
+      const reel = code ? reels.find(r => r.code === code) : null;
+      if (reel) {
+        const dsc = parseFloat(t.data.cable_discrepancy) || 0, sh = parseFloat(t.data.cable_shortfall) || 0;
+        if (dsc) reel.discrepancy = Math.max(0, round2((reel.discrepancy || 0) - dsc));
+        if (sh) reel.shortfall = Math.max(0, round2((reel.shortfall || 0) - sh));
+        logReel(reel, 'reviewed', { ticketId: t.id, ticketRef: t.ref || '', meters: round2(dsc + sh), by: me.name, note: note || 'Discrepancy reviewed by the office' });
+      }
+      saveDB();
+      return json(res, 200, { ticket: t });
+    }
     const approveNap = p.match(/^\/api\/tickets\/([\w.]+)\/approve-nap-name$/);
     if (approveNap && req.method === 'POST') {
       if (!isAdmin) return json(res, 403, { error: 'Admin only' });
@@ -1868,7 +1894,45 @@ const server = http.createServer(async (req, res) => {
                  recorded as a shortfall for the admin to settle. */
               if (cableUsed > 0 && t.data && t.data.cable_reel) {
                 const reel = tech.inv.cables.find(r => r.id === t.data.cable_reel);
-                if (reel) {
+                const d0 = t.data || {};
+                const startN = parseFloat(d0.cable_start), endN = parseFloat(d0.cable_end);
+                const byReading = reel && !isNaN(startN) && !isNaN(endN) && endN >= 0 && startN <= round2(reel.meters) + READING_TOL_M;
+                if (reel && byReading) {
+                  /* Start/end jobs: the reel is set to the AFTER reading, so the system always
+                     matches what is physically on the reel. When the technician's BEFORE reading
+                     was lower than the system figure, the gap is recorded as a discrepancy for
+                     the office instead of quietly disappearing. */
+                  const before = round2(reel.meters);
+                  const after = round2(Math.min(endN, before));
+                  const gap = round2(before - startN);
+                  reel.meters = after;
+                  reel.lastUsedAt = Date.now();
+                  t.data.cable_reel_name = reel.name;
+                  t.data.cable_reel_code = reel.code;
+                  t.data.cable_drawn = round2(cableUsed);
+                  t.data.cable_start_system = before;
+                  logReel(reel, 'drawn', {
+                    techId: tech.id, techName: tech.name, ticketId: t.id, ticketRef: t.ref || '',
+                    meters: round2(cableUsed), before, after: reel.meters
+                  });
+                  if (gap > READING_TOL_M) {
+                    reel.discrepancy = round2((reel.discrepancy || 0) + gap);
+                    t.data.cable_discrepancy = gap;
+                    t.data.cable_review =
+                      'Reel ' + reel.code + ' should have had ' + before + ' m, but the technician read ' + startN +
+                      ' m before the job. ' + gap + ' m is missing from the reel — check the meter-mark photo, then count the reel.';
+                    t.needsStockReview = true;
+                    delete t.stockReviewed;
+                    logReel(reel, 'reading_discrepancy', {
+                      techId: tech.id, techName: tech.name, ticketId: t.id, ticketRef: t.ref || '',
+                      meters: gap, expected: before, counted: startN, variance: round2(-gap), note: t.data.cable_review
+                    });
+                  }
+                  if (reel.meters <= REEL_EMPTY_M && reel.state === 'open') {
+                    reel.state = 'empty';
+                    logReel(reel, 'emptied', { techId: tech.id, techName: tech.name, after: reel.meters });
+                  }
+                } else if (reel) {
                   const before = round2(reel.meters);
                   const drawn = Math.min(cableUsed, before);
                   reel.meters = round2(before - drawn);
@@ -1889,6 +1953,7 @@ const server = http.createServer(async (req, res) => {
                       ' only held ' + before + ' m. ' + short + ' m is unaccounted — check whether a' +
                       ' second reel was used, or the meter reading was misread.';
                     t.needsStockReview = true;
+                    delete t.stockReviewed;
                     logReel(reel, 'shortfall', {
                       techId: tech.id, techName: tech.name, ticketId: t.id, ticketRef: t.ref || '',
                       meters: short, note: t.data.cable_review
