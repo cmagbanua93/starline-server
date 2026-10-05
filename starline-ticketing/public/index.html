@@ -1105,10 +1105,10 @@ const WORKFLOWS = {
         {k:'nap_reading_photo', type:'photo', label:'Photo of Power Meter Reading', autogps:true}
       ]},
     { key:'post', title:'4. Post Location',
-      desc:'Take a photo of the actual post where the NAP box is installed and capture its GPS coordinates.',
+      desc:'Stand at the post and take a photo showing the installed NAP box. The GPS of this photo is saved as the box\'s position on the map.',
       fields:[
-        {k:'post_photo', type:'photo', label:'Photo of the Post with NAP Box', req:true, autogps:true},
-        {k:'location', type:'gps', label:'GPS Coordinates of the Post', req:true}
+        {k:'post_photo', type:'photo', label:'Photo of the Post with NAP Box', req:true, autogps:true, setsGps:'location'},
+        {k:'location', type:'gps', label:'GPS of the Post (from the photo)', req:true, fromPhoto:'post_photo'}
       ]},
     { key:'materials', title:'5. Materials &amp; Completion',
       desc:'Check the reel meter again and take a photo of the actual cable showing the meter mark — the system auto-computes cable used and deducts it from the cable you selected in Step 1 when the job is completed.',
@@ -2243,6 +2243,8 @@ function nextStep(){
   if(missing.length){ alert('Required before continuing:\n• '+missing.join('\n• ')); persist(t); renderTicket(); return; }
   const strayArea = badArea(t, s);
   if(strayArea){ alert(strayArea); persist(t); renderTicket(); return; }
+  const weak = s.fields.find(f=>f.type==='gps' && t.data[f.k] && (t.data[f.k].src==='phone' || t.data[f.k].src==='photo') && t.data[f.k].acc > GPS_GOOD_M);
+  if(weak && !confirm(`The GPS fix for "${weak.label}" is only accurate to ±${t.data[weak.k].acc} m, so the pin on the map may be far from the real spot.\n\nTap Cancel and "Use My GPS Location" again while standing at the post, outdoors. Tap OK to keep it anyway.`)){ renderTicket(); return; }
   const cableBad = cableProblem(t, s.fields);
   if(cableBad){ persist(t); blockForCable(t, cableBad); return; }
   if(s.fields.some(f=>f.k==='cable_start') && t.data.cable_start_override){
@@ -2270,7 +2272,12 @@ function collectStep(){
     if(f.type==='photo'||f.type==='signature'||f.type==='nap_picker'||f.type==='feeder_picker'||f.type==='pppoe_link') return;
     if(f.type==='gps'){
       const lat=document.getElementById('f_'+f.k+'_lat'), lng=document.getElementById('f_'+f.k+'_lng');
-      if(lat&&lng&&lat.value&&lng.value) t.data[f.k]={lat:parseFloat(lat.value),lng:parseFloat(lng.value)};
+      if(lat&&lng&&lat.value&&lng.value){
+        const prev = t.data[f.k] || {}, nl = parseFloat(lat.value), ng = parseFloat(lng.value);
+        const same = prev.lat===nl && prev.lng===ng;
+        /* keep how the fix was taken; a hand-typed change is marked as typed */
+        t.data[f.k] = same ? Object.assign({}, prev, {lat:nl, lng:ng}) : {lat:nl, lng:ng, src:'typed'};
+      }
       return;
     }
     if(f.type==='items_used'){
@@ -2413,15 +2420,28 @@ function renderField(t,f){
     return `<label>${f.label}${reqMark}</label>
       <div class="photo-box ${v&&v.img?'has':''}" onclick="openCamera('${f.k}',${!!f.autogps})">${inner}</div>`;
   }
+  if(f.type==='gps' && f.fromPhoto && !t.data[f.k+'_manual']){
+    if(v && v.lat!=null && v.src==='photo'){
+      return `<label>${f.label}${reqMark}</label>
+        <div class="gps-out">${gpsSourceText(v)}</div>
+        <p class="hint">Taken from the post photo above. If it is wrong, retake the photo while standing at the post, outdoors.
+          <a href="#" onclick="gpsManual('${f.k}',true);return false">Enter coordinates by hand instead</a></p>`;
+    }
+    return `<label>${f.label}${reqMark}</label>
+      <div class="gps-out" style="background:#fef3c7;border-color:#fcd34d;color:#92400e">${t.data[f.fromPhoto] ? 'Waiting for the photo\'s GPS… if it does not appear, allow location for this site and retake the photo.' : 'Take the post photo above — its GPS becomes the box\'s position on the map.'}</div>
+      <p class="hint"><a href="#" onclick="gpsManual('${f.k}',true);return false">No GPS on the phone? Enter coordinates by hand</a></p>`;
+  }
   if(f.type==='gps'){
     const lat=v&&v.lat!=null?v.lat:'', lng=v&&v.lng!=null?v.lng:'';
-    return `<label>${f.label}${reqMark}</label>
+    const backToPhoto = f.fromPhoto ? `<p class="hint"><a href="#" onclick="gpsManual('${f.k}',false);return false">Use the photo's GPS instead</a></p>` : '';
+    return `<label>${f.label}${reqMark}</label>${backToPhoto}
       <div class="row2">
         <input type="number" step="any" id="f_${f.k}_lat" placeholder="Latitude" value="${lat}">
         <input type="number" step="any" id="f_${f.k}_lng" placeholder="Longitude" value="${lng}">
       </div>
       <button class="btn btn-ghost btn-sm" onclick="getGPS('${f.k}')">📍 Use My GPS Location</button>
-      <div class="gps-out hidden" id="f_${f.k}_out"></div>`;
+      <div class="gps-out ${v&&v.lat!=null?'':'hidden'}" id="f_${f.k}_out">${v&&v.lat!=null ? gpsSourceText(v) : ''}</div>
+      <p class="hint">Stand right at the post/house when you tap the button. Use the phone outdoors, not inside a vehicle or building — a weak fix can be 100 m or more off.</p>`;
   }
   if(f.type==='items_used'){
     /* only the items the office actually issued to this technician can be booked out */
@@ -3426,6 +3446,9 @@ function fallbackCameraInput(key, autogps){
 function savePhoto(key, img, autogps){
   const t = byId(currentId);
   t.data[key] = { img, time: Date.now() };
+  /* a new post photo means a new position: forget the old one until this photo's GPS arrives */
+  const setsDef = getWorkflow(t).flatMap(st=>st.fields).find(f=>f.k===key && f.setsGps);
+  if(setsDef && t.data[setsDef.setsGps] && t.data[setsDef.setsGps].src==='photo') delete t.data[setsDef.setsGps];
   persist(t); renderTicket();
   /* Look the entry up by key each time: persist() swaps t.data for the server's
      copy (base64 -> /photos/ URL), so a captured object reference would go stale. */
@@ -3433,7 +3456,10 @@ function savePhoto(key, img, autogps){
     const cur = byId(t.id);
     const d = cur && cur.data && cur.data[key];
     if(!d) return;
-    d.lat = pn.coords.latitude; d.lng = pn.coords.longitude;
+    d.lat = pn.coords.latitude; d.lng = pn.coords.longitude; d.acc = Math.round(pn.coords.accuracy);
+    /* A photo that sets a position (the NAP post photo): its GPS is the box's location. */
+    const def = getWorkflow(cur).flatMap(st=>st.fields).find(f=>f.k===key && f.setsGps);
+    if(def) cur.data[def.setsGps] = { lat:+pn.coords.latitude.toFixed(6), lng:+pn.coords.longitude.toFixed(6), acc:d.acc, src:'photo', at:Date.now() };
     persist(cur); renderTicket();
   };
   if(autogps && navigator.geolocation){
@@ -3445,6 +3471,26 @@ function savePhoto(key, img, autogps){
 }
 
 /* =================== GPS =================== */
+const GPS_GOOD_M = 25;   // a fix worse than this is flagged before the step can be left
+function gpsSourceText(v){
+  if(!v || v.lat==null) return '';
+  const at = `${Number(v.lat).toFixed(6)}, ${Number(v.lng).toFixed(6)}`;
+  if(v.src==='typed') return `✎ ${at} — typed in by hand`;
+  if(v.acc!=null) return `${v.acc>GPS_GOOD_M?'⚠':'✔'} ${at} — ${v.src==='photo'?'photo':'phone'} GPS ±${v.acc} m${v.acc>GPS_GOOD_M?(v.src==='photo'?' (weak fix — retake the photo outdoors at the post)':' (weak fix — tap again outdoors at the post)'):''}`;
+  return `✔ ${at}`;
+}
+function gpsManual(key, on){
+  const t = byId(currentId); if(!t) return;
+  collectStep();
+  if(on) t.data[key+'_manual'] = true;
+  else {
+    delete t.data[key+'_manual'];
+    const def = getWorkflow(t).flatMap(st=>st.fields).find(f=>f.k===key && f.fromPhoto);
+    const ph = def && t.data[def.fromPhoto];
+    if(ph && ph.lat!=null) t.data[key] = { lat:+Number(ph.lat).toFixed(6), lng:+Number(ph.lng).toFixed(6), acc:ph.acc, src:'photo' };
+  }
+  persist(t); renderTicket();
+}
 function getGPS(key){
   const out = document.getElementById('f_'+key+'_out');
   if(!navigator.geolocation){ alert('GPS not available on this device/browser.'); return; }
@@ -3452,8 +3498,10 @@ function getGPS(key){
   navigator.geolocation.getCurrentPosition(pn=>{
     document.getElementById('f_'+key+'_lat').value = pn.coords.latitude.toFixed(6);
     document.getElementById('f_'+key+'_lng').value = pn.coords.longitude.toFixed(6);
-    out.textContent = `✔ ${pn.coords.latitude.toFixed(6)}, ${pn.coords.longitude.toFixed(6)} (±${Math.round(pn.coords.accuracy)} m)`;
-    const t=byId(currentId); collectStep(); persist(t);
+    const t=byId(currentId); collectStep();
+    t.data[key] = { lat:+pn.coords.latitude.toFixed(6), lng:+pn.coords.longitude.toFixed(6), acc:Math.round(pn.coords.accuracy), src:'phone', at:Date.now() };
+    out.textContent = gpsSourceText(t.data[key]);
+    persist(t);
   }, err=>{ out.textContent='✖ GPS failed: '+err.message+'. Type coordinates manually.'; },
   {enableHighAccuracy:true, timeout:12000});
 }
@@ -5045,7 +5093,7 @@ function renderSummary(t, targetId){
     const v=t.data[f.k];
     if(v==null||v==='') return;
     if(f.type==='photo'){ if(v.img) photos.push({cap:f.label+(v.time?' — '+fmt(v.time):''),img:v.img,gps:v.lat!=null?`${v.lat.toFixed(6)}, ${v.lng.toFixed(6)}`:null}); if(v.lat!=null) add(f.label+' GPS', v.lat.toFixed(6)+', '+v.lng.toFixed(6)); return; }
-    if(f.type==='gps'){ add(f.label, v.lat.toFixed(6)+', '+v.lng.toFixed(6)); return; }
+    if(f.type==='gps'){ add(f.label, Number(v.lat).toFixed(6)+', '+Number(v.lng).toFixed(6) + (v.src==='typed' ? ' (typed in)' : v.acc!=null ? ' ('+(v.src==='photo'?'from post photo, ':'phone GPS ')+'±'+v.acc+' m)' : '')); return; }
     if(f.type==='signature'){ return; }
     if(f.type==='reel_select'){ add(f.label, t.data[f.k+'_name']||t.data.cable_reel_name||'(cable reel)'); return; }
     if(f.type==='items_used'){ const txt=itemsUsedText(v); if(txt) rows.push([f.label, txt]); return; }
