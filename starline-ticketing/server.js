@@ -462,6 +462,8 @@ function napInstallPayload(t) {
     ticketId: t.id,
     /* Picked from the office's planned boxes: the map finishes that box (its name, moved to this GPS). */
     plannedId: d.nap_planned_id || undefined,
+    /* Sub-main box: second cassette on port 1 of the first (see FTTH addCompanionCassette). */
+    combo: String(d.nap_layout || '').startsWith('Sub-main') ? { secondary_ports: parseInt(d.nap_combo_ports, 10) || 8 } : undefined,
     nap: {
       name,
       area: name,                       // one value names the box and its billing area
@@ -562,6 +564,24 @@ async function registerBillingArea(t) {
     t.areaSync = { state: 'failed', at: Date.now(), error: e.name === 'TimeoutError' ? 'billing did not answer in time' : e.message };
     console.error(`[area] NAP job ${t.number} (${name}) not registered: ${t.areaSync.error}`);
   }
+  /* A sub-main box also holds its second cassette (AREA-LCP1-SUB1-NAP1), which is
+     its own billing area: subscribers on it are filed under that name. */
+  const comp = t.ftthSync && t.ftthSync.state === 'done' ? String(t.ftthSync.companionName || '').trim() : '';
+  if (t.areaSync && t.areaSync.state === 'done' && comp) {
+    try {
+      const r2 = await fetch(MONITOR_URL + '/api/billing-area', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': MONITOR_TOKEN },
+        body: JSON.stringify({ area: comp }),
+        signal: AbortSignal.timeout(45000),
+      });
+      const o2 = await r2.json().catch(() => ({}));
+      if (r2.ok && o2.ok) t.areaSync.message += ` · "${o2.area}" (second cassette) ${o2.created ? 'added too' : 'already there'}`;
+      else t.areaSync = { state: 'failed', at: Date.now(), error: `second cassette "${comp}": ` + (o2.error || ('billing returned HTTP ' + r2.status)) };
+    } catch (e) {
+      t.areaSync = { state: 'failed', at: Date.now(), error: `second cassette "${comp}": ` + (e.name === 'TimeoutError' ? 'billing did not answer in time' : e.message) };
+    }
+  }
   saveDB();
 }
 
@@ -594,13 +614,16 @@ async function pushNapInstall(t) {
     if (!r.link) todo.push('draw the cable run from its feeding box');
     t.ftthSync = {
       state: 'done', at: Date.now(), deviceId: dev.id, deviceName: dev.name,
+      companionId: r.companion ? r.companion.id : undefined,
+      companionName: r.companion ? r.companion.name : undefined,
       created: r.created !== false,
       linked: !!r.link,
       sized,
       movedMeters: r.planned ? r.movedMeters : undefined,
       message: (r.planned ? `Planned box finished on the map — pin moved ${r.movedMeters} m to the actual post`
         : r.created === false ? 'Already on the map' : 'Placed on the map at the recorded GPS')
-        + (todo.length ? ' — still to do on the map: ' + todo.join('; ') : ' and connected to its feeding box'),
+        + (todo.length ? ' — still to do on the map: ' + todo.join('; ') : ' and connected to its feeding box')
+        + (r.companion ? ` · second cassette "${r.companion.name}" added on port 1` : ''),
     };
   } catch (e) {
     const permanent = e.code === 400;
@@ -1248,6 +1271,12 @@ const server = http.createServer(async (req, res) => {
         try {
           await ftthCall('PATCH', '/api/devices/' + encodeURIComponent(t.ftthSync.deviceId), { name, area: name });
           t.ftthSync.deviceName = name;
+          /* Its second cassette follows the box's name: <box>-NAP1. */
+          if (t.ftthSync.companionId) {
+            const cn = name + '-NAP1';
+            await ftthCall('PATCH', '/api/devices/' + encodeURIComponent(t.ftthSync.companionId), { name: cn, area: cn });
+            t.ftthSync.companionName = cn;
+          }
         } catch (e) {
           return json(res, e.code || 502, { error: 'Could not rename the box on the map: ' + e.message });
         }

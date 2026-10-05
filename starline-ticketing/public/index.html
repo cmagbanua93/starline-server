@@ -976,7 +976,9 @@ const WORKFLOWS = {
       desc:'Install the new NAP box on the post, take a photo of it with its tagging, and record its optical reading.',
       fields:[
         {k:'nap_id', type:'planned_nap', label:'Which planned NAP box are you installing?', req:true},
-        {k:'nap_ports', type:'select', label:'Box Size (ports)', req:true, options:['4','8','12','16']},
+        {k:'nap_ports', type:'select', label:'Box Size (ports) — for a Sub-main, the size of the first cassette', req:true, options:['4','8','12','16']},
+        {k:'nap_layout', type:'select', label:'Cassettes in this box', options:['One cassette','Sub-main: second cassette on port 1 of the first']},
+        {k:'nap_combo_ports', type:'select', label:'Second cassette size (Sub-main only)', options:['8','4','12','16']},
         {k:'nap_box_photo', type:'photo', label:'Photo of New NAP Box with Tagging', req:true, autogps:true},
         {k:'nap_reading', type:'number', label:'NAP Box Reading (dBm)', req:true, placeholder:'e.g. -18.5', step:'0.1'},
         {k:'nap_reading_photo', type:'photo', label:'Photo of Power Meter Reading', autogps:true}
@@ -2106,7 +2108,13 @@ function finishTicket(){
     if(pl){ const m = metres(pl, t.data.location);
       if(m>150 && !confirm('The post GPS is '+fmtDist(m)+' away from where '+t.data.nap_id+' was planned.\n\nIf this really is '+t.data.nap_id+', the map will move it to your GPS. Complete the job?')){ renderTicket(); return; } }
   }
-  if(t.type==='nap_install' && t.data.nap_unplanned && t.data.nap_id) t.data.nap_id = String(t.data.nap_id).trim().toUpperCase();
+  if(t.type==='nap_install' && String(t.data.nap_layout||'').startsWith('Sub-main') && parseInt(t.data.nap_ports,10) < 2){
+    alert('A Sub-main box needs its first cassette size (usually 4) under Box Size.'); renderTicket(); return;
+  }
+  if(t.type==='nap_install' && t.data.nap_unplanned && t.data.nap_id){
+    t.data.nap_id = String(t.data.nap_id).trim().toUpperCase().replace(/\s+/g,'');
+    if(!napNameOk(t.data.nap_id) && !confirm('"'+t.data.nap_id+'" does not follow the naming rule (e.g. TUNGKIL-LCP1-SUB1-NAP2).\n\nThe office will correct it before it reaches billing. Complete anyway?')){ renderTicket(); return; }
+  }
   if(t.type==='repair' && t.data.modem_action===SWAP_ACTION && !t.data.swap_pppoe){
     alert('You chose "'+SWAP_ACTION+'".\n\nSearch and pick the PPPoE account programmed in the replacement modem (Step 3), so billing can move it to this subscriber.');
     renderTicket(); return;
@@ -2121,7 +2129,7 @@ function finishTicket(){
 
 /* ---------- field renderers ---------- */
 function renderField(t,f){
-  const v = t.data[f.k];
+  let v = t.data[f.k];
   const reqMark = f.req?' <span class="req">*</span>':'';
   if(f.type==='pppoe_link'){
     const linked = t.pppoeUsername
@@ -2155,8 +2163,8 @@ function renderField(t,f){
     }
     if(d.nap_unplanned){
       return `<label>${f.label}${reqMark}</label>
-        <div class="ctx-warn">This box is <b>not on the office's plan</b>. Type a name in the format <b>BARANGAY - NAP number</b> (e.g. TUNGKIL - NAP 4). The office approves the name before it is added to billing.</div>
-        <input type="text" id="f_${f.k}" value="${esc(v||'')}" placeholder="e.g. TUNGKIL - NAP 4" style="text-transform:uppercase">
+        <div class="ctx-warn">This box is <b>not on the office's plan</b>. Use the naming rule, no spaces: <b>AREA-LCP1</b> (main), <b>AREA-LCP1-SUB1</b> (sub-main on port 1 of the LCP), <b>AREA-LCP1-SUB1-NAP2</b> (port 2 of that sub-main). The next step suggests the name from the port you pick. The office approves the name before it is added to billing.</div>
+        <input type="text" id="f_${f.k}" value="${esc(v||'')}" placeholder="e.g. TUNGKIL-LCP1-SUB1-NAP2" style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase().replace(/\s+/g,'')">
         <button type="button" class="btn btn-ghost btn-sm" onclick="usePlannedList()">‹ Pick from the map instead</button>`;
     }
     return `<label>${f.label}${reqMark}</label>
@@ -2186,6 +2194,9 @@ function renderField(t,f){
       : '';
     return `<label>${f.label}${reqMark}</label>
       ${chosen}
+      ${napNameCheckHtml(t)}
+      <div class="tmeta">Tap a box on the map (green = has free ports, grey = full) or in the list, then pick the port. Your position is the blue dot.</div>
+      <div id="feederMap" class="plan-map"></div>
       <div id="feederPickWrap" class="nap-wrap"><div class="tmeta">Loading boxes from the FTTH map…</div></div>
       <div class="tmeta" style="margin-top:6px">Pick the box and the port the new NAP is fed from. If the feeding box is not on the map yet, leave this — the job still completes, and the new box is placed without its cable run drawn.</div>`;
   }
@@ -2266,6 +2277,13 @@ function renderField(t,f){
       ${reelPickerNote(sel, activeIds)}`;
   }
   if(f.type==='select'){
+    if(!v && t.type==='nap_install'){
+      /* The name already says what kind of box it is: AREA-LCP1-SUB1 is a 4-port with an 8-port on port 1. */
+      const nm = String(t.data.nap_id||'').toUpperCase(), sub = /-SUB\d+$/.test(nm);
+      if(f.k==='nap_layout') v = sub ? 'Sub-main: second cassette on port 1 of the first' : (nm ? 'One cassette' : '');
+      if(f.k==='nap_combo_ports' && sub) v = '8';
+      if(f.k==='nap_ports') v = (sub || /-LCP\d+$/.test(nm)) ? '4' : (/-NAP\d+$/.test(nm) ? '8' : '');
+    }
     return `<label>${f.label}${reqMark}</label>
       <select id="f_${f.k}">
         <option value="">— select —</option>
@@ -2519,6 +2537,36 @@ async function clearPlannedNap(){
   ['nap_planned_id','nap_planned_lat','nap_planned_lng','nap_id'].forEach(k=>delete t.data[k]);
   await persist(t); renderTicket();
 }
+/* ---- NAP naming convention (same rule as the FTTH map) ----
+   AREA-LCP<k>               main 4-port cassette on a PON (AREA = barangay/sitio code, no spaces; k = 1st, 2nd LCP in the area)
+   AREA-LCP<k>-SUB<p>        sub-main 4-port box on port p of that LCP
+   AREA-LCP<k>-SUB<p>-NAP<n> 8-port box on port n of that sub-main (NAP1 = the cassette inside the sub-main box)
+   AREA-LCP<k>-NAP<n>        8-port box fed straight from port n of the LCP
+   The numbers are the PORT the box is fed from, so a name tells the technician where its fiber lands. */
+const NAP_NAME_RE = /^[A-Z0-9]+-LCP\d{1,2}(-SUB\d{1,2}(-NAP\d{1,2})?|-NAP\d{1,2})?$/;
+const napNameOk = n => NAP_NAME_RE.test(String(n||'').trim().toUpperCase());
+/* Names a box fed from port `portNo` of `feeder` may carry (first = the usual one). */
+function napNamesFor(feeder, portNo){
+  const f = String(feeder||'').trim().toUpperCase(), n = parseInt(portNo,10);
+  if(!napNameOk(f) || !n) return [];
+  const m = /-LCP\d+$/.test(f);
+  if(m) return [f+'-SUB'+n, f+'-NAP'+n];
+  return [f+'-NAP'+n];
+}
+function napNameCheckHtml(t){
+  const d = t.data||{}, names = napNamesFor(d.main_nap, d.feeder_port_no);
+  if(!d.feeder_port_id || !names.length || !d.nap_id) return '';
+  const cur = String(d.nap_id).trim().toUpperCase();
+  if(names.includes(cur)) return `<div class="sync-ok">✓ ${esc(cur)} matches port ${esc(d.feeder_port_no)} of ${esc(d.main_nap)}</div>`;
+  if(d.nap_unplanned) return `<div class="ctx-warn">By the naming rule, a box on port ${esc(d.feeder_port_no)} of ${esc(d.main_nap)} is <b>${esc(names[0])}</b>.
+      <div class="wizard-btns">${names.map(n=>`<button type="button" class="btn btn-primary btn-sm" onclick="useNapName('${esc(n)}')">Use ${esc(n)}</button>`).join('')}</div></div>`;
+  return `<div class="ctx-warn">The plan calls this box <b>${esc(cur)}</b>, but a box on port ${esc(d.feeder_port_no)} of ${esc(d.main_nap)} would be <b>${esc(names[0])}</b>.
+      Check that the fiber is on the right port. If the port is right, finish the job and tell the office to rename the box.</div>`;
+}
+async function useNapName(n){
+  const t = byId(currentId); if(!t) return; collectStep();
+  t.data.nap_id = n; await persist(t); renderTicket();
+}
 async function markUnplanned(){
   const t = byId(currentId); if(!t) return;
   if(!confirm('Only use this if the office did NOT plan this box on the map.\n\nYou will type the name and the office must approve it before it reaches billing. Continue?')) return;
@@ -2742,7 +2790,7 @@ async function chooseNapPort(napId, portId){
   const previous = t.data.nap_port_id;
   t.data.nap_device_id = napId;
   t.data.nap_port_id   = portId;
-  t.data.nap_id        = nap.name;
+  t.data.nap_id        = nap.area || nap.name;      // the billing area (a box's second cassette shares the box's area)
   t.data.nap_port      = 'Port ' + port.port_no + (port.fiber_color? ' ('+port.fiber_color+')' : '') + ' of ' + nap.counts.total;
   await persist(t);
   if(previous && previous !== portId){
@@ -2785,9 +2833,10 @@ async function loadFeederPicker(){
     const loc = t.data && t.data.location;
     if(loc && loc.lat!=null && loc.lng!=null){ qs.set('lat', loc.lat); qs.set('lng', loc.lng); }
     const d = await api('/api/ftth/naps' + (qs.toString()?'?'+qs.toString():''));
-    FEEDERS = d.naps || [];
+    FEEDERS = (d.naps || []).filter(n => n.status !== 'planned');   // a box not built yet cannot feed anything
     if(!FEEDER_OPEN && t.data.feeder_device_id) FEEDER_OPEN = t.data.feeder_device_id;
     renderFeederList();
+    drawFeederMap();
   }catch(e){
     wrap.innerHTML = `<div class="tmeta">The FTTH map is unavailable — ${esc(e.message)} The job still completes; the new box just will not be placed automatically.</div>`;
   }
@@ -2827,6 +2876,35 @@ function renderFeederList(){
   }).join('');
 }
 
+let _feedMap = null, _feedLayer = null;
+function drawFeederMap(){
+  const t = byId(currentId); const el = document.getElementById('feederMap');
+  if(!t || !el || typeof L==='undefined') return;
+  if(_feedMap){ try{ _feedMap.remove(); }catch(e){} _feedMap = null; }
+  _feedMap = L.map(el).setView([10.245, 123.79], 15);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19, attribution:'&copy; OpenStreetMap' }).addTo(_feedMap);
+  _feedLayer = L.layerGroup().addTo(_feedMap);
+  const pts = [];
+  FEEDERS.forEach(n=>{
+    if(n.lat==null || n.lng==null) return;
+    const sel = t.data.feeder_device_id === n.id;
+    const color = sel ? '#16a34a' : (n.counts.free > 0 ? '#22c55e' : '#94a3b8');
+    const icon = L.divIcon({ className:'', iconSize:null, iconAnchor:[12,12],
+      html:`<div class="plan-pin" style="background:${color};color:${sel||n.counts.free>0?'#fff':'#111'}">${esc(n.name)} · ${n.counts.free} free</div>` });
+    L.marker([n.lat,n.lng],{icon}).addTo(_feedLayer).on('click',()=>{ FEEDER_OPEN = n.id; renderFeederList();
+      const card = document.querySelector('.nap-card.open'); if(card) card.scrollIntoView({behavior:'smooth', block:'center'}); });
+    pts.push([n.lat,n.lng]);
+  });
+  // centre on the technician if we know where they are, otherwise on the nearest boxes
+  const near = FEEDERS.filter(n=>n.distance_m!=null).slice(0,6).map(n=>[n.lat,n.lng]);
+  if(near.length) _feedMap.fitBounds(near,{padding:[30,30],maxZoom:17}); else if(pts.length) _feedMap.fitBounds(pts,{padding:[30,30],maxZoom:16});
+  if(navigator.geolocation) navigator.geolocation.getCurrentPosition(p=>{
+    if(!_feedMap) return;
+    const ll=[p.coords.latitude,p.coords.longitude];
+    L.marker(ll,{icon:L.divIcon({className:'',html:'<div class="me-dot"></div>',iconAnchor:[7,7]})}).addTo(_feedMap).bindTooltip('You');
+    if(!near.length) _feedMap.setView(ll, 17);
+  }, ()=>{}, { enableHighAccuracy:true, timeout:15000, maximumAge:30000 });
+}
 function openFeeder(id){
   FEEDER_OPEN = (FEEDER_OPEN === id) ? null : id;
   renderFeederList();
@@ -2849,6 +2927,7 @@ async function chooseFeederPort(devId, portId){
   const previous = t.data.feeder_port_id;
   t.data.feeder_device_id = devId;
   t.data.feeder_port_id   = portId;
+  t.data.feeder_port_no   = port.port_no;
   /* The typed fields stay in step, so the printed report reads the same as it
      always did whether or not the map was used. */
   t.data.main_nap      = dev.name;
@@ -2866,7 +2945,7 @@ async function clearFeederChoice(){
   if(!t || !t.data.feeder_port_id) return;
   const portId = t.data.feeder_port_id;
   collectStep();
-  t.data.feeder_port_id = ''; t.data.feeder_device_id = '';
+  t.data.feeder_port_id = ''; t.data.feeder_device_id = ''; t.data.feeder_port_no = '';
   await persist(t);
   try{ await api('/api/ftth/release','POST',{ ticketId: t.id, portId }); }catch(e){}
   await loadFeederPicker();
@@ -4303,11 +4382,18 @@ function napAreaLine(t){
 }
 
 async function approveNapName(id, current){
-  const name = prompt('Name for this NAP box (format: BARANGAY - NAP number).\nIt is renamed on the map and added to billing as an area.', current||'');
+  const t = byId(id);
+  const d = (t && t.data) || {};
+  const sug = napNameOk(current) ? current : (napNamesFor(d.main_nap, d.feeder_port_no)[0] || current || '');
+  const name = prompt('Name for this NAP box — AREA-LCP1, AREA-LCP1-SUB1 or AREA-LCP1-SUB1-NAP2 (SUB and NAP numbers = the port it is fed from).\n'
+    + (d.main_nap ? 'Fed from ' + d.main_nap + (d.feeder_port_no ? ' port ' + d.feeder_port_no : '') + '.\n' : '')
+    + 'It is renamed on the map and added to billing as an area.', sug);
   if(name===null) return;
+  const clean = name.trim().toUpperCase().replace(/\s+/g,'');
+  if(!napNameOk(clean) && !confirm('"'+clean+'" does not follow the naming rule. Use it anyway?')) return;
   try{
-    await api('/api/tickets/'+id+'/approve-nap-name','POST',{ name: name.trim().toUpperCase() });
-    alert('Approved: '+name.trim().toUpperCase());
+    await api('/api/tickets/'+id+'/approve-nap-name','POST',{ name: clean });
+    alert('Approved: '+clean);
     await refreshTickets(); openReport(id);
   }catch(e){ alert(e.message); }
 }
