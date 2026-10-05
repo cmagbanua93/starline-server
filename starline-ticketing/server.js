@@ -28,6 +28,12 @@ const FTTH_TOKEN = process.env.FTTH_TOKEN || '';
 try { fs.mkdirSync(PHOTO_DIR, { recursive: true }); } catch (e) { console.error('Cannot create photo dir:', e.message); }
 
 /* ---------------- database (JSON file) ---------------- */
+/* Moving to a new Railway service: copy the old service's data in before loading it
+   (only when IMPORT_FROM + IMPORT_TOKEN are set — see import-old.js). */
+if (process.env.IMPORT_FROM && process.env.IMPORT_TOKEN) {
+  try { require('child_process').execFileSync(process.execPath, [path.join(__dirname, 'import-old.js')], { stdio: 'inherit', timeout: 15 * 60 * 1000 }); }
+  catch (e) { console.error('[import] did not complete — starting with the data already here'); }
+}
 let db = { users: [], tickets: [], sessions: {} };
 try { db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); } catch (e) {}
 db.users = db.users || []; db.tickets = db.tickets || []; db.sessions = db.sessions || {};
