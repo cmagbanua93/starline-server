@@ -511,6 +511,7 @@
   <div class="card compact" id="techStockPanel" onclick="go('materials')" style="cursor:pointer"></div>
   <div class="pills no-print" id="techStatusPills"></div>
   <div class="type-tabs no-print" id="techTypeTabs"></div>
+  <input class="search-box no-print" id="tSearch" placeholder="🔍 Search my jobs — name, PPPoE, NAP, serial, notes…" oninput="renderTechList()">
   <div class="filter-row no-print">
     <select id="tSort" onchange="setTechSort(this.value)">
       <option value="priority">Sort: priority (most urgent first)</option>
@@ -721,7 +722,7 @@
     <div><div class="page-title">Tickets</div><div class="page-sub" id="ticketsSub"></div></div>
     <button class="icon-btn no-print" onclick="refreshTickets(true)" title="Refresh">↻</button>
   </div>
-  <input class="search-box no-print" id="dSearch" placeholder="🔍 Search number, customer, technician or address" oninput="renderTickets()">
+  <input class="search-box no-print" id="dSearch" placeholder="🔍 Search anything on a ticket — name, PPPoE, NAP, serial, notes…" oninput="renderTickets()">
   <div class="pills no-print" id="dashStatusPills"></div>
   <div class="type-tabs no-print" id="dashTypeTabs"></div>
   <div class="filter-row no-print">
@@ -1635,6 +1636,49 @@ function prioBadge(t){
   const p = t.priority||3;
   return `<span class="badge ${p===1?'b-p1':p===2?'b-p2':'b-p3'}">${p===1?'P1 Urgent':p===2?'P2 High':'P3 Normal'}</span>`;
 }
+/* ---- full-text ticket search ----
+   Everything written on a ticket is searchable: number, customer, phone, address,
+   PPPoE account, account number, technician, type, status, priority, issue, and
+   every field filled in during the job (NAP box, port, modem serial, readings,
+   cable reel, notes…), plus dates and sync messages. Photos/signatures are skipped.
+   Several words = every word must appear somewhere ("tungkil nap 2 modem"). */
+const _searchCache = new WeakMap();
+function ticketSearchText(t){
+  const stamp = [t.updated||t.created||0, t.step||0, t.status, Object.keys(t.data||{}).length].join(':');
+  const hit = _searchCache.get(t);
+  if(hit && hit.stamp === stamp) return hit.text;
+  const parts = [];
+  const add = v => { if(v===null || v===undefined || v==='') return; parts.push(String(v)); };
+  const walk = (v, key) => {
+    if(v===null || v===undefined) return;
+    if(typeof v === 'string'){
+      if(v.startsWith('data:') || /^\/photos\//.test(v)) return;            // images
+      add(v); return;
+    }
+    if(typeof v === 'number' || typeof v === 'boolean'){ if(typeof v==='number') add(v); return; }
+    if(Array.isArray(v)){ v.forEach(x=>walk(x, key)); return; }
+    if(typeof v === 'object'){
+      if(v.img || v.dataUrl) { add(v.gps||''); return; }                      // photo object: keep its GPS text only
+      for(const k of Object.keys(v)) walk(v[k], k);
+    }
+  };
+  ['number','customer','phone','address','subject','issue','message','assignedName','pppoeUsername','accountNo','ref'].forEach(k=>add(t[k]));
+  add(typeName(t.type)); add(t.type);
+  add({open:'Open', in_progress:'In Progress', completed:'Completed'}[t.status] || t.status);
+  const p = t.priority||3; add(p===1?'P1 Urgent':p===2?'P2 High':'P3 Normal');
+  ['created','started','completed'].forEach(k=>{ if(t[k]){ const d=new Date(t[k]); add(d.toLocaleDateString()); add(d.toISOString().slice(0,10)); add(d.toLocaleDateString(undefined,{month:'long', day:'numeric', year:'numeric'})); } });
+  walk(t.data || {}, '');
+  ['billingSync','ftthSync','areaSync'].forEach(k=>{ const x=t[k]; if(x){ add(x.message); add(x.error); add(x.deviceName); add(x.area); } });
+  const text = parts.join(' \u2063 ').toLowerCase();
+  _searchCache.set(t, { stamp, text });
+  return text;
+}
+function ticketMatches(t, q){
+  const words = String(q||'').toLowerCase().split(/\s+/).filter(Boolean);
+  if(!words.length) return true;
+  const text = ticketSearchText(t);
+  return words.every(w=>text.includes(w));
+}
 function sortTickets(list){
   return list.slice().sort((a,b)=>(a.priority||3)-(b.priority||3) || b.created-a.created);
 }
@@ -1897,6 +1941,8 @@ function techFiltered(){
   }
   else if(techStatus==='active') list = list.filter(t=>t.status!=='completed');
   else if(techStatus) list = list.filter(t=>t.status===techStatus);
+  const tq = ((document.getElementById('tSearch')||{}).value || '').trim();
+  if(tq) list = applyTechSort(tickets).filter(t=>(!techType||t.type===techType) && ticketMatches(t, tq));   // a search looks through all my jobs
   return list;
 }
 function renderTechList(){
@@ -3941,7 +3987,7 @@ function renderTickets(){
     });
   }
   if(q){
-    list = list.filter(t=>[t.number,t.customer,t.assignedName,t.address,t.subject,t.issue].some(v=>String(v||'').toLowerCase().includes(q)));
+    list = list.filter(t=>ticketMatches(t, q));
   }
   const sort = (document.getElementById('dSort')||{}).value || 'priority';
   if(sort==='newest') list = list.slice().sort((a,b)=>b.created-a.created);
