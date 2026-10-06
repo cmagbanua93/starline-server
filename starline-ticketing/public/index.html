@@ -2570,6 +2570,18 @@ function renderField(t,f){
   }
   if(f.k==='cable_start'){
     const reel = jobReel(t);
+    if(USER && USER.role==='admin'){
+      /* The office corrects figures on reopened jobs: the BEFORE reading stays editable. */
+      return `<label>${f.label}${reqMark}</label>
+        <input type="number" step="0.1" id="f_${f.k}" value="${esc(v===undefined?'':v)}">
+        ${reel ? `<p class="hint">Reel <b>${esc(reel.code||'')}</b> held <b>${reelBefore(t, reel)} m</b> before this job${t.invApplied?` (it shows ${reel.meters} m now, after this job)`:''}. When a completed job is reopened and corrected, only the difference goes back to or comes off the reel.</p>` : ''}`;
+    }
+    if(reel && t.invApplied){
+      /* reopened job: keep the BEFORE reading that was recorded, never today's reel figure */
+      return `<label>${f.label}${reqMark}</label>
+        <input type="number" id="f_${f.k}" value="${esc(v===undefined?'':v)}" readonly class="locked-num">
+        <p class="hint">Recorded when the job was first done. Ask the office if it needs correcting.</p>`;
+    }
     if(reel && !t.data.cable_start_override){
       /* Filled from the reel register and locked: the figure the system holds is the
          starting point. A different meter mark goes through "My reading is different". */
@@ -3254,7 +3266,23 @@ function cableEstimate(t){
   return v > 0 ? Math.round(v) : 0;
 }
 function jobReel(t){
-  return ((USER&&USER.inv&&USER.inv.cables)||[]).find(r=>r.id===(t.data||{}).cable_reel) || null;
+  const id = (t.data||{}).cable_reel;
+  if(!id) return null;
+  /* the office looks the reel up in the assigned technician's stock */
+  const inv = (USER && USER.role==='admin')
+    ? (((users||[]).find(u=>u.id===t.assignedTo)||{}).inv || {})
+    : ((USER&&USER.inv)||{});
+  return (inv.cables||[]).find(r=>r.id===id) || null;
+}
+/* What the reel held BEFORE this job. For a job that was already completed once
+   (stock taken) and reopened, the reel's current figure already has this job's
+   cable taken off, so the checks must use the figure from before the job. */
+function reelBefore(t, reel){
+  if(!reel) return null;
+  const d = t.data||{};
+  if(!t.invApplied) return reel.meters;
+  if(d.cable_start_system!=null && d.cable_start_system!=='') return parseFloat(d.cable_start_system);
+  return Math.round((reel.meters + (parseFloat(d.cable_drawn!=null?d.cable_drawn:d.cable_used)||0))*100)/100;
 }
 function refreshReelOptions(){
   const sel = document.getElementById('f_cable_reel'); if(!sel) return;
@@ -3281,7 +3309,7 @@ function cableProblem(t, fields){
   const reel = jobReel(t);
   if(!reel) return null;                         // reel not in this user's stock (e.g. office finishing a job)
   const name = (reel.code||'') + ' (' + reel.name + ')';
-  const left = reel.meters;
+  const left = reelBefore(t, reel);
   const est = parseFloat(d.cable_estimate) || 0;
   if(has('cable_reel') && has('cable_estimate') && est > left)
     return `Reel ${name} has only ${left} m left, but this run needs about ${est} m.\n\nYou are not allowed to use this reel for this run — StarLine does not join two reels mid-span.\n\nChoose another reel with at least ${est} m, or request a fresh reel from the office.`;
@@ -3344,7 +3372,7 @@ function onReelChange(){
     /* The BEFORE figure follows the chosen reel: re-draw the step so it shows locked. */
     collectStep();
     tt.data.cable_reel = sel.value;
-    if(!tt.data.cable_start_override) tt.data.cable_start = reel ? reel.meters : '';
+    if(!tt.data.cable_start_override && !tt.invApplied && !(USER && USER.role==='admin')) tt.data.cable_start = reel ? reel.meters : '';
     persist(tt); renderTicket(); return;
   }
   /* Refresh the note under the picker so the short-reel warning appears the
@@ -4351,7 +4379,7 @@ function renderReels(){
 }
 function reelEventLabel(e){
   return ({ issued:'Issued to technician', reissued:'Remnant re-issued', drawn:'Cable drawn on a job',
-    shortfall:'Drew more than the reel held', reading_discrepancy:'Reading lower than the system figure', reviewed:'Discrepancy reviewed by the office', shortfall_recovered:'Negative balance repaired',
+    shortfall:'Drew more than the reel held', corrected:'Job corrected after reopening', reading_discrepancy:'Reading lower than the system figure', reviewed:'Discrepancy reviewed by the office', shortfall_recovered:'Negative balance repaired',
     emptied:'Reel run down to empty', return_started:'Technician marked it for return',
     received:'Received back at the office', reconciled:'Physically counted',
     adjusted:'Metres changed by an admin', removed:'Removed from stock', written_off:'Written off' })[e] || e;
@@ -4714,7 +4742,7 @@ async function openReport(id){
     ${t.status==='completed' && (t.type==='installation' || (t.type==='repair' && t.data && t.data.swap_pppoe)) ? billingSyncPanel(t) : ''}
     ${t.status==='completed' && t.type==='nap_install' ? napMapPanel(t) : ''}
     <div class="wizard-btns">
-      ${t.status==='completed'?'<button class="btn btn-ghost btn-sm" onclick="reopenTicket()">Reopen</button>':''}
+      ${t.status==='completed'?'<button class="btn btn-ghost btn-sm" onclick="reopenTicket()">Reopen to correct</button>':`<button class="btn btn-primary btn-sm" onclick="openTicket('${esc(t.id)}')">✎ Edit job details</button>`}
       <button class="btn btn-warn btn-sm" onclick="deleteTicket()">🗑 Delete Ticket</button>
     </div>`;
   renderSummary(t, 'repSummary');
@@ -4843,10 +4871,12 @@ async function retryNapMap(id, number){
 }
 
 async function reopenTicket(){
-  if(!confirm('Reopen this completed ticket?')) return;
+  if(!confirm('Reopen this completed ticket to correct it?\n\nFix the figures, then press Complete again. Stock already taken for this job is NOT taken twice — only a changed cable figure is corrected on the reel.')) return;
   try{
-    await api('/api/tickets/'+currentId,'PUT',{status:'in_progress'});
-    await refreshTickets(); openReport(currentId);
+    const id = currentId;
+    await api('/api/tickets/'+id,'PUT',{status:'in_progress'});
+    await refreshTickets();
+    openTicket(id);            // straight into the job so the figures can be fixed
   }catch(e){ alert(e.message); }
 }
 async function deleteTicket(){

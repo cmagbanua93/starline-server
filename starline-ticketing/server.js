@@ -1848,6 +1848,12 @@ const server = http.createServer(async (req, res) => {
             const pv = prev[k], nv = incoming[k];
             if (pv && typeof pv === 'object' && pv.img && nv && typeof nv === 'object' && nv.img === undefined) nv.img = pv.img;
           });
+          /* Figures the server works out at completion are kept even if a client
+             sends back an older copy of the job without them. */
+          ['cable_drawn', 'cable_start_system', 'cable_reel_code', 'cable_reel_name', 'cable_shortfall',
+           'cable_discrepancy', 'cable_review', 'connector_shortfall'].forEach(k => {
+            if (prev[k] !== undefined && incoming[k] === undefined) incoming[k] = prev[k];
+          });
           t.data = incoming;
         }
         if (b.step !== undefined) t.step = b.step;
@@ -1995,6 +2001,39 @@ const server = http.createServer(async (req, res) => {
               });
               if (cleanItems.length) t.data.items_used = cleanItems;
               t.invApplied = true;
+            }
+          } else if (b.status === 'completed' && t.invApplied && t.assignedTo && t.data && t.data.cable_reel) {
+            /* Re-completed after a reopen (e.g. the office fixed a wrongly typed
+               meter reading). Stock was taken the first time, so only the
+               DIFFERENCE in cable used goes back to, or comes off, the reel. */
+            const tech = db.users.find(u => u.id === t.assignedTo);
+            const reel = tech && tech.inv && (tech.inv.cables || []).find(r => r.id === t.data.cable_reel);
+            const st = parseFloat(t.data.cable_start), en = parseFloat(t.data.cable_end);
+            const len = parseFloat(t.data.cable_length);
+            const newUsed = (!isNaN(st) && !isNaN(en)) ? Math.max(0, round2(st - en)) : (!isNaN(len) ? round2(len) : null);
+            const oldUsed = parseFloat(t.data.cable_drawn !== undefined ? t.data.cable_drawn : t.data.cable_used) || 0;
+            if (reel && newUsed !== null && Math.abs(newUsed - oldUsed) > 0.001) {
+              const before = round2(reel.meters);
+              reel.meters = Math.max(0, round2(before - (newUsed - oldUsed)));
+              if (reel.meters > REEL_EMPTY_M && reel.state === 'empty') reel.state = 'open';
+              if (reel.meters <= REEL_EMPTY_M && reel.state === 'open') reel.state = 'empty';
+              logReel(reel, 'corrected', {
+                techId: tech.id, techName: tech.name, ticketId: t.id, ticketRef: t.ref || '', by: me.name,
+                meters: round2(newUsed - oldUsed), before, after: reel.meters,
+                note: `Job ${t.number} corrected after reopening: cable used ${oldUsed} m → ${newUsed} m`
+              });
+              t.data.cable_used = newUsed;
+              t.data.cable_drawn = newUsed;
+              /* a reading-discrepancy that came from the wrong figure is re-checked */
+              const sys = parseFloat(t.data.cable_start_system);
+              if (!isNaN(sys) && !isNaN(st)) {
+                const gap = round2(sys - st);
+                if (gap <= READING_TOL_M && t.data.cable_discrepancy) {
+                  reel.discrepancy = Math.max(0, round2((reel.discrepancy || 0) - t.data.cable_discrepancy));
+                  delete t.data.cable_discrepancy; delete t.data.cable_review;
+                  if (!t.data.cable_shortfall && !t.data.connector_shortfall) t.needsStockReview = false;
+                }
+              }
             }
           }
         }
