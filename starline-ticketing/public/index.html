@@ -2298,6 +2298,7 @@ function collectStep(){
       if(f.type==='reel_select'){
         const reel = ((USER&&USER.inv&&USER.inv.cables)||[]).find(r=>r.id===el.value);
         t.data[f.k+'_name'] = reel ? reel.name : '';
+        t.data[f.k+'_code'] = reel ? (reel.code || '') : '';
       }
     }
   });
@@ -5125,7 +5126,13 @@ function renderSummary(t, targetId){
     if(f.type==='photo'){ if(v.img) photos.push({cap:f.label+(v.time?' — '+fmt(v.time):''),img:v.img,gps:v.lat!=null?`${v.lat.toFixed(6)}, ${v.lng.toFixed(6)}`:null}); if(v.lat!=null) add(f.label+' GPS', v.lat.toFixed(6)+', '+v.lng.toFixed(6)); return; }
     if(f.type==='gps'){ add(f.label, Number(v.lat).toFixed(6)+', '+Number(v.lng).toFixed(6) + (v.src==='typed' ? ' (typed in)' : v.acc!=null ? ' ('+(v.src==='photo'?'from post photo, ':'phone GPS ')+'±'+v.acc+' m)' : '')); return; }
     if(f.type==='signature'){ return; }
-    if(f.type==='reel_select'){ add(f.label, t.data[f.k+'_name']||t.data.cable_reel_name||'(cable reel)'); return; }
+    if(f.type==='reel_select'){
+      /* name + the code on the reel's tag, e.g. "1 Core - Pure Black · reel 1CPB-0007" */
+      const reel = (f.k==='cable_reel' && typeof jobReel==='function') ? jobReel(t) : null;
+      const name = t.data[f.k+'_name'] || t.data.cable_reel_name || (reel && reel.name) || '(cable reel)';
+      const code = (f.k==='cable_reel' && t.data.cable_reel_code) || t.data[f.k+'_code'] || (reel && reel.code) || '';
+      add(f.label, code ? name + ' · reel ' + code : name); return;
+    }
     if(f.type==='items_used'){ const txt=itemsUsedText(v); if(txt) rows.push([f.label, txt]); return; }
     add(f.label, v);
   }));
