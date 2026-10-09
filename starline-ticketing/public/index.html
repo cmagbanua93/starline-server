@@ -373,9 +373,17 @@
   .plan-row{display:flex;align-items:center;gap:8px;justify-content:space-between;background:#f8fafc;border:1px solid var(--border);border-radius:10px;padding:8px 10px;margin-bottom:6px}
   .plan-row b{font-size:13px} .plan-row .tmeta{font-size:11px}
   .plan-row .acts{display:flex;gap:6px;flex-shrink:0}
-  .me-dot{width:14px;height:14px;border-radius:50%;background:#2563eb;border:3px solid #fff;box-shadow:0 0 0 2px #2563eb55}
+  .me-dot{pointer-events:none;width:14px;height:14px;border-radius:50%;background:#2563eb;border:3px solid #fff;box-shadow:0 0 0 2px #2563eb55}
   .plan-pin{background:#f59e0b;color:#111;font-weight:800;font-size:10px;border-radius:8px;padding:2px 6px;white-space:nowrap;border:2px solid #fff;box-shadow:0 1px 3px #0005}
   .plan-pin.sel{background:#16a34a;color:#fff}
+  .nap-map{height:340px}
+  .nap-pin{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;border:3px solid #fff;box-shadow:0 1px 4px #0006;color:#fff;background:#22c55e}
+  .nap-pin.full{background:#94a3b8;color:#1e293b}
+  .nap-pin.feeder{background:#64748b}
+  .nap-pin.open{background:#d9b345;color:#12304a;transform:scale(1.18)}
+  .nap-pin.sel{background:#12304a;color:#d9b345;transform:scale(1.18)}
+  .home-pin{pointer-events:none;font-size:24px;line-height:28px;filter:drop-shadow(0 1px 2px #0007)}
+  .nap-dist{background:#12304a;color:#fff;border:none;font-weight:700;font-size:11px}
 </style>
 <style>
   /* ===== StarLine brand theme — same look as the payment page and subscriber portal ===== */
@@ -1017,13 +1025,13 @@ const WORKFLOWS = {
     { key:'nap', title:'4. NAP Box &amp; Port Details',
       desc:'Record the NAP box the subscriber is connected to and the exact port used, then take a photo of the NAP box cassette. Time and GPS location are stamped on the photo automatically.',
       fields:[
-        {k:'nap_pick', type:'nap_picker', label:'Pick the box and port from the map'},
+        {k:'nap_pick', type:'nap_picker', label:'Tap the NAP box on the map, then choose the port'},
         /* allowNew:false — this value IS the Area written to billing. A box a
            subscriber is being hung off already exists, so it is already one of
            billing's areas; anything else is a typo that billing rejects hours
            later, long after the technician has left the pole. */
-        {k:'nap_id', type:'area_select', label:'NAP Box / Area (from billing)', req:true, allowNew:false},
-        {k:'nap_port', type:'text', label:'Port Number Connected', req:true, placeholder:'e.g. Port 5 of 8'},
+        {k:'nap_id', type:'area_select', label:'NAP Box / Area (from billing)', req:true, allowNew:false, mapLocked:true},
+        {k:'nap_port', type:'text', label:'Port Number Connected', req:true, placeholder:'e.g. Port 5 of 8', mapLocked:true},
         {k:'nap_photo', type:'photo', label:'Photo of NAP Box Cassette', req:true, autogps:true},
         {k:'nap_reading', type:'number', label:'Reading at NAP (dBm, optional)', step:'0.1'}
       ]},
@@ -2239,7 +2247,12 @@ function nextStep(){
   const t = byId(currentId);
   collectStep();
   const s = getWorkflow(t)[t.step];
-  const missing = s.fields.filter(f=>f.req && !hasValue(t,f)).map(f=>f.label);
+  let missing = s.fields.filter(f=>f.req && !hasValue(t,f)).map(f=>f.label);
+  if(s.fields.some(f=>f.type==='nap_picker') && !t.data.nap_port_id && !t.data.nap_manual
+     && s.fields.some(f=>f.mapLocked && f.req && !hasValue(t,f))){
+    missing = ['Tap the NAP box on the map and choose the port you used']
+      .concat(s.fields.filter(f=>f.req && !f.mapLocked && !hasValue(t,f)).map(f=>f.label));
+  }
   if(missing.length){ alert('Required before continuing:\n• '+missing.join('\n• ')); persist(t); renderTicket(); return; }
   const strayArea = badArea(t, s);
   if(strayArea){ alert(strayArea); persist(t); renderTicket(); return; }
@@ -2343,6 +2356,19 @@ function finishTicket(){
 
 /* ---------- field renderers ---------- */
 function renderField(t,f){
+  /* NAP box and port on a subscriber install come from the map pick. The typed
+     fields only show when the box is not on the map (or the map cannot load),
+     so a technician never has to work out which name is the right box. */
+  if(f.mapLocked && !f._inner){
+    const held = !!t.data.nap_port_id;
+    const typedBefore = !held && t.data[f.k];               // a job started before the map picker
+    const show = held || t.data.nap_manual || typedBefore || NAP_MAP_FAILED;
+    const inner = renderField(t, Object.assign({}, f, {_inner:true}));
+    const locked = held
+      ? inner.replace(/<input /, '<input readonly style="background:#f1f5f9" ').replace(/<p class="hint"[^]*?<\/p>/, '<p class="hint">Filled in from the box you picked on the map.</p>')
+      : inner;
+    return `<div class="nap-manual" style="${show?'':'display:none'}">${locked}</div>`;
+  }
   let v = t.data[f.k];
   const reqMark = f.req?' <span class="req">*</span>':'';
   if(f.type==='pppoe_link'){
@@ -2392,10 +2418,16 @@ function renderField(t,f){
       ? `<div class="nap-chosen">🔌 Holding ${esc(t.data.nap_port||'')} on ${esc(t.data.nap_id||'')}
            <button type="button" class="linked-x" title="Choose a different port" onclick="clearNapChoice()">✕</button></div>`
       : '';
-    return `<label>${f.label}</label>
+    return `<label>${f.label} <span class="req">*</span></label>
       ${chosen}
+      <div class="tmeta">🏠 = this subscriber (from the arrival photo GPS) · blue dot = you · each box shows how many ports are free. Tap the box you are actually connecting to.</div>
+      <div id="napMap" class="plan-map nap-map"></div>
       <div id="napPickWrap" class="nap-wrap"><div class="tmeta">Loading boxes from the FTTH map…</div></div>
-      <div class="tmeta" style="margin-top:6px">Not on the map yet? Leave this and type the box and port by hand below — the job still completes.</div>`;
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="toggleNapList()">${NAP_LIST?'Hide list':'Show as a list instead'}</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="toggleFeederBoxes()">${NAP_SHOW_FEEDERS?'Hide LCP / SUB boxes':'Show LCP / SUB boxes too'}</button>
+        ${t.data.nap_port_id?'':`<button type="button" class="btn btn-ghost btn-sm" onclick="napNotOnMap()">${t.data.nap_manual?'Use the map after all':'The box is not on the map'}</button>`}
+      </div>`;
   }
   if(f.type==='feeder_picker'){
     /* Which existing box feeds the new one. Picking it from the map — rather
@@ -2973,7 +3005,40 @@ async function unlinkPppoe(){
    The map is the source of truth for what is free — billing only knows the NAP
    for about one subscriber in five. Picking a port holds it immediately, so two
    technicians working the same barangay cannot both claim it. */
-let NAPS = [], NAP_OPEN = null;
+let NAPS = [], NAP_OPEN = null, NAP_MAP_FAILED = false, NAP_LIST = false, NAP_SHOW_FEEDERS = false;
+let _napMap = null, _napLayer = null;
+const NAP_SAME_SPOT_M = 6;          // a sub box and its cassette sit ~1 m apart: one pin for both
+/* LCP / sub-main boxes feed other boxes, not houses (AREA-LCP1, AREA-LCP1-SUB2).
+   They are hidden from the subscriber picker unless asked for. */
+const isFeederBox = n => /(-LCP\d{1,2}(-SUB\d{1,2})?|-SUB(MAIN)?\s*\d{0,2})$/i.test(String(n.name||'').trim());   // also the older TUNGKIL-SUBMAIN01 style
+/* On a pole with several boxes: the 8-port NAPs first, feeder boxes last. */
+const napRank = n => (isFeederBox(n)?2:0) + (/NAP\s*\d+/i.test(n.name||'')?0:1);
+
+function napHome(t){
+  const loc = t && t.data && t.data.location;
+  return (loc && loc.lat!=null && loc.lng!=null) ? { lat:+loc.lat, lng:+loc.lng } : null;
+}
+function napVisible(){
+  const t = byId(currentId);
+  return NAPS.filter(n => n.status !== 'planned'                       // not built yet
+    && (NAP_SHOW_FEEDERS || !isFeederBox(n) || (t && t.data.nap_device_id === n.id)));
+}
+/* Boxes on the same pole become one pin, so two pins never hide each other. */
+function napSpots(list){
+  const spots = [];
+  list.forEach(n=>{
+    if(n.lat==null || n.lng==null) return;
+    const s = spots.find(sp => metersBetween(sp, n) <= NAP_SAME_SPOT_M);
+    if(s) s.boxes.push(n); else spots.push({ lat:+n.lat, lng:+n.lng, boxes:[n] });
+  });
+  return spots;
+}
+function metersBetween(a, b){
+  const R=6371000, r=x=>x*Math.PI/180;
+  const dLat=r(b.lat-a.lat), dLng=r(b.lng-a.lng);
+  const h=Math.sin(dLat/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
 
 async function loadNapPicker(){
   const t = byId(currentId);
@@ -2981,35 +3046,84 @@ async function loadNapPicker(){
   if(!t || !wrap) return;
   try{
     const qs = new URLSearchParams();
-    const loc = t.data && t.data.location;          // set once the GPS step is done
-    if(loc && loc.lat!=null && loc.lng!=null){ qs.set('lat', loc.lat); qs.set('lng', loc.lng); }
+    const home = napHome(t);                               // distances are from the house, not from the technician
+    if(home){ qs.set('lat', home.lat); qs.set('lng', home.lng); }
     const d = await api('/api/ftth/naps' + (qs.toString()?'?'+qs.toString():''));
     NAPS = d.naps || [];
+    NAP_MAP_FAILED = false;
     if(!NAP_OPEN && t.data.nap_device_id) NAP_OPEN = t.data.nap_device_id;
     renderNapList();
+    drawNapMap();
   }catch(e){
-    wrap.innerHTML = `<div class="tmeta">The FTTH map is unavailable — ${esc(e.message)} Type the box and port by hand below.</div>`;
+    NAP_MAP_FAILED = true;
+    const m = document.getElementById('napMap'); if(m) m.style.display = 'none';
+    wrap.innerHTML = `<div class="ctx-warn">The FTTH map is unavailable — ${esc(e.message)} Type the box and port below.</div>`;
+    document.querySelectorAll('.nap-manual').forEach(el => el.style.display = '');
   }
 }
 
-function renderNapList(){
-  const t = byId(currentId);
-  const wrap = document.getElementById('napPickWrap');
-  if(!wrap || !t) return;
-  if(!NAPS.length){
-    wrap.innerHTML = '<div class="tmeta">No NAP boxes on the map yet. Type the box and port by hand below.</div>';
-    return;
+function drawNapMap(keepView){
+  const t = byId(currentId); const el = document.getElementById('napMap');
+  if(!t || !el || typeof L==='undefined') return;
+  if(_napMap && _napMap.getContainer() === el && keepView){ _napLayer.clearLayers(); drawNapPins(t); return; }
+  if(_napMap){ try{ _napMap.off(); _napMap.remove(); }catch(e){} _napMap = null; }
+  _napMap = L.map(el, { zoomAnimation:false, fadeAnimation:false, markerZoomAnimation:false }).setView([10.245, 123.79], 16);
+  const street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19, attribution:'&copy; OpenStreetMap' });
+  const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom:19, maxNativeZoom:18, attribution:'Imagery &copy; Esri' });
+  street.addTo(_napMap);
+  L.control.layers({ 'Street':street, 'Satellite':sat }, null, { position:'topright' }).addTo(_napMap);
+  _napLayer = L.layerGroup().addTo(_napMap);
+  const { home, spots } = drawNapPins(t);
+  // frame the house and the nearest boxes; without a house fix, the nearest to the technician
+  const near = spots.slice().sort((a,b)=> home ? metersBetween(home,a)-metersBetween(home,b) : 0).slice(0,5).map(sp=>[sp.lat,sp.lng]);
+  if(home) near.push([home.lat,home.lng]);
+  if(near.length) _napMap.fitBounds(near,{padding:[34,34],maxZoom:18,animate:false});
+  const map = _napMap;
+  if(navigator.geolocation) navigator.geolocation.getCurrentPosition(p=>{
+    if(_napMap !== map) return;                            // the step was re-drawn meanwhile
+    const ll=[p.coords.latitude,p.coords.longitude];
+    L.marker(ll,{icon:L.divIcon({className:'',html:'<div class="me-dot"></div>',iconAnchor:[7,7]}), interactive:false, keyboard:false, zIndexOffset:-1000}).addTo(map);   // never covers the box they are standing at
+    if(!home && !spots.length) map.setView(ll, 17, {animate:false});
+  }, ()=>{}, { enableHighAccuracy:true, timeout:15000, maximumAge:30000 });
+}
+function drawNapPins(t){
+  const home = napHome(t);
+  const spots = napSpots(napVisible());
+  const selId = t.data.nap_device_id;
+  spots.forEach(sp=>{
+    const free = sp.boxes.reduce((a,n)=>a+n.counts.free,0);
+    const sel = sp.boxes.some(n=>n.id===selId);
+    const open = sp.boxes.some(n=>n.id===NAP_OPEN);
+    const feeder = sp.boxes.every(isFeederBox);
+    const cls = sel ? 'sel' : open ? 'open' : free>0 ? (feeder?'feeder':'free') : 'full';
+    const icon = L.divIcon({ className:'', iconSize:null, iconAnchor:[17,17],
+      html:`<div class="nap-pin ${cls}">${sel?'✓':free}</div>` });
+    L.marker([sp.lat,sp.lng],{icon, zIndexOffset: sel||open ? 1000 : 0}).addTo(_napLayer)
+      .on('click',()=>{ NAP_OPEN = sp.boxes.slice().sort((a,b)=>napRank(a)-napRank(b) || b.counts.free-a.counts.free)[0].id; renderNapList(); drawNapMapPins(); });
+  });
+  if(home){
+    L.marker([home.lat,home.lng],{icon:L.divIcon({className:'',iconSize:null,iconAnchor:[14,14],html:'<div class="home-pin">🏠</div>'}), zIndexOffset:-1000, interactive:false, keyboard:false}).addTo(_napLayer);   // under the boxes, never steals a tap
+    const target = NAPS.find(n=>n.id===(selId||NAP_OPEN));
+    if(target && target.lat!=null){
+      L.polyline([[home.lat,home.lng],[target.lat,target.lng]],{color:'#12304a',weight:2,dashArray:'6 6'}).addTo(_napLayer)
+        .bindTooltip(fmtDist(Math.round(metersBetween(home,target)))+' straight line',{permanent:true,direction:'right',offset:[10,0],className:'nap-dist'});
+    }
   }
-  wrap.innerHTML = NAPS.map(n=>{
-    const open = NAP_OPEN === n.id;
-    const dist = n.distance_m!=null
-      ? (n.distance_m < 1000 ? n.distance_m+' m away' : (n.distance_m/1000).toFixed(1)+' km away')
-      : (n.area || '');
-    const full = n.counts.free === 0;
-    return `<div class="nap-card ${open?'open':''}">
+  return { home, spots };
+}
+/* Re-colour pins after a tap without moving the map under the technician's finger. */
+function drawNapMapPins(){ drawNapMap(true); }
+
+function napCard(t, n){
+  const open = NAP_OPEN === n.id;
+  const home = napHome(t);
+  const dist = home && n.lat!=null ? fmtDist(Math.round(metersBetween(home, n)))+' from the house' : (n.area||'');
+  const full = n.counts.free === 0;
+  const kind = isFeederBox(n) ? ' · <b>LCP / sub-main box</b> — normally feeds other boxes, not houses' : '';
+  return `<div class="nap-card ${open?'open':''}">
       <button type="button" class="nap-head" onclick="openNap('${n.id}')">
         <span class="nap-name">${esc(n.name)}</span>
-        <span class="tmeta">${esc(dist)}${dist?' · ':''}<b class="${full?'nap-full':'nap-free'}">${n.counts.free} free</b> of ${n.counts.total}</span>
+        <span class="tmeta">${esc(dist)}${dist?' · ':''}<b class="${full?'nap-full':'nap-free'}">${n.counts.free} free</b> of ${n.counts.total}${kind}</span>
       </button>
       ${open?`<div class="port-grid">${n.ports.map(p=>{
         const mine = t.data.nap_port_id === p.id;
@@ -3021,14 +3135,52 @@ function renderNapList(){
         return `<button type="button" class="port ${cls}" ${can?'':'disabled'} title="${esc(title)} — ${esc(p.fiber_color||'')}"
           onclick="chooseNapPort('${n.id}','${p.id}')">${p.port_no}<span class="port-col">${esc((p.fiber_color||'').slice(0,3))}</span></button>`;
       }).join('')}</div>
-      <div class="tmeta" style="margin-top:6px">Grey = in use · amber = held by another job · red = faulty</div>`:''}
+      <div class="tmeta" style="margin:0 12px 10px">Green = free · grey = in use · amber = held by another job · red = faulty.
+        ${n.lat!=null?` <a href="${dirUrl(n)}" target="_blank" rel="noopener">Directions</a>`:''}</div>`:''}
     </div>`;
-  }).join('');
+}
+
+function renderNapList(){
+  const t = byId(currentId);
+  const wrap = document.getElementById('napPickWrap');
+  if(!wrap || !t) return;
+  const vis = napVisible();
+  if(!vis.length){
+    wrap.innerHTML = '<div class="tmeta">No NAP boxes on the map yet. Tap "The box is not on the map" and type the box and port.</div>';
+    return;
+  }
+  let html = '';
+  const openBox = NAPS.find(n=>n.id===NAP_OPEN);
+  if(openBox){
+    // everything on that pole: e.g. the sub box and the 8-port cassette inside it
+    const spot = napSpots(vis).find(sp=>sp.boxes.some(n=>n.id===openBox.id));
+    const boxes = spot ? spot.boxes : [openBox];
+    if(boxes.length>1) html += `<div class="tmeta" style="margin:2px 0 6px">${boxes.length} boxes on this pole — choose the one the drop cable goes into:</div>`;
+    html += boxes.slice().sort((a,b)=>napRank(a)-napRank(b) || b.counts.total-a.counts.total).map(n=>napCard(t, n)).join('');
+  } else {
+    html += '<div class="tmeta" style="margin:2px 0 6px">Tap a box on the map to see its ports.</div>';
+  }
+  if(NAP_LIST){
+    const rest = vis.filter(n=>!openBox || n.id!==openBox.id).slice(0,12);
+    html += `<div class="tmeta" style="margin:10px 0 6px"><b>Nearest boxes</b></div>` + rest.map(n=>napCard(t,n)).join('');
+  }
+  wrap.innerHTML = html;
 }
 
 function openNap(id){
-  NAP_OPEN = (NAP_OPEN === id) ? null : id;
+  /* Inside a pole with two boxes, tapping a box opens that one rather than closing the pole. */
+  NAP_OPEN = (NAP_OPEN === id && NAP_LIST) ? null : id;
   renderNapList();
+  drawNapMapPins();
+}
+function toggleNapList(){ collectStep(); NAP_LIST = !NAP_LIST; renderTicket(); }
+function toggleFeederBoxes(){ collectStep(); NAP_SHOW_FEEDERS = !NAP_SHOW_FEEDERS; renderTicket(); }
+async function napNotOnMap(){
+  const t = byId(currentId); if(!t) return;
+  collectStep();
+  t.data.nap_manual = !t.data.nap_manual;
+  await persist(t);
+  renderTicket();
 }
 
 async function chooseNapPort(napId, portId){
@@ -3159,7 +3311,7 @@ function drawFeederMap(){
   if(navigator.geolocation) navigator.geolocation.getCurrentPosition(p=>{
     if(!_feedMap) return;
     const ll=[p.coords.latitude,p.coords.longitude];
-    L.marker(ll,{icon:L.divIcon({className:'',html:'<div class="me-dot"></div>',iconAnchor:[7,7]})}).addTo(_feedMap).bindTooltip('You');
+    L.marker(ll,{icon:L.divIcon({className:'',html:'<div class="me-dot"></div>',iconAnchor:[7,7]}), interactive:false, keyboard:false, zIndexOffset:-1000}).addTo(_feedMap);
     if(!near.length) _feedMap.setView(ll, 17);
   }, ()=>{}, { enableHighAccuracy:true, timeout:15000, maximumAge:30000 });
 }
@@ -3216,6 +3368,7 @@ async function clearNapChoice(){
   const portId = t.data.nap_port_id;
   collectStep();
   t.data.nap_port_id = ''; t.data.nap_device_id = '';
+  if(!t.data.nap_manual){ t.data.nap_id = ''; t.data.nap_port = ''; }   // these came from the map pick
   await persist(t);
   try{ await api('/api/ftth/release','POST',{ ticketId: t.id, portId }); }catch(e){}
   renderTicket();
