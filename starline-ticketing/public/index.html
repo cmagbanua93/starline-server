@@ -1986,7 +1986,8 @@ function renderTechList(){
     const canReturn = !returning;
     return `<div class="tmeta" style="font-size:13px;${colour};display:flex;justify-content:space-between;gap:8px;align-items:center">
       <span>🧵 <b>${esc(r.code||'')}</b> ${esc(r.name)} — ${r.meters} m${tail}</span>
-      ${canReturn?`<button class="pill" style="flex:none;padding:2px 8px;font-size:11px" onclick="returnReel('${esc(r.id)}','${esc(r.code||'')}',${r.meters})">Return</button>`:''}
+      ${canReturn?`<button class="pill" style="flex:none;padding:2px 8px;font-size:11px" onclick="returnReel('${esc(r.id)}','${esc(r.code||'')}',${r.meters})">Return</button>`
+        :`<button class="pill" style="flex:none;padding:2px 8px;font-size:11px" onclick="cancelReturn('${esc(r.id)}','${esc(r.code||'')}',${r.meters},false)">Undo return</button>`}
     </div>`;
   };
   document.getElementById('techStockPanel').innerHTML = `
@@ -2232,6 +2233,11 @@ function badArea(t, step){
     if(f.type !== 'area_select' || f.allowNew !== false) continue;
     const v = String((t.data || {})[f.k] || '').trim();
     if(!v || areas.includes(v)) continue;
+    /* A box on the FTTH map is a real box even if billing has not heard of it
+       yet (drawn on the map by hand, never had a NAP-install job). The push
+       adds it to billing's areas first, so it is not a typo to stop here. */
+    if(f.mapLocked && t.data.nap_port_id) continue;
+    if((NAPS||[]).some(n => [n.name, n.area].some(x => String(x||'').trim().toUpperCase() === v.toUpperCase()))) continue;
     const near = areas.filter(a => {
       const A = a.toUpperCase(), V = v.toUpperCase();
       return A.includes(V) || V.includes(A) || A.split(/[^A-Z0-9]+/).some(w => w.length > 2 && V.includes(w));
@@ -3225,6 +3231,9 @@ function areaPicked(key){
   const areas = CATALOG.areas||[];
   if(!v){ hint.textContent = 'This is the NAP box and the billing area — one name for both.'; hint.style.color=''; return; }
   if(areas.includes(v)){ hint.textContent = '✓ '+v+' is an area billing already knows.'; hint.style.color=''; }
+  else if(el.dataset.allowNew === 'false' && (NAPS||[]).some(n => [n.name, n.area].some(x => String(x||'').trim().toUpperCase() === v.toUpperCase()))){
+    hint.textContent = '✓ '+v+' is on the FTTH map — it will be added to billing\'s areas when this job is sent.'; hint.style.color='';
+  }
   else if(el.dataset.allowNew === 'false'){
     /* Said plainly and in red while the field is still in front of them, rather
        than as a push failure the office finds later. */
@@ -4475,7 +4484,7 @@ function renderReels(){
   }).join('');
   document.getElementById('reelAlerts').innerHTML = discHtml + (alerts.length ? alerts.map(r=>{
     const why = r.state==='returning'
-        ? `${esc(r.techName||'A technician')} marked it for return with ${r.meters} m on it — confirm when it physically arrives.`
+        ? `${esc(r.techName||'A technician')} marked it for return with ${r.meters} m on it — confirm when it physically arrives, or, if it is still usable, keep it with them or give it to another technician (buttons on the reel below).`
       : r.shortfall>0
         ? `A job drew ${r.shortfall} m more than this reel held. Find out whether a second reel was used or the meter was misread.`
       : r.discrepancy>0
@@ -4508,7 +4517,9 @@ function renderReels(){
       ${r.discrepancy>0?`<div class="tmeta" style="color:var(--danger);font-weight:700">${r.discrepancy} m missing — technician's reading was lower than the system figure</div>`:''}
       <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
         <button class="pill" style="padding:3px 10px;font-size:12px" onclick="countReel('${esc(r.id)}','${esc(r.code||'')}',${r.meters})">Count it</button>
-        ${r.state==='returning'?`<button class="pill" style="padding:3px 10px;font-size:12px" onclick="receiveReel('${esc(r.id)}','${esc(r.code||'')}',${r.meters})">Confirm received</button>`:''}
+        ${r.state==='returning'?`<button class="pill" style="padding:3px 10px;font-size:12px" onclick="receiveReel('${esc(r.id)}','${esc(r.code||'')}',${r.meters})">Confirm received</button>
+          <button class="pill" style="padding:3px 10px;font-size:12px" onclick="cancelReturn('${esc(r.id)}','${esc(r.code||'')}',${r.meters},true,'${esc(r.techName||'')}')">Still usable — keep with ${esc((r.techName||'technician').split(' ')[0])}</button>`:''}
+        ${r.holder==='tech'&&r.state!=='written_off'?`<button class="pill" style="padding:3px 10px;font-size:12px" onclick="transferReel('${esc(r.id)}','${esc(r.code||'')}','${esc(r.techId||'')}','${esc(r.techName||'')}')">Give to another technician</button>`:''}
         <button class="pill" style="padding:3px 10px;font-size:12px" onclick="writeOffReel('${esc(r.id)}','${esc(r.code||'')}')">Write off</button>
       </div>
     </div>`;
@@ -4535,6 +4546,7 @@ function reelEventLabel(e){
   return ({ issued:'Issued to technician', reissued:'Remnant re-issued', drawn:'Cable drawn on a job',
     shortfall:'Drew more than the reel held', corrected:'Job corrected after reopening', reading_discrepancy:'Reading lower than the system figure', reviewed:'Discrepancy reviewed by the office', shortfall_recovered:'Negative balance repaired',
     emptied:'Reel run down to empty', return_started:'Technician marked it for return',
+    return_cancelled:'Return cancelled — kept with the technician', transferred:'Moved to another technician',
     received:'Received back at the office', reconciled:'Physically counted',
     adjusted:'Metres changed by an admin', removed:'Removed from stock', written_off:'Written off' })[e] || e;
 }
@@ -4564,6 +4576,36 @@ async function receiveReel(id, code, expected){
     await loadReels(); renderMaterials();
     alert('Reel '+code+' received. It is off the technician\'s record and back in office stock.');
   }catch(e){ alert(e.message); }
+}
+/* A reel marked for return that is still good: back on the same technician's
+   stock (the technician can undo their own tap; the office can cancel any). */
+async function cancelReturn(id, code, meters, asAdmin, techName){
+  const msg = asAdmin
+    ? `Keep reel ${code} (${meters} m) with ${techName||'the technician'}?\n\nThe return is cancelled and the reel shows on their jobs again.`
+    : `Undo the return of reel ${code} (${meters} m)?\n\nIt goes back on your stock and shows on your jobs again.`;
+  if(!confirm(msg)) return;
+  try{
+    await api('/api/reels/'+id+'/cancel-return','POST',{});
+    if(asAdmin){ await loadReels(); renderMaterials(); }
+    else { USER = (await api('/api/me')).user; renderTechList(); }
+  }catch(e){ alert(e.message||'Could not cancel the return'); }
+}
+/* Straight from one technician to another — same reel, same code, logged. */
+async function transferReel(id, code, fromId, fromName){
+  if(!users || !users.length) await loadUsers();
+  const techs = users.filter(u=>u.role==='tech' && u.id!==fromId);
+  if(!techs.length) return alert('There is no other technician to give it to.');
+  const list = techs.map((u,i)=>(i+1)+'. '+u.name).join('\n');
+  const pick = prompt(`Give reel ${code} (now with ${fromName||'a technician'}) to which technician?\n\n${list}\n\nType the number:`);
+  if(pick===null) return;
+  const to = techs[parseInt(pick,10)-1];
+  if(!to) return alert('Type one of the numbers in the list.');
+  if(!confirm(`Move reel ${code} from ${fromName||'the technician'} to ${to.name}?`)) return;
+  try{
+    await api('/api/reels/'+id+'/transfer','POST',{toUserId:to.id});
+    await loadReels(); renderMaterials();
+    alert('Reel '+code+' is now with '+to.name+'.');
+  }catch(e){ alert(e.message||'Could not move the reel'); }
 }
 async function writeOffReel(id, code){
   const reason = prompt('Write off reel '+code+'?\n\nThis takes it out of stock for good. Say why — this is kept on the record.');

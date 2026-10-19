@@ -736,6 +736,50 @@ async function pushModemSwap(t) {
   saveDB();
 }
 
+/* ---- a box the office drew on the FTTH map by hand ----
+ * Boxes put up before the ticketing system (or added straight on the map) never
+ * went through a NAP-install job, so nothing ever added them to billing's area
+ * list — and the first subscriber hung off one was refused by billing. The map
+ * is where boxes are made, so a box that exists on the map is a real box: add
+ * it to billing's areas just before the subscriber push. A name that is on
+ * neither the map nor billing is still refused (that is the typo guard). */
+async function mapBoxOnFtth(name) {
+  try {
+    const out = await ftthCall('GET', '/api/nap-candidates?q=' + encodeURIComponent(name));
+    const want = name.toUpperCase();
+    return (out.naps || []).some(n => String(n.name || '').trim().toUpperCase() === want ||
+                                      String(n.area || '').trim().toUpperCase() === want);
+  } catch (e) { return false; }
+}
+async function ensureMapBoxArea(t) {
+  const d = t.data || {};
+  const name = String(d.nap_id || '').trim();
+  if (!name) return { ok: true };
+  const known = catalogCache.data && (catalogCache.data.areas || []);
+  if (known && known.includes(name)) return { ok: true };
+  const fromMap = !!d.nap_device_id || await mapBoxOnFtth(name);
+  if (!fromMap) return { ok: true, skipped: true };          // billing decides, as before
+  try {
+    const r = await fetch(MONITOR_URL + '/api/billing-area', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': MONITOR_TOKEN },
+      body: JSON.stringify({ area: name }),
+      signal: AbortSignal.timeout(45000),
+    });
+    const out = await r.json().catch(() => ({}));
+    if (!(r.ok && out.ok)) return { ok: false, error: out.error || ('billing returned HTTP ' + r.status) };
+    if (catalogCache.data && !catalogCache.data.areas.includes(out.area || name)) catalogCache.data.areas.push(out.area || name);
+    if (out.created) {
+      t.areaSync = { state: 'done', at: Date.now(), area: out.area || name, created: true,
+        message: '"' + (out.area || name) + '" was on the FTTH map but not in billing — added to billing\'s area list' };
+      console.log(`[area] ${t.number}: added map box "${out.area || name}" to billing`);
+    }
+    return { ok: true, created: !!out.created };
+  } catch (e) {
+    return { ok: false, error: e.name === 'TimeoutError' ? 'billing did not answer in time' : e.message };
+  }
+}
+
 async function pushBilling(t) {
   if (!MONITOR_URL || !MONITOR_TOKEN) return;
   if (isModemSwap(t)) return pushModemSwap(t);
@@ -765,6 +809,15 @@ async function pushBilling(t) {
      the subscription date. */
   const done = new Date(t.completed || Date.now());
   const installDate = `${done.getFullYear()}-${String(done.getMonth() + 1).padStart(2, '0')}-${String(done.getDate()).padStart(2, '0')}`;
+
+  const areaOk = await ensureMapBoxArea(t);
+  if (!areaOk.ok) {
+    t.billingSync = { state: 'failed', at: Date.now(),
+      error: `NAP box "${String(d.nap_id || '').trim()}" is on the FTTH map but could not be added to billing's areas: ${areaOk.error}` };
+    console.error(`[billing] ticket ${t.number} (${username}) not pushed: ${t.billingSync.error}`);
+    saveDB();
+    return;
+  }
 
   const payload = {
     username,
@@ -1644,7 +1697,7 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    m = p.match(/^\/api\/reels\/([\w.]+)\/(return|receive|reconcile|writeoff)$/);
+    m = p.match(/^\/api\/reels\/([\w.]+)\/(return|cancel-return|transfer|receive|reconcile|writeoff)$/);
     if (m && req.method === 'POST') {
       const b = await readBody(req);
       const action = m[2];
@@ -1663,11 +1716,54 @@ const server = http.createServer(async (req, res) => {
         if (!reel) return json(res, 404, { error: 'Reel not found' });
         if (!isAdmin && owner.id !== me.id) return json(res, 403, { error: 'That reel is not issued to you' });
         if (reel.state === 'returning') return json(res, 400, { error: 'That reel is already marked for return' });
+        reel.prevState = reel.state;          // so a cancelled return puts it back exactly as it was
         reel.state = 'returning';
         reel.returnedAt = Date.now();
         logReel(reel, 'return_started', {
           techId: owner.id, techName: owner.name, meters: reel.meters, by: me.name,
           note: String(b.reason || '').trim() || 'Technician is returning the reel to the office.'
+        });
+        saveDB();
+        return json(res, 200, { ok: true, reel });
+      }
+
+      if (action === 'cancel-return') {
+        /* The reel was marked for return but is still good to use: it goes back on
+           the technician's stock as it was. The technician can undo their own tap;
+           the office can cancel any return. Logged either way. */
+        if (!reel) return json(res, 404, { error: 'Reel not found' });
+        if (!isAdmin && owner.id !== me.id) return json(res, 403, { error: 'That reel is not issued to you' });
+        if (reel.state !== 'returning') return json(res, 400, { error: 'That reel is not marked for return' });
+        reel.state = reel.prevState && reel.prevState !== 'returning' ? reel.prevState : (reel.meters > REEL_EMPTY_M ? 'open' : 'empty');
+        delete reel.prevState; delete reel.returnedAt;
+        logReel(reel, 'return_cancelled', {
+          techId: owner.id, techName: owner.name, meters: reel.meters, by: me.name,
+          note: String(b.reason || '').trim() || (isAdmin ? 'Still usable — kept with the technician.' : 'Technician undid the return.')
+        });
+        saveDB();
+        return json(res, 200, { ok: true, reel });
+      }
+
+      if (action === 'transfer') {
+        /* Hand a technician's reel (returning or in use) straight to another
+           technician, without a trip through the office. Same reel, same code. */
+        if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+        if (!reel) return json(res, 404, { error: 'Only a reel a technician holds can be moved this way.' });
+        const to = db.users.find(u => u.id === String(b.toUserId || ''));
+        if (!to || to.role !== 'tech') return json(res, 400, { error: 'Pick the technician to give it to.' });
+        if (to.id === owner.id) return json(res, 400, { error: 'That technician already holds this reel.' });
+        owner.inv.cables = owner.inv.cables.filter(r => r.id !== reel.id);
+        if (reel.state === 'returning') reel.state = reel.prevState && reel.prevState !== 'returning' ? reel.prevState : 'open';
+        if (reel.meters <= REEL_EMPTY_M) reel.state = 'empty';
+        else if (reel.state === 'empty') reel.state = 'open';
+        delete reel.prevState; delete reel.returnedAt;
+        reel.issuedAt = Date.now();
+        to.inv = to.inv || { connectors: 0, cables: [], items: [] };
+        to.inv.cables = to.inv.cables || [];
+        to.inv.cables.push(reel);
+        logReel(reel, 'transferred', {
+          techId: to.id, techName: to.name, fromTechId: owner.id, fromTechName: owner.name, meters: reel.meters, by: me.name,
+          note: `From ${owner.name} to ${to.name}` + (String(b.reason || '').trim() ? ' — ' + String(b.reason).trim() : '')
         });
         saveDB();
         return json(res, 200, { ok: true, reel });
