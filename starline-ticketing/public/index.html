@@ -263,6 +263,8 @@
   .chip-idle{background:#f1f5f9;color:#64748b}
   .chip-issue{background:#e0e7ff;color:#3730a3;max-width:100%;overflow:hidden;text-overflow:ellipsis;display:inline-block}
   /* ---- billing lookup + live status on tickets ---- */
+  .pp-tag{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.04em;padding:1px 6px;border-radius:99px;margin-left:4px;vertical-align:1px}
+  .pp-use{background:#fee2e2;color:#991b1b} .pp-dis{background:#ede9fe;color:#5b21b6} .pp-free{background:#dcfce7;color:#166534}
   .lookup-out{margin:6px 0 2px}
   .lookup-row{display:block;width:100%;text-align:left;background:#f8fafc;border:1px solid var(--border);border-radius:10px;padding:8px 10px;margin-bottom:6px;cursor:pointer;font:inherit}
   .lookup-row:hover{background:#eef2f7}
@@ -2880,8 +2882,8 @@ async function usePlannedList(){
    free / placeholder (never billed) / reusable (disconnected, deactivated or
    archived) / in_use (someone active and paying — never take it). */
 const SWAP_ACTION = 'Replaced with a modem from a deactivated account';
-async function pppoeStatus(username){
-  try{ return await api('/api/lookup/pppoe-status/'+encodeURIComponent(username)); }
+async function pppoeStatus(username, forName){
+  try{ return await api('/api/lookup/pppoe-status/'+encodeURIComponent(username)+(forName?'?name='+encodeURIComponent(forName):'')); }
   catch(e){ return { state:'unknown' }; }
 }
 function ownerText(o){
@@ -2891,10 +2893,14 @@ function ownerText(o){
 }
 /* Confirms a pick with the technician. Returns false to stop. */
 async function confirmReuse(username, forName){
-  const st = await pppoeStatus(username);
+  const st = await pppoeStatus(username, forName);
   if(st.state==='in_use'){
-    alert('⛔ '+username+' belongs to '+ownerText(st.owner)+', who is still ACTIVE and paying.\n\nThis cannot be used. Check the PPPoE username inside the modem, or use a modem from a disconnected/deactivated account.');
+    alert('⛔ '+username+' is already used by '+(ownerText(st.owner)||'another subscriber')+', whose billing is ACTIVE.\n\nIt cannot be given to '+(forName||'this subscriber')+' — billing would overwrite that subscriber.\n\n• Check the PPPoE username programmed in the modem you installed (e.g. sl160, not sl151), or\n• if the old subscriber has really left, ask the office to disable or deactivate their account in billing first.');
     return { ok:false };
+  }
+  if(st.state==='takeover'){
+    const ok = confirm('⚠ '+username+' belonged to '+ownerText(st.owner)+', whose account is '+(st.reason==='disabled'?'DISABLED':'DEACTIVATED')+' in billing.\n\nIf you continue, that billing record will be taken over by '+(forName||'this subscriber')+'.\n\nOnly continue if this modem really came from that former subscriber. Continue?');
+    return { ok, from: ok ? ownerText(st.owner) : '' };
   }
   if(st.state==='reusable'){
     const ok = confirm('This modem belonged to '+ownerText(st.owner)+'.\n\nIf you continue, billing will archive that account (their unpaid balance stays on their record) and move PPPoE '+username+' to '+(forName||'this subscriber')+'.\n\nContinue?');
@@ -2963,11 +2969,17 @@ function searchPppoe(){
       if(seq !== _pppoeSeq) return;
       _pppoeHits = d.customers || [];
       if(!_pppoeHits.length){ out.innerHTML = '<div class="tmeta">No PPPoE account by that name on the router.</div>'; return; }
-      out.innerHTML = _pppoeHits.map((c,i)=>`
-        <button type="button" class="lookup-row" onclick="pickPppoe(${i})">
-          <span class="lr-name">${esc(c.username)}</span>
-          <span class="tmeta">${esc(c.customerName && c.customerName!==c.username ? c.customerName : 'no name in billing yet')}${c.accountNo?' · '+esc(c.accountNo):' · not activated'}</span>
-        </button>`).join('');
+      out.innerHTML = _pppoeHits.map((c,i)=>{
+        const named = c.customerName && c.customerName!==c.username;
+        /* An account with an active subscriber on it is marked right in the list. */
+        const tag = c.status==='disabled' ? '<span class="pp-tag pp-dis">disabled</span>'
+          : (c.billingActive && named) ? '<span class="pp-tag pp-use">IN USE</span>'
+          : (!named ? '<span class="pp-tag pp-free">free</span>' : '');
+        return `<button type="button" class="lookup-row" onclick="pickPppoe(${i})">
+          <span class="lr-name">${esc(c.username)} ${tag}</span>
+          <span class="tmeta">${esc(named ? c.customerName : 'no name in billing yet')}${c.accountNo?' · '+esc(c.accountNo):' · not activated'}</span>
+        </button>`;
+      }).join('');
     }catch(e){
       if(seq !== _pppoeSeq) return;
       out.innerHTML = `<div class="tmeta">Lookup unavailable — ${esc(e.message)}</div>`;
@@ -2980,9 +2992,14 @@ async function pickPppoe(i){
   const t = byId(currentId);
   if(!c || !t) return;
   collectStep();                                   // keep what is already typed on this step
-  /* An installation on a pulled-out modem: say whose account it was before linking. */
+  /* Before linking: is this account already somebody's? (sl151 was given to a new
+     subscriber by mistake and billing overwrote the paying one.) */
   if(t.type==='installation'){
-    const chk = await confirmReuse(c.username, t.customer);
+    const out = document.getElementById('pppoeOut');
+    if(out) out.innerHTML = '<div class="tmeta">Checking billing that '+esc(c.username)+' is free…</div>';
+    const forName = [(t.data||{}).cust_fname, (t.data||{}).cust_lname].map(v=>String(v||'').trim()).filter(Boolean).join(' ') || t.customer || '';
+    const chk = await confirmReuse(c.username, forName);
+    if(out) out.innerHTML = '';
     if(!chk.ok) return;
     if(chk.from){ c = Object.assign({}, c, { accountNo:'' }); t.data.reused_from = chk.from; }
   }
@@ -4974,6 +4991,7 @@ function billingSyncPanel(t){
     <div class="sec-head"><div class="sec-title">Billing</div>
       <span class="badge ${tone}">${label}</span></div>
     ${when?`<div class="tmeta">Last attempt ${esc(when)}</div>`:''}
+    ${t.accountNo?`<div class="tmeta">🧾 Account number <b style="color:var(--text)">${esc(t.accountNo)}</b></div>`:(b && b.state==='done'?'<div class="tmeta" style="color:#92400e">🧾 No account number yet — set it in billing</div>':'')}
     ${b && b.error?`<div class="tmeta" style="color:var(--danger)">${esc(b.error)}</div>`:''}
     ${steps}
     <div class="tmeta" style="margin-top:6px">Sending again is safe: billing that is already active keeps its due date, and a plan that already matches is left alone, so nobody is charged differently or texted twice.</div>

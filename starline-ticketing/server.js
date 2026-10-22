@@ -839,11 +839,19 @@ async function pushBilling(t) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': MONITOR_TOKEN },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(60000),
+      signal: AbortSignal.timeout(150000),
     });
     const out = await r.json().catch(() => ({}));
     if (r.ok && out.ok) {
       t.billingSync = { state: 'done', at: Date.now(), recordId: out.recordId, steps: out.steps || [] };
+      /* A new subscriber's account number (given by billing, or assigned during the
+         push) comes back with the answer, so the job shows it straight away. */
+      const acct = String(out.accountNo || out.account || '').trim();
+      if (acct) {
+        t.accountNo = acct;
+        t.data = t.data || {};
+        if (!t.data.cust_account) t.data.cust_account = acct;
+      }
     } else {
       /* The monitor reports a step failure in the step itself, not as a
          top-level error. Showing "HTTP 502" instead of "the record did not come
@@ -853,7 +861,9 @@ async function pushBilling(t) {
       const why = out.error
         || (bad && (bad.detail || `the ${bad.step} step failed`))
         || `billing returned HTTP ${r.status}`;
-      t.billingSync = { state: 'failed', at: Date.now(), error: why, steps: out.steps || [] };
+      /* The PPPoE account belongs to another active subscriber: retrying would
+         never help (and must never succeed) — it needs a person to fix the job. */
+      t.billingSync = { state: out.code === 'IN_USE' || r.status === 409 ? 'blocked' : 'failed', at: Date.now(), error: why, steps: out.steps || [] };
       console.error(`[billing] ticket ${t.number} (${username}) not pushed: ${t.billingSync.error}`);
     }
   } catch (e) {
@@ -900,12 +910,12 @@ setInterval(() => {
 
 let catalogCache = { at: 0, data: null };
 
-async function monitorLookup(pathAndQuery) {
+async function monitorLookup(pathAndQuery, timeoutMs) {
   if (!MONITOR_URL || !MONITOR_TOKEN) {
     throw lookupError('Customer lookup is not set up yet (MONITOR_URL / MONITOR_TOKEN).', 503);
   }
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs || 12000);
   try {
     const r = await fetch(MONITOR_URL + pathAndQuery, {
       headers: { 'x-api-key': MONITOR_TOKEN },
@@ -1182,7 +1192,11 @@ const server = http.createServer(async (req, res) => {
     const statusOne = p.match(/^\/api\/lookup\/pppoe-status\/(.+)$/);
     if (statusOne && req.method === 'GET') {
       try {
-        return json(res, 200, await monitorLookup('/api/billing-pppoe-status/' + encodeURIComponent(decodeURIComponent(statusOne[1]))));
+        /* name = the new subscriber, so re-linking a job's own account is not flagged.
+           Billing's export can take a while, hence the longer wait. */
+        const forName = url.searchParams.get('name') || '';
+        return json(res, 200, await monitorLookup('/api/billing-pppoe-status/' + encodeURIComponent(decodeURIComponent(statusOne[1])) +
+          (forName ? '?name=' + encodeURIComponent(forName) : ''), 40000));
       } catch (e) {
         return json(res, 200, { state: 'unknown', error: e.message });
       }
