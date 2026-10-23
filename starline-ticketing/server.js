@@ -390,7 +390,7 @@ function auth(req) {
   const user = db.users.find(u => u.id === db.sessions[token]);
   return user ? { user, token } : null;
 }
-function publicUser(u) { return { id: u.id, username: u.username, name: u.name, role: u.role, inv: u.inv || { connectors: 0, cables: [], items: [] } }; }
+function publicUser(u) { return { id: u.id, username: u.username, name: u.name, role: u.role, phone: u.phone || '', smsReport: u.smsReport !== false, inv: u.inv || { connectors: 0, cables: [], items: [] } }; }
 
 /* ---------------- customer lookup (via the monitoring service) ----------------
  * The API key stays on this server: the technician's browser never sees it, and
@@ -971,6 +971,9 @@ function ticketSummary(t) {
 /* Records stock leaving the warehouse for a technician. `qty` is pieces (reels for
    cable) and `meters` the cable length that represents, so the usage report can
    compare metres released against metres consumed. */
+/* daily count + 4:45 PM SMS stock report — see stockday.js */
+const stockDay = require('./stockday')({ db, saveDB, logStock, logReel, round2, REEL_EMPTY_M, READING_TOL_M });
+
 function logStock(tech, kind, name, qty, meters, source, by, codes) {
   const q = parseFloat(qty) || 0;
   if (!tech || !q) return;
@@ -1177,6 +1180,13 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true });
     }
     if (p === '/api/me' && req.method === 'GET') return json(res, 200, { user: publicUser(me) });
+
+    /* end-of-shift count, daily stock report, staff mobile numbers (stockday.js) */
+    if (p.startsWith('/api/stock/') || /^\/api\/users\/[\w.]+\/phone$/.test(p)) {
+      const handled = await stockDay.routes(req, res, p, me, isAdmin, json, readBody);
+      if (handled !== false) return;
+      return json(res, 403, { error: 'Admin only' });
+    }
 
     /* ---- customer lookup for the ticket screens ----
        Any logged-in user may search; the key never leaves this server. */
@@ -1925,6 +1935,15 @@ const server = http.createServer(async (req, res) => {
 
       if (req.method === 'PUT') {
         const b = await readBody(req);
+        /* A technician who worked a day and did not count their stock at the end of
+           it counts before starting a new job. Only the start is held back: work on
+           a job already under way carries on. */
+        if (!isAdmin && t.status === 'open' && b.status === 'in_progress') {
+          const missed = stockDay.pendingCountDay(me);
+          if (missed) return json(res, 409, { code: 'COUNT_REQUIRED', day: missed,
+            error: `Do your stock count for ${missed} first (Stock count on your job list), then start this job.` });
+        }
+        if (!isAdmin) me.lastWorkDay = stockDay.manilaDay();
         if (isAdmin) {
           ['subject', 'customer', 'phone', 'address', 'message', 'number'].forEach(k => { if (b[k] !== undefined) t[k] = String(b[k]).trim(); });
           if (b.assignedTo !== undefined) {

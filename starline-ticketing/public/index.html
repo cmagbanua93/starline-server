@@ -518,6 +518,7 @@
     <button class="icon-btn no-print" onclick="refreshTickets(true)" title="Refresh">↻</button>
   </div>
   <div class="ministats" id="techMiniStats"></div>
+  <div class="card compact hidden" id="countCard"></div>
   <div class="card compact" id="techStockPanel" onclick="go('materials')" style="cursor:pointer"></div>
   <div class="pills no-print" id="techStatusPills"></div>
   <div class="type-tabs no-print" id="techTypeTabs"></div>
@@ -673,6 +674,8 @@
   </div>
 
   <!-- warehouse + technician stock -->
+  <div id="matDaily" class="hidden"></div>
+
   <div id="matStock" class="hidden">
     <div class="card">
       <div class="sec-head"><div class="sec-title">🏢 Warehouse Inventory</div></div>
@@ -995,6 +998,18 @@ async function persist(t){
     ticketsEtag = null;   // our own write changed the list
   }catch(e){
     if(e.message.includes('Session expired')) return;
+    if(/stock count/i.test(e.message)){
+      /* the server would not start this job until yesterday's count is in */
+      t.status = 'open'; delete t.started; delete t._dirty;
+      cacheTickets();
+      if(Date.now()-COUNT_ALERT_AT > 5000){
+        COUNT_ALERT_AT = Date.now();
+        alert(e.message);
+        countFormOpen = true; COUNT_AT = 0;
+        go('jobs');
+      }
+      return;
+    }
     t._dirty = true; setOffline(true);
   }
   cacheTickets();
@@ -1992,6 +2007,8 @@ function renderTechList(){
         :`<button class="pill" style="flex:none;padding:2px 8px;font-size:11px" onclick="cancelReturn('${esc(r.id)}','${esc(r.code||'')}',${r.meters},false)">Undo return</button>`}
     </div>`;
   };
+  renderCountCard();
+  if(Date.now()-COUNT_AT > 60000) loadCountStatus();
   document.getElementById('techStockPanel').innerHTML = `
     <div class="sec-head" style="margin-bottom:5px">
       <span class="sec-title">📦 My Stock on Hand</span>
@@ -2163,6 +2180,13 @@ function renderTechStats(){
 
 /* =================== TECH: WIZARD =================== */
 async function openTicket(id){
+  const ot = byId(id);
+  if(ot && ot.status==='open' && USER && USER.role==='tech' && COUNT_STATUS && COUNT_STATUS.pendingDay){
+    alert(`Do your stock count for ${prettyCountDay(COUNT_STATUS.pendingDay)} first. It is at the top of your job list — then you can start this job.`);
+    countFormOpen = true; renderCountCard();
+    const cc = document.getElementById('countCard'); if(cc) cc.scrollIntoView({behavior:'smooth'});
+    return;
+  }
   currentId = id;
   renderTicket();          // instant paint from the summary
   show('viewTicket');
@@ -4057,6 +4081,14 @@ function renderDash(){
   const alerts = [];
   const disc = stockDiscrepancies();
   if(disc.length) alerts.push([`<span class="dot"></span>${disc.length} cable/stock discrepanc${disc.length===1?'y':'ies'} to review`, `matTab='reels';go('materials')`, 'red']);
+  if(Date.now()-DAILY_AT > 60000) loadDaily().then(()=>{ if(currentView==='viewDash') renderDash(); });
+  if(DAILY){
+    const nRev = DAILY.review.length;
+    if(nRev) alerts.push([`<span class="dot"></span>${nRev} stock count difference${nRev===1?'':'s'} to review`, `matTab='daily';go('materials')`, 'red']);
+    const notCounted = DAILY.preview.techs.filter(t=>!t.count);
+    if(notCounted.length && manilaHHMM() >= DAILY.settings.reportTime)
+      alerts.push([`🧮 ${notCounted.length} technician${notCounted.length===1?' has':'s have'}n't done today's stock count`, `matTab='daily';go('materials')`]);
+  }
   if(urgent.length) alerts.push([`⚡ ${urgent.length} urgent job${urgent.length===1?'':'s'} still open`, `dashPriority=1;go('tickets')`]);
   if(stale.length) alerts.push([`🕒 ${stale.length} job${stale.length===1?' has':'s have'} been running over 24 hours`, `dashStatus='in_progress';go('tickets')`]);
   if(unassigned.length) alerts.push([`👤 ${unassigned.length} unassigned job${unassigned.length===1?'':'s'}`, `dashStatus='';go('tickets')`]);
@@ -4647,12 +4679,15 @@ function renderMaterials(){
     ['requests','Requests'+(pending?` (${pending})`:'')],
     ['usage','Usage'],
     ['reels','Reels'+(REEL_ALERTS?` (${REEL_ALERTS})`:'')],
-    ['stock','Stock']
+    ['stock','Stock'],
+    ['daily','Daily count'+(DAILY&&DAILY.review.length?` (${DAILY.review.length})`:'')]
   ].map(([v,l])=>`<button class="${matTab===v?'on':''}" onclick="setMatTab('${v}')">${l}</button>`).join('');
   document.getElementById('matRequests').classList.toggle('hidden', matTab!=='requests');
   document.getElementById('matUsage').classList.toggle('hidden', matTab!=='usage');
   document.getElementById('matReels').classList.toggle('hidden', matTab!=='reels');
   document.getElementById('matStock').classList.toggle('hidden', matTab!=='stock');
+  document.getElementById('matDaily').classList.toggle('hidden', matTab!=='daily');
+  if(matTab==='daily'){ if(DAILY) renderDaily(); loadDaily().then(()=>{ if(matTab==='daily') renderDaily(); }); }
   if(matTab==='requests') renderRequests();
   if(matTab==='usage'){
     renderByTech();
@@ -5111,6 +5146,208 @@ function exportJSON(){
 }
 
 /* =================== ADMIN: USERS =================== */
+/* =================== DAILY STOCK COUNT & SMS REPORT =================== */
+let COUNT_STATUS = null, COUNT_AT = 0, COUNT_ALERT_AT = 0, countFormOpen = false, COUNT_RESULT = null;
+let DAILY = null, DAILY_AT = 0;
+function manilaHHMM(){ const d = new Date(Date.now()+8*3600000); return String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0'); }
+function prettyCountDay(day){
+  if(!day) return '';
+  const d = new Date(day+'T00:00:00Z');
+  return d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric',timeZone:'UTC'});
+}
+function time12(hhmm){ const [h,m]=String(hhmm||'00:00').split(':').map(Number); return `${((h+11)%12)+1}:${String(m).padStart(2,'0')} ${h<12?'AM':'PM'}`; }
+
+async function loadCountStatus(){
+  if(!USER || USER.role!=='tech') return;
+  COUNT_AT = Date.now();
+  try{ COUNT_STATUS = await api('/api/stock/count-status'); }catch(e){ return; }
+  if(currentView==='viewTechList') renderCountCard();
+}
+function renderCountCard(){
+  const el = document.getElementById('countCard');
+  if(!el) return;
+  const cs = COUNT_STATUS;
+  if(!cs || !USER || USER.role!=='tech'){ el.classList.add('hidden'); return; }
+  const due = cs.pendingDay || (cs.open && !cs.doneToday);
+  /* hide the system figures while counting, so the count is a real count */
+  const sp = document.getElementById('techStockPanel');
+  if(sp) sp.classList.toggle('hidden', !!(due && countFormOpen));
+  if(COUNT_RESULT && !due){
+    const r = COUNT_RESULT;
+    el.classList.remove('hidden');
+    el.innerHTML = r.status==='ok'
+      ? `<div class="sec-head" style="margin-bottom:4px"><span class="sec-title">✅ Stock count saved</span><button class="pill" onclick="COUNT_RESULT=null;renderCountCard()">OK</button></div>
+         <div class="tmeta" style="font-size:13px">Everything matches the system. Thank you!</div>`
+      : `<div class="sec-head" style="margin-bottom:4px"><span class="sec-title" style="color:var(--danger)">⚠ Stock count saved — some items don't match</span><button class="pill" onclick="COUNT_RESULT=null;renderCountCard()">OK</button></div>
+         ${r.diffs.map(d=>`<div class="tmeta" style="font-size:13px;color:var(--danger)">• ${esc(d)}</div>`).join('')}
+         <div class="tmeta" style="font-size:12px;margin-top:4px">The office will check these. If you find a mistake in your count, tell the admin.</div>`;
+    return;
+  }
+  if(!due){
+    el.classList.toggle('hidden', !cs.doneToday);
+    if(cs.doneToday) el.innerHTML = `<div class="tmeta" style="font-size:13px;color:var(--ok,#15803d);font-weight:700">✅ Today's stock count is done</div>`;
+    return;
+  }
+  el.classList.remove('hidden');
+  const forDay = cs.pendingDay ? `${prettyCountDay(cs.pendingDay)} (missed — required before your next job)` : 'today';
+  if(!countFormOpen){
+    el.innerHTML = `<div class="sec-head" style="margin-bottom:4px">
+        <span class="sec-title"${cs.pendingDay?' style="color:var(--danger)"':''}>🧮 End-of-day stock count</span>
+        <span class="badge ${cs.pendingDay?'b-rej':'b-install'}">${cs.pendingDay?'Required':'Due now'}</span></div>
+      <div class="tmeta" style="font-size:13px">Count what is actually in your bag and on your reels for ${esc(forDay)}. It takes about a minute.</div>
+      <button class="btn btn-primary btn-sm" onclick="countFormOpen=true;renderCountCard()">Start count</button>`;
+    return;
+  }
+  const sh = cs.sheet || {reels:[],items:[]};
+  el.innerHTML = `<div class="sec-head" style="margin-bottom:4px"><span class="sec-title">🧮 Stock count — ${esc(forDay)}</span></div>
+    <div class="tmeta" style="font-size:12.5px">Count what you physically have. Don't copy the app — the office compares the two.</div>
+    <label>🔌 FIC connectors (pcs)</label>
+    <input id="cntConn" type="number" inputmode="numeric" min="0" step="1" placeholder="0 if none">
+    ${sh.reels.map(r=>`<label>🧵 Reel ${esc(r.code||'')} ${esc(r.name||'')} — metres left${r.returning?' (returning)':''}</label>
+      <input class="cnt-reel" data-id="${esc(r.id)}" type="number" inputmode="decimal" min="0" step="0.1" placeholder="read the meter mark">`).join('')}
+    ${sh.items.map(i=>`<label>📦 ${esc(i.name)} (pcs)</label>
+      <input class="cnt-item" data-name="${esc(i.name)}" type="number" inputmode="numeric" min="0" step="1" placeholder="0 if none">`).join('')}
+    <label>Note (optional)</label>
+    <input id="cntNote" placeholder="e.g. 2 connectors damaged">
+    <button class="btn btn-ok btn-sm" id="cntBtn" onclick="submitStockCount()">Submit count</button>
+    ${cs.pendingDay?'':'<button class="btn btn-ghost btn-sm" onclick="countFormOpen=false;renderCountCard()">Later</button>'}`;
+}
+async function submitStockCount(){
+  const conn = document.getElementById('cntConn').value;
+  if(conn===''){ alert('Enter how many FIC connectors you have (0 if none).'); return; }
+  const reels = {}, items = {};
+  let missing = false;
+  document.querySelectorAll('#countCard .cnt-reel').forEach(i=>{ if(i.value==='') missing = true; reels[i.dataset.id] = i.value; });
+  if(missing){ alert('Enter the metres left on every reel (read the meter mark on the cable).'); return; }
+  document.querySelectorAll('#countCard .cnt-item').forEach(i=>{ items[i.dataset.name] = i.value===''?0:i.value; });
+  const btn = document.getElementById('cntBtn'); btn.disabled = true; btn.textContent = 'Saving…';
+  try{
+    const r = await api('/api/stock/count','POST',{connectors:conn, reels, items, note:document.getElementById('cntNote').value});
+    COUNT_RESULT = r.count; countFormOpen = false;
+    await loadCountStatus();
+    renderCountCard();
+  }catch(e){ alert(e.message); btn.disabled = false; btn.textContent = 'Submit count'; }
+}
+
+/* ---- admin: Materials › Daily count ---- */
+async function loadDaily(){
+  DAILY_AT = Date.now();
+  try{ DAILY = await api('/api/stock/daily'); }catch(e){}
+  return DAILY;
+}
+function renderDaily(){
+  const el = document.getElementById('matDaily');
+  if(!DAILY){ el.innerHTML = '<div class="card"><div class="tmeta">Loading…</div></div>'; return; }
+  const d = DAILY, st = d.settings, pv = d.preview;
+  const reviewHtml = d.review.length ? d.review.map(c=>`
+    <div style="border:1px solid #fca5a5;background:#fef2f2;border-radius:10px;padding:9px 11px;margin-bottom:8px">
+      <div style="font-weight:700">${esc(c.techName)} — ${esc(prettyCountDay(c.day))}${(c.days||[]).length>1?` (also ${esc(c.days.slice(0,-1).map(prettyCountDay).join(', '))})`:''}</div>
+      ${c.diffs.map(x=>`<div class="tmeta" style="font-size:13px;color:#991b1b">• ${esc(x)}</div>`).join('')}
+      ${c.note?`<div class="tmeta" style="font-size:12.5px">💬 ${esc(c.note)}</div>`:''}
+      <div class="tmeta" style="font-size:11.5px">Counted ${esc(fmt(c.at))}${c.by&&c.by!==c.techName?' by '+esc(c.by):''}</div>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button class="btn btn-ok btn-sm" style="margin-top:0" onclick="reviewStockCount('${esc(c.id)}','accept')">Accept count — fix the system</button>
+        <button class="btn btn-ghost btn-sm" style="margin-top:0" onclick="reviewStockCount('${esc(c.id)}','dismiss')">Dismiss — system is right</button>
+      </div>
+    </div>`).join('') : '<div class="tmeta">No differences waiting. 👍</div>';
+
+  const techRows = pv.techs.map(t=>{
+    const s = t.stock;
+    const cnt = t.count ? (t.count.status==='ok' ? '<span class="badge b-done">Counted ✓</span>' : `<span class="badge b-rej">Diff (${t.count.diffs.length})</span>`)
+      : '<span class="badge b-open">Not counted</span>';
+    return `<tr>
+      <td><b>${esc(t.name)}</b>${t.to?'':'<div class="tmeta" style="color:var(--danger)">no mobile</div>'}${t.pending?`<div class="tmeta" style="color:var(--danger)">missed ${esc(prettyCountDay(t.pending))}</div>`:''}</td>
+      <td>🔌 ${s.connectors} · 🧵 ${s.meters} m${s.items.map(i=>`<br>📦 ${esc(i.name)} ${i.qty}`).join('')}</td>
+      <td>${s.needs.length?s.needs.map(n=>`<div style="color:var(--danger);font-weight:700">${esc(n)}</div>`).join(''):'<span class="tmeta">OK</span>'}</td>
+      <td>${cnt}</td></tr>`;
+  }).join('');
+
+  const itemMinRows = d.items.map(i=>`<div class="row2"><div><label>${esc(i.name)}</label></div>
+    <div><input class="dm-item" data-name="${esc(i.name)}" type="number" min="0" step="1" value="${i.min}"></div></div>`).join('');
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="sec-head"><div class="sec-title">⚠ Count differences to review</div></div>
+      <div class="step-desc">A technician's count did not match the system. <b>Accept</b> sets the system to what they counted (logged as a count adjustment). <b>Dismiss</b> keeps the system figures.</div>
+      ${reviewHtml}
+    </div>
+    <div class="card">
+      <div class="sec-head"><div class="sec-title">📋 Today's stock report — ${esc(prettyCountDay(pv.day))}</div></div>
+      <div class="step-desc">Sent by SMS ${st.enabled?`every day at <b>${esc(time12(st.reportTime))}</b>`:'<b style="color:var(--danger)">— automatic sending is OFF</b>'}. Each technician gets their own stock; the office numbers get the summary below.</div>
+      <table class="summary-table"><tr><td>Technician</td><td>On hand</td><td>Needs</td><td>Count</td></tr>${techRows||'<tr><td colspan="4">No technicians.</td></tr>'}</table>
+      <label>Office summary SMS (${pv.office.to.length?esc(pv.office.to.join(', ')):'<span style="color:var(--danger)">no office number yet — add a mobile to an admin account in Users, or below</span>'})</label>
+      <pre style="white-space:pre-wrap;background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:9px;font-size:12.5px;margin:0">${esc(pv.office.message)}</pre>
+      <div class="tmeta" style="margin-top:8px">SMS gateway: ${d.keySet?'<b style="color:#15803d">Semaphore key set ✓</b>':'<b style="color:var(--danger)">SEMAPHORE_API_KEY not set on the ticketing service — nothing will send</b>'}</div>
+      <button class="btn btn-primary btn-sm" onclick="sendStockNow()">📨 Send today's report now</button>
+    </div>
+    <div class="card">
+      <div class="sec-head"><div class="sec-title">⚙ Settings</div></div>
+      <div class="row2">
+        <div><label>Send report at</label><input id="dsReport" type="time" value="${esc(st.reportTime)}"></div>
+        <div><label>Count opens at</label><input id="dsFrom" type="time" value="${esc(st.countFrom)}"></div>
+      </div>
+      <label style="display:flex;gap:8px;align-items:center;text-transform:none"><input id="dsEnabled" type="checkbox" style="width:auto" ${st.enabled?'checked':''}> Send the SMS report automatically</label>
+      <label style="display:flex;gap:8px;align-items:center;text-transform:none"><input id="dsRequire" type="checkbox" style="width:auto" ${st.requireCount?'checked':''}> Require the count — a technician who skipped it can't start a job next day until it's done</label>
+      <div class="row2">
+        <div><label>Request when FIC below</label><input id="dsMinConn" type="number" min="0" value="${st.minConnectors}"></div>
+        <div><label>Request when fiber below (m)</label><input id="dsMinM" type="number" min="0" value="${st.minCableMeters}"></div>
+      </div>
+      <div class="tmeta" style="margin-top:8px;font-weight:700">Request when these items are below:</div>
+      ${itemMinRows}
+      <div class="row2"><div><input id="dsNewItem" placeholder="Add item, e.g. NAP box 16-port"></div><div><input id="dsNewMin" type="number" min="0" placeholder="min"></div></div>
+      <label>Extra office numbers (comma separated)</label>
+      <input id="dsPhones" value="${esc((st.extraPhones||[]).join(', '))}" placeholder="09171234567, 09981234567">
+      <label>Sender name (optional — must be approved in Semaphore)</label>
+      <input id="dsSender" maxlength="11" value="${esc(st.sender||'')}" placeholder="e.g. STARLINE">
+      <button class="btn btn-primary btn-sm" onclick="saveDailySettings()">Save settings</button>
+    </div>
+    <div class="card">
+      <div class="sec-head"><div class="sec-title">📨 SMS log</div></div>
+      ${d.smsLog.length?`<table class="summary-table"><tr><td>When</td><td>To</td><td>Status</td></tr>
+        ${d.smsLog.map(m=>`<tr><td>${esc(fmt(m.at))}<div class="tmeta">${esc(m.kind)}</div></td><td>${esc(m.to)}</td>
+        <td>${m.status==='sent'?'<span class="badge b-done">Sent</span>':`<span class="badge b-rej">Failed</span><div class="tmeta">${esc((m.response||'').slice(0,120))}</div>`}</td></tr>`).join('')}</table>`
+        :'<div class="tmeta">Nothing sent yet.</div>'}
+    </div>`;
+}
+async function reviewStockCount(id, action){
+  if(action==='accept' && !confirm('Set this technician\'s stock in the system to what they counted?')) return;
+  try{ await api(`/api/stock/counts/${id}/${action}`,'POST',{}); }catch(e){ alert(e.message); return; }
+  await loadDaily(); await loadUsers(); renderMaterials();
+}
+async function sendStockNow(){
+  if(!confirm('Send today\'s stock report by SMS now?')) return;
+  try{
+    const r = await api('/api/stock/send-now','POST',{});
+    alert(`${r.sent} sent, ${r.failed} failed${r.skipped.length?'\nSkipped: '+r.skipped.join(', '):''}`);
+  }catch(e){ alert(e.message); }
+  await loadDaily(); renderDaily();
+}
+async function saveDailySettings(){
+  const itemMins = {};
+  document.querySelectorAll('#matDaily .dm-item').forEach(i=>{ itemMins[i.dataset.name] = i.value||0; });
+  const ni = document.getElementById('dsNewItem').value.trim();
+  if(ni) itemMins[ni] = document.getElementById('dsNewMin').value||1;
+  const body = {
+    reportTime: document.getElementById('dsReport').value, countFrom: document.getElementById('dsFrom').value,
+    enabled: document.getElementById('dsEnabled').checked, requireCount: document.getElementById('dsRequire').checked,
+    minConnectors: document.getElementById('dsMinConn').value, minCableMeters: document.getElementById('dsMinM').value,
+    itemMins, sender: document.getElementById('dsSender').value,
+    extraPhones: document.getElementById('dsPhones').value.split(/[,\s]+/).filter(Boolean)
+  };
+  try{ await api('/api/stock/settings','POST',body); }catch(e){ alert(e.message); return; }
+  await loadDaily(); renderDaily();
+  alert('Saved.');
+}
+async function setPhone(id){
+  const u = users.find(x=>x.id===id); if(!u) return;
+  const v = prompt(`Mobile number for ${u.name} (for the daily stock SMS). Leave blank to remove.`, u.phone||'');
+  if(v===null) return;
+  let smsReport = u.smsReport!==false;
+  if(v.trim()) smsReport = confirm(`Send the daily stock SMS to ${u.name}?\nOK = yes, Cancel = keep the number but don't send.`);
+  try{ await api(`/api/users/${id}/phone`,'POST',{phone:v.trim(), smsReport}); }catch(e){ alert(e.message); return; }
+  await loadUsers(); renderUsers();
+}
+
 function renderUsers(){
   const el = document.getElementById('userList');
   if(!users.length){ el.innerHTML='<div class="tmeta">No accounts.</div>'; return; }
@@ -5122,10 +5359,12 @@ function renderUsers(){
       <div>
         <div class="un">${esc(u.name)} ${u.role==='admin'?'<span class="badge b-install">Admin</span>':'<span class="badge b-done">Technician</span>'}</div>
         <div class="um">@${esc(u.username)}${u.role==='tech'?` · 🧵 ${reelTxt} · 🔌 ${inv.connectors||0} pcs FIC`:''}</div>
+        <div class="um">📱 ${u.phone?esc(u.phone)+(u.smsReport===false?' · daily SMS off':' · gets the daily stock SMS'):'<span style="color:var(--danger)">no mobile number — no stock SMS</span>'}</div>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
         ${u.role==='tech'?`<button class="btn btn-ok btn-sm" style="margin-top:0" onclick="addStock('${u.id}','${esc(u.name)}')">＋ Stock</button>
         <button class="btn btn-ghost btn-sm" style="margin-top:0" onclick="toggleManage('${u.id}')">⚙ Manage</button>`:''}
+        <button class="btn btn-ghost btn-sm" style="margin-top:0" onclick="setPhone('${u.id}')">📱 Phone</button>
         <button class="btn btn-ghost btn-sm" style="margin-top:0" onclick="resetPassword('${u.id}','${esc(u.name)}')">Reset PW</button>
         ${u.id!==USER.id?`<button class="btn btn-warn btn-sm" style="margin-top:0" onclick="deleteUser('${u.id}','${esc(u.name)}')">✕</button>`:''}
       </div>
