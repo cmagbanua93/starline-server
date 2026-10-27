@@ -1211,8 +1211,8 @@ const REPAIR_FLOWS = {
     { key:'work', title:'3. Repair or Replacement',
       desc:'Record exactly what you did to the unit. If you swapped it, fill in the details of the replacement modem.',
       fields:[
-        {k:'modem_action', type:'select', label:'Action Taken', req:true, options:['Reset / reconfigured','Firmware or settings fix','Power adapter replaced','Modem replaced with a new unit','Replaced with a modem from a deactivated account','Patch cord replaced']},
-        {k:'swap_pppoe', type:'pppoe_swap', label:'PPPoE Account in the Replacement Modem (only if you used a modem from a deactivated account)'},
+        {k:'modem_action', type:'select', label:'Action Taken', req:true, options:['Reset / reconfigured','Firmware or settings fix','Power adapter replaced','New modem — different PPPoE account (e.g. sl170)','New modem — same PPPoE account','Replaced with a modem from a deactivated account','Patch cord replaced']},
+        {k:'swap_pppoe', type:'pppoe_swap', label:'PPPoE Account Programmed in the Replacement Modem'},
         {k:'modem_serial', type:'text', label:'New Modem Serial Number (if replaced)', placeholder:'Leave blank if the same unit was kept'},
         {k:'modem_model', type:'text', label:'Modem Model', placeholder:'e.g. Huawei EG8145V5'},
         {k:'modem_mac', type:'text', label:'MAC Address (optional)'},
@@ -2374,8 +2374,8 @@ function finishTicket(){
     t.data.nap_id = String(t.data.nap_id).trim().toUpperCase().replace(/\s+/g,'');
     if(!napNameOk(t.data.nap_id) && !confirm('"'+t.data.nap_id+'" does not follow the naming rule (e.g. TUNGKIL-LCP1-SUB1-NAP2).\n\nThe office will correct it before it reaches billing. Complete anyway?')){ renderTicket(); return; }
   }
-  if(t.type==='repair' && t.data.modem_action===SWAP_ACTION && !t.data.swap_pppoe){
-    alert('You chose "'+SWAP_ACTION+'".\n\nSearch and pick the PPPoE account programmed in the replacement modem (Step 3), so billing can move it to this subscriber.');
+  if(t.type==='repair' && SWAP_ACTIONS.includes(t.data.modem_action) && !t.data.swap_pppoe){
+    alert('You chose "'+t.data.modem_action+'".\n\nIn Step 3, search and pick the PPPoE account programmed in the replacement modem (e.g. sl170), so billing moves this subscriber to it.\n\nIf you programmed the SAME account into the new modem, choose "'+SAME_ACTION+'" instead.');
     renderTicket(); return;
   }
   if(t.type==='installation' && !t.pppoeUsername){
@@ -2417,7 +2417,7 @@ function renderField(t,f){
     const chosen = t.data.swap_pppoe
       ? `<div class="linked-chip"><span>🔁 ${esc(t.data.swap_pppoe)}${t.data.swap_from?' · from '+esc(t.data.swap_from):''}</span>
            <button type="button" class="linked-x" title="Remove" onclick="clearSwap()">✕</button></div>`
-      : `<div class="tmeta">Pick this only if Action Taken is <b>${esc(SWAP_ACTION)}</b>. Search the PPPoE username programmed in the modem you brought. Billing moves that account to this subscriber, archives the old owner (their balance stays), and switches off the account in the defective modem.</div>`;
+      : `<div class="tmeta">Needed when the replacement modem has a <b>different</b> PPPoE account from ${esc(t.pppoeUsername||'the subscriber\'s current one')} (e.g. it carries sl170). Search that account. When the job is completed, billing changes this subscriber's PPPoE username and password to it — name, account number and balance stay. Leave empty if you kept or re-programmed the same account.</div>`;
     return `<label>${f.label}</label>
       ${chosen}
       <input id="swapSearch" placeholder="e.g. sl132" oninput="searchSwap()" autocomplete="off">
@@ -2906,6 +2906,9 @@ async function usePlannedList(){
    free / placeholder (never billed) / reusable (disconnected, deactivated or
    archived) / in_use (someone active and paying — never take it). */
 const SWAP_ACTION = 'Replaced with a modem from a deactivated account';
+const NEW_ACCT_ACTION = 'New modem — different PPPoE account (e.g. sl170)';
+const SAME_ACTION = 'New modem — same PPPoE account';
+const SWAP_ACTIONS = [NEW_ACCT_ACTION, SWAP_ACTION, 'Modem replaced with a new unit'];
 async function pppoeStatus(username, forName){
   try{ return await api('/api/lookup/pppoe-status/'+encodeURIComponent(username)+(forName?'?name='+encodeURIComponent(forName):'')); }
   catch(e){ return { state:'unknown' }; }
@@ -2916,11 +2919,15 @@ function ownerText(o){
   return (o.name||'a former subscriber') + (o.account_no?' (account '+o.account_no+')':'') + (bal>0?', owes ₱'+bal.toFixed(2):'');
 }
 /* Confirms a pick with the technician. Returns false to stop. */
-async function confirmReuse(username, forName){
+async function confirmReuse(username, forName, swapFrom){
   const st = await pppoeStatus(username, forName);
   if(st.state==='in_use'){
     alert('⛔ '+username+' is already used by '+(ownerText(st.owner)||'another subscriber')+', whose billing is ACTIVE.\n\nIt cannot be given to '+(forName||'this subscriber')+' — billing would overwrite that subscriber.\n\n• Check the PPPoE username programmed in the modem you installed (e.g. sl160, not sl151), or\n• if the old subscriber has really left, ask the office to disable or deactivate their account in billing first.');
     return { ok:false };
+  }
+  if(st.state==='takeover' && swapFrom){
+    const ok = confirm('⚠ '+username+' belonged to '+ownerText(st.owner)+', whose account is '+(st.reason==='disabled'?'DISABLED':'DEACTIVATED')+' in billing.\n\nIf you continue, '+(forName||'this subscriber')+' moves to '+username+' (same name, account number and balance), and '+ownerText(st.owner).split(' (')[0]+'\'s record gets '+swapFrom+' (the defective modem) instead.\n\nOnly continue if this modem really came from that former subscriber. Continue?');
+    return { ok, from: ok ? ownerText(st.owner) : '' };
   }
   if(st.state==='takeover'){
     const ok = confirm('⚠ '+username+' belonged to '+ownerText(st.owner)+', whose account is '+(st.reason==='disabled'?'DISABLED':'DEACTIVATED')+' in billing.\n\nIf you continue, that billing record will be taken over by '+(forName||'this subscriber')+'.\n\nOnly continue if this modem really came from that former subscriber. Continue?');
@@ -2961,11 +2968,11 @@ async function pickSwap(i){
   if(!c || !t) return;
   collectStep();
   if(t.pppoeUsername && c.username.toLowerCase()===t.pppoeUsername.toLowerCase()){ alert('That is this subscriber\'s current account — pick the account in the replacement modem.'); return; }
-  const chk = await confirmReuse(c.username, t.customer);
+  const chk = await confirmReuse(c.username, t.customer, t.pppoeUsername||'the old account');
   if(!chk.ok) return;
   t.data.swap_pppoe = c.username;
   t.data.swap_from = chk.from || (c.customerName && c.customerName!==c.username ? c.customerName : '');
-  t.data.modem_action = SWAP_ACTION;
+  if(!SWAP_ACTIONS.includes(t.data.modem_action)) t.data.modem_action = chk.from ? SWAP_ACTION : NEW_ACCT_ACTION;
   await persist(t);
   renderTicket();
 }

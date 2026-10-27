@@ -698,8 +698,12 @@ async function pushInstall(t) {
    billing moves that account to this subscriber and switches off the old one
    (still inside the defective unit). Same fire-and-record rules as installs. */
 const SWAP_ACTION = 'Replaced with a modem from a deactivated account';
+/* Every "Action Taken" where the subscriber ends up on a different PPPoE account
+   (the old "new unit" wording counts too, for jobs started before the change). */
+const SWAP_ACTIONS = ['New modem — different PPPoE account (e.g. sl170)', SWAP_ACTION, 'Modem replaced with a new unit'];
 function isModemSwap(t) {
-  return t && t.type === 'repair' && t.data && t.data.modem_action === SWAP_ACTION && String(t.data.swap_pppoe || '').trim();
+  return t && t.type === 'repair' && t.data && SWAP_ACTIONS.includes(t.data.modem_action) && String(t.data.swap_pppoe || '').trim()
+    && String(t.data.swap_pppoe).trim().toLowerCase() !== String(t.pppoeUsername || '').trim().toLowerCase();
 }
 async function pushModemSwap(t) {
   const d = t.data || {};
