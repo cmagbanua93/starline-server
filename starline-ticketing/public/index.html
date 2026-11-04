@@ -5360,7 +5360,7 @@ function renderUsers(){
   if(!users.length){ el.innerHTML='<div class="tmeta">No accounts.</div>'; return; }
   el.innerHTML = users.map(u=>{
     const inv = u.inv||{connectors:0,cables:[]};
-    const reelTxt = (inv.cables||[]).map(r=>`${esc(r.name)} ${r.meters}m`).join(', ')||'no cable';
+    const reelTxt = (inv.cables||[]).map(r=>`${r.code?'<b>'+esc(r.code)+'</b> ':''}${esc(r.name)} ${r.meters}m${r.state==='returning'?' (returning)':''}`).join(', ')||'no cable';
     return `
     <div class="user-row">
       <div>
@@ -5387,10 +5387,10 @@ function manageStockHtml(u){
     <div class="tmeta" style="font-weight:700;margin-bottom:6px">Edit stock on hand — ${esc(u.name)}</div>
     ${(inv.cables||[]).map(r=>`
       <div class="user-row" style="padding:6px 0">
-        <div class="um">🧵 ${esc(r.name)} — <b>${r.meters} m</b></div>
+        <div class="um">🧵 ${r.code?'<b>'+esc(r.code)+'</b> · ':''}${esc(r.name)} — <b>${r.meters} m</b>${r.state==='returning'?' <span style="color:var(--muted)">(returning)</span>':''}</div>
         <div style="display:flex;gap:6px">
-          <button class="btn btn-ghost btn-sm" style="margin-top:0;padding:4px 10px" onclick="editReel('${u.id}','${r.id}','${esc(r.name)}',${r.meters})">✎ Edit</button>
-          <button class="btn btn-warn btn-sm" style="margin-top:0;padding:4px 10px" onclick="deleteReel('${u.id}','${r.id}','${esc(r.name)}')">✕</button>
+          <button class="btn btn-ghost btn-sm" style="margin-top:0;padding:4px 10px" onclick="editReel('${u.id}','${r.id}','${esc((r.code?r.code+' ':'')+r.name)}',${r.meters})">✎ Edit</button>
+          <button class="btn btn-warn btn-sm" style="margin-top:0;padding:4px 10px" onclick="deleteReel('${u.id}','${r.id}','${esc((r.code?r.code+' ':'')+r.name)}')">✕</button>
         </div>
       </div>`).join('')||'<div class="um">No cable reels.</div>'}
     <div class="user-row" style="padding:6px 0">
