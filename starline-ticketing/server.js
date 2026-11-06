@@ -1267,6 +1267,67 @@ const server = http.createServer(async (req, res) => {
        is that night's worklist, worked out by comparing each completed job with
        what billing currently holds. It clears itself: once TaokiNinam matches,
        the row stops appearing. Nothing to tick off. */
+    /* ---- one-time repair: installs whose billing record lost its Area / NAP ----
+       The job knows the box (nap_id, picked on the map); billing is asked what it
+       holds now, and only records with a blank Area or NAP are offered for fixing.
+       The monitor does the writes in the background (billing-tools.js). */
+    if (p === '/api/billing/area-check' && req.method === 'GET') {
+      if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+      if (!MONITOR_URL || !MONITOR_TOKEN) return json(res, 503, { error: 'Billing is not connected (MONITOR_URL / MONITOR_TOKEN).' });
+      const jobs = db.tickets.filter(t => t.type === 'installation' && t.status === 'completed' && String(t.pppoeUsername || '').trim())
+        .sort((a, b) => (b.completed || 0) - (a.completed || 0));
+      try {
+        const r = await fetch(MONITOR_URL + '/api/billing-records', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': MONITOR_TOKEN },
+          body: JSON.stringify({ usernames: jobs.map(t => t.pppoeUsername) }), signal: AbortSignal.timeout(120000),
+        });
+        const out = await r.json().catch(() => ({}));
+        if (!r.ok) return json(res, 502, { error: out.error || ('billing returned HTTP ' + r.status) });
+        const recs = out.records || {};
+        const seen = new Set();
+        const rows = [];
+        for (const t of jobs) {
+          const u = String(t.pppoeUsername).trim().toLowerCase();
+          if (seen.has(u)) continue;                       // newest job for each account wins
+          seen.add(u);
+          const d = t.data || {}, box = String(d.nap_id || '').trim(), b = recs[u];
+          let state;
+          if (!b || !b.found) state = b && b.duplicate ? 'duplicate' : 'not_found';
+          else if (!box) state = 'no_box';
+          else if (!b.area || !b.nap) state = 'missing';
+          else if (b.area.trim().toUpperCase() !== box.toUpperCase()) state = 'different';
+          else continue;                                   // already right — not listed
+          rows.push({ ticketId: t.id, number: t.number, completed: t.completed, customer: t.customer || '', username: u,
+            box, port: String(d.nap_port || '').trim(), billingArea: b && b.area || '', billingNap: b && b.nap || '', accountNo: b && b.account || '', state });
+        }
+        return json(res, 200, { checked: seen.size, rows });
+      } catch (e) {
+        return json(res, 502, { error: e.name === 'TimeoutError' ? 'billing did not answer in time' : e.message });
+      }
+    }
+    if (p === '/api/billing/area-fix') {
+      if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+      if (!MONITOR_URL || !MONITOR_TOKEN) return json(res, 503, { error: 'Billing is not connected (MONITOR_URL / MONITOR_TOKEN).' });
+      try {
+        let r;
+        if (req.method === 'POST') {
+          const b = await readBody(req);
+          const ids = new Set(Array.isArray(b.ids) ? b.ids : []);
+          const items = db.tickets.filter(t => ids.has(t.id) && t.type === 'installation' && t.status === 'completed' && t.pppoeUsername && (t.data || {}).nap_id)
+            .map(t => ({ username: t.pppoeUsername, area: String(t.data.nap_id).trim(), port: String(t.data.nap_port || '').trim(), ticket: t.number }));
+          if (!items.length) return json(res, 400, { error: 'Nothing selected.' });
+          r = await fetch(MONITOR_URL + '/api/billing-batch', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': MONITOR_TOKEN },
+            body: JSON.stringify({ kind: 'details', items }), signal: AbortSignal.timeout(30000) });
+        } else {
+          r = await fetch(MONITOR_URL + '/api/billing-batch', { headers: { 'x-api-key': MONITOR_TOKEN }, signal: AbortSignal.timeout(15000) });
+        }
+        const out = await r.json().catch(() => ({}));
+        return json(res, r.ok ? 200 : (r.status === 409 ? 409 : 502), r.ok ? out : { error: out.error || ('billing returned HTTP ' + r.status) });
+      } catch (e) {
+        return json(res, 502, { error: e.name === 'TimeoutError' ? 'billing did not answer in time' : e.message });
+      }
+    }
+
     if (p === '/api/billing-catchup' && req.method === 'GET') {
       if (!isAdmin) return json(res, 403, { error: 'Admin only' });
       const installs = db.tickets
