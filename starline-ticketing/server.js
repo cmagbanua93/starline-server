@@ -976,6 +976,20 @@ function ticketSummary(t) {
    cable) and `meters` the cable length that represents, so the usage report can
    compare metres released against metres consumed. */
 /* daily count + 4:45 PM SMS stock report — see stockday.js */
+/* An installation the technician started on an earlier day (Manila time) and never
+   completed. The modem is pre-activated, so the subscriber is usually already online
+   — and billing only starts when the job is completed. Such a job holds back the
+   technician's next installation until it is finished, unless the office has put it
+   on hold (subscriber not home, waiting for materials…). */
+function unfinishedInstalls(user, exceptId) {
+  const today = stockDay.manilaDay();
+  return db.tickets.filter(t => t.type === 'installation' && t.assignedTo === user.id && t.status === 'in_progress'
+    && t.id !== exceptId && !(t.hold && t.hold.at) && stockDay.manilaDay(t.started || t.created) < today);
+}
+function unfinishedMessage(list) {
+  const names = list.slice(0, 3).map(t => `${t.number}${t.pppoeUsername ? ' (' + t.pppoeUsername + ')' : t.customer ? ' (' + t.customer + ')' : ''}`).join(', ');
+  return `Finish your unfinished installation${list.length === 1 ? '' : 's'} from a previous day first: ${names}${list.length > 3 ? ' and ' + (list.length - 3) + ' more' : ''}. Complete ${list.length === 1 ? 'it' : 'them'} (or ask the office to put ${list.length === 1 ? 'it' : 'them'} on hold), then start the new installation.`;
+}
 const stockDay = require('./stockday')({ db, saveDB, logStock, logReel, round2, REEL_EMPTY_M, READING_TOL_M });
 
 function logStock(tech, kind, name, qty, meters, source, by, codes) {
@@ -1943,6 +1957,10 @@ const server = http.createServer(async (req, res) => {
       /* Technicians may raise their own jobs, but only ever for themselves —
          they cannot assign work to a colleague, and they cannot delete anything. */
       const assignee = isAdmin ? db.users.find(u => u.id === b.assignedTo) : me;
+      if (!isAdmin && (!['repair', 'nap_install'].includes(b.type))) {
+        const left = unfinishedInstalls(me);
+        if (left.length) return json(res, 409, { code: 'INSTALL_PENDING', tickets: left.map(x => x.number), error: unfinishedMessage(left) });
+      }
       const t = {
         id: 'id' + Date.now() + Math.random().toString(36).slice(2, 6),
         number: String(b.number || '').trim() || `TKT-${new Date().getFullYear()}-${seq}`,
@@ -2007,6 +2025,10 @@ const server = http.createServer(async (req, res) => {
           const missed = stockDay.pendingCountDay(me);
           if (missed) return json(res, 409, { code: 'COUNT_REQUIRED', day: missed,
             error: `Do your stock count for ${missed} first (Stock count on your job list), then start this job.` });
+          if (t.type === 'installation') {
+            const left = unfinishedInstalls(me, t.id);
+            if (left.length) return json(res, 409, { code: 'INSTALL_PENDING', tickets: left.map(x => x.number), error: unfinishedMessage(left) });
+          }
         }
         if (!isAdmin) me.lastWorkDay = stockDay.manilaDay();
         if (isAdmin) {
@@ -2016,6 +2038,11 @@ const server = http.createServer(async (req, res) => {
             t.assignedTo = a ? a.id : null; t.assignedName = a ? a.name : null;
           }
           if (b.priority !== undefined && [1, 2, 3].includes(parseInt(b.priority))) t.priority = parseInt(b.priority);
+          /* office: an unfinished installation that should not block the technician */
+          if (b.hold !== undefined) {
+            t.hold = b.hold ? { at: Date.now(), by: me.name, reason: String(b.hold === true ? '' : b.hold).trim().slice(0, 200) } : null;
+            if (!t.hold) delete t.hold;
+          }
           /* re-classifying a repair swaps in that issue's step list */
           if (b.issueId !== undefined && t.type === 'repair') {
             const issue = (db.settings.repairIssues || []).find(x => x.id === b.issueId);

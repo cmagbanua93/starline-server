@@ -518,6 +518,7 @@
     <button class="icon-btn no-print" onclick="refreshTickets(true)" title="Refresh">↻</button>
   </div>
   <div class="ministats" id="techMiniStats"></div>
+  <div class="card compact hidden" id="pendingInstallCard" style="border:2px solid #fca5a5;background:#fef2f2"></div>
   <div class="card compact hidden" id="countCard"></div>
   <div class="card compact" id="techStockPanel" onclick="go('materials')" style="cursor:pointer"></div>
   <div class="pills no-print" id="techStatusPills"></div>
@@ -998,6 +999,12 @@ async function persist(t){
     ticketsEtag = null;   // our own write changed the list
   }catch(e){
     if(e.message.includes('Session expired')) return;
+    if(/unfinished installation/i.test(e.message)){
+      t.status = 'open'; delete t.started; delete t._dirty;
+      cacheTickets();
+      if(Date.now()-COUNT_ALERT_AT > 5000){ COUNT_ALERT_AT = Date.now(); alert(e.message); go('jobs'); }
+      return;
+    }
     if(/stock count/i.test(e.message)){
       /* the server would not start this job until yesterday's count is in */
       t.status = 'open'; delete t.started; delete t._dirty;
@@ -2008,6 +2015,7 @@ function renderTechList(){
     </div>`;
   };
   renderCountCard();
+  renderPendingInstallCard();
   if(Date.now()-COUNT_AT > 60000) loadCountStatus();
   document.getElementById('techStockPanel').innerHTML = `
     <div class="sec-head" style="margin-bottom:5px">
@@ -2178,9 +2186,43 @@ function renderTechStats(){
     : '<div class="tmeta">Nothing completed this month yet.</div>'}`;
 }
 
+/* =================== UNFINISHED INSTALLATIONS ===================
+   Modems are pre-activated, so a subscriber is online from the moment of install,
+   but billing starts only when the job is completed. An installation started on an
+   earlier day and still open holds back the technician's next installation (the
+   server enforces it; this is the same rule, shown before they try). The office can
+   put a job on hold when it really cannot be finished yet. */
+const manilaDayOf = ts => new Date((ts||Date.now()) + 8*3600000).toISOString().slice(0,10);
+function unfinishedInstalls(exceptId){
+  if(!USER) return [];
+  const today = manilaDayOf();
+  return tickets.filter(t => t.type==='installation' && t.status==='in_progress' && t.id!==exceptId
+    && (USER.role!=='tech' || t.assignedTo===USER.id) && !(t.hold && t.hold.at)
+    && manilaDayOf(t.started||t.created) < today);
+}
+function renderPendingInstallCard(){
+  const el = document.getElementById('pendingInstallCard'); if(!el) return;
+  const left = USER && USER.role==='tech' ? unfinishedInstalls() : [];
+  el.classList.toggle('hidden', !left.length);
+  if(!left.length) return;
+  el.innerHTML = `<div class="sec-title" style="color:var(--danger)">⛔ Finish ${left.length===1?'this installation':'these installations'} first</div>
+    <div class="tmeta" style="font-size:12.5px;margin:2px 0 6px">Started on an earlier day and not completed. The subscriber is already online but billing only starts when you press Complete. You can't start a new installation until ${left.length===1?'it is':'they are'} completed — repairs are not affected. If it really can't be finished, ask the office to put it on hold.</div>
+    ${left.map(t=>`<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;padding:4px 0">
+      <span class="tmeta" style="font-size:13px"><b>${esc(t.number)}</b> · ${esc(t.pppoeUsername||t.customer||'')} · started ${esc(new Date(t.started||t.created).toLocaleDateString())}</span>
+      <button class="pill" style="flex:none" onclick="openTicket('${esc(t.id)}')">Open ›</button></div>`).join('')}`;
+}
+
 /* =================== TECH: WIZARD =================== */
 async function openTicket(id){
   const ot = byId(id);
+  if(ot && ot.type==='installation' && ot.status==='open' && USER && USER.role==='tech'){
+    const left = unfinishedInstalls(ot.id);
+    if(left.length){
+      alert('Finish your unfinished installation'+(left.length===1?'':'s')+' from a previous day first: '+left.map(t=>t.number+(t.pppoeUsername?' ('+t.pppoeUsername+')':'')).join(', ')+'.\n\nComplete '+(left.length===1?'it':'them')+' (or ask the office to put '+(left.length===1?'it':'them')+' on hold), then start this installation.');
+      const pc = document.getElementById('pendingInstallCard'); if(pc) pc.scrollIntoView({behavior:'smooth'});
+      return;
+    }
+  }
   if(ot && ot.status==='open' && USER && USER.role==='tech' && COUNT_STATUS && COUNT_STATUS.pendingDay){
     alert(`Do your stock count for ${prettyCountDay(COUNT_STATUS.pendingDay)} first. It is at the top of your job list — then you can start this job.`);
     countFormOpen = true; renderCountCard();
@@ -4127,6 +4169,7 @@ function renderDash(){
 
   /* things worth chasing today, so the office does not have to hunt for them */
   const stale = running.filter(t=>jobElapsed(t) > 24*3600000);
+  const leftInstalls = unfinishedInstalls();
   const unassigned = tickets.filter(t=>!t.assignedTo && t.status!=='completed');
   const urgent = tickets.filter(t=>(t.priority||3)===1 && t.status!=='completed');
   const lowStock = users.filter(u=>u.role==='tech' && (((u.inv||{}).connectors||0)<5 || !((u.inv||{}).cables||[]).some(r=>r.meters>50)));
@@ -4142,6 +4185,7 @@ function renderDash(){
     if(notCounted.length && manilaHHMM() >= DAILY.settings.reportTime)
       alerts.push([`🧮 ${notCounted.length} technician${notCounted.length===1?' has':'s have'}n't done today's stock count`, `matTab='daily';go('materials')`]);
   }
+  if(leftInstalls.length) alerts.push([`<span class="dot"></span>${leftInstalls.length} installation${leftInstalls.length===1?'':'s'} left unfinished from a previous day — not billed yet`, `dashStatus='in_progress';dashType='installation';go('tickets')`, 'red']);
   if(urgent.length) alerts.push([`⚡ ${urgent.length} urgent job${urgent.length===1?'':'s'} still open`, `dashPriority=1;go('tickets')`]);
   if(stale.length) alerts.push([`🕒 ${stale.length} job${stale.length===1?' has':'s have'} been running over 24 hours`, `dashStatus='in_progress';go('tickets')`]);
   if(unassigned.length) alerts.push([`👤 ${unassigned.length} unassigned job${unassigned.length===1?'':'s'}`, `dashStatus='';go('tickets')`]);
@@ -5042,6 +5086,12 @@ async function openReport(id){
     </div>
     ${t.status==='completed' && (t.type==='installation' || (t.type==='repair' && t.data && t.data.swap_pppoe)) ? billingSyncPanel(t) : ''}
     ${t.status==='completed' && t.type==='nap_install' ? napMapPanel(t) : ''}
+    ${t.type==='installation' && t.status==='in_progress' ? `<div class="card" style="margin-top:10px">
+      <div class="sec-head"><div class="sec-title">⏸ Hold</div>${t.hold?'<span class="badge b-p2">On hold</span>':''}</div>
+      <div class="tmeta">${t.hold?`Put on hold by ${esc(t.hold.by||'the office')} on ${esc(new Date(t.hold.at).toLocaleString())}${t.hold.reason?' — '+esc(t.hold.reason):''}. It does not stop ${esc(t.assignedName||'the technician')} starting new installations.`
+        :'An installation left unfinished from a previous day stops the technician from starting a new one. Put it on hold only if it really cannot be finished yet (subscriber not home, waiting for materials…).'}</div>
+      <div class="wizard-btns"><button class="btn btn-ghost btn-sm" onclick="setHold(${t.hold?'false':'true'})">${t.hold?'Release hold':'Put on hold'}</button></div>
+    </div>` : ''}
     <div class="wizard-btns">
       ${t.status==='completed'?'<button class="btn btn-ghost btn-sm" onclick="reopenTicket()">Reopen to correct</button>':`<button class="btn btn-primary btn-sm" onclick="openTicket('${esc(t.id)}')">✎ Edit job details</button>`}
       <button class="btn btn-warn btn-sm" onclick="deleteTicket()">🗑 Delete Ticket</button>
@@ -5172,6 +5222,12 @@ async function retryNapMap(id, number){
   }catch(e){ alert('Could not place it on the map: '+e.message); }
 }
 
+async function setHold(on){
+  let reason = '';
+  if(on){ reason = prompt('Why can\'t this installation be finished yet? (e.g. subscriber not home, waiting for materials)', ''); if(reason===null) return; }
+  try{ await api('/api/tickets/'+currentId,'PUT',{hold: on ? (reason.trim()||true) : false}); await refreshTickets(true); openReport(currentId); }
+  catch(e){ alert(e.message); }
+}
 async function reopenTicket(){
   if(!confirm('Reopen this completed ticket to correct it?\n\nFix the figures, then press Complete again. Stock already taken for this job is NOT taken twice — only a changed cable figure is corrected on the reel.')) return;
   try{
