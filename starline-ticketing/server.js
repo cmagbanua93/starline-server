@@ -122,6 +122,9 @@ function humanDuration(ms) {
 /* warehouse/office stock: cables are reel types {id, name, meters (per reel), qty (pcs)};
    items are any other stock {id, name, qty} */
 db.warehouse = db.warehouse || { connectors: 0, cables: [], items: [] };
+db.warehouse.connectors = Math.max(0, parseInt(db.warehouse.connectors) || 0);
+db.warehouse.connBlue = Math.max(0, parseInt(db.warehouse.connBlue) || 0);
+db.warehouse.connGreen = Math.max(0, parseInt(db.warehouse.connGreen) || 0);
 db.warehouse.items = db.warehouse.items || [];
 /* remnants handed back by technicians: part-used reels that are back at the office
    and can be re-issued. Kept apart from full reels so nobody re-issues one by
@@ -167,6 +170,69 @@ function logReel(reel, event, detail) {
   if (db.reelLog.length > 20000) db.reelLog = db.reelLog.slice(-20000);
 }
 
+/* ---- FIC connectors: blue and green ----
+   inv.connectors stays the TOTAL, so every older screen, report and the SMS keep
+   adding up; connBlue / connGreen split it by colour. Whatever the two colours do
+   not cover was counted before colours were tracked ("not sorted") — a job or a
+   release of a colour the holder has run out of takes from that first, and the
+   next daily count (or an admin adjust) sorts it. Same shape for db.warehouse. */
+const CONN_COLOURS = ['blue', 'green'];
+const connColour = c => { c = String(c || '').trim().toLowerCase(); return CONN_COLOURS.includes(c) ? c : ''; };
+const CONN_NAME = { blue: 'FIC Connector (Blue)', green: 'FIC Connector (Green)', '': 'FIC Connector' };
+const connKey = c => (c === 'blue' ? 'connBlue' : 'connGreen');
+function connFix(inv) {
+  inv.connBlue = Math.max(0, parseInt(inv.connBlue) || 0);
+  inv.connGreen = Math.max(0, parseInt(inv.connGreen) || 0);
+  inv.connectors = Math.max(0, parseInt(inv.connectors) || 0, inv.connBlue + inv.connGreen);
+  return inv;
+}
+function connParts(inv) {
+  inv = inv || {};
+  const blue = Math.max(0, parseInt(inv.connBlue) || 0), green = Math.max(0, parseInt(inv.connGreen) || 0);
+  const total = Math.max(0, parseInt(inv.connectors) || 0, blue + green);
+  return { total, blue, green, unsorted: total - blue - green };
+}
+/* +qty adds to that colour (or to "not sorted" when none is given) */
+function connAdd(inv, colour, qty) {
+  const q = parseInt(qty) || 0;
+  if (!q) return;
+  connFix(inv);
+  const c = connColour(colour);
+  if (q > 0) { inv.connectors += q; if (c) inv[connKey(c)] += q; return; }
+  connTake(inv, c, -q);
+}
+/* takes qty of a colour — that colour first, then "not sorted"; with no colour,
+   "not sorted" first, then blue, then green. Returns what could not be covered. */
+function connTake(inv, colour, qty) {
+  let left = Math.max(0, parseInt(qty) || 0);
+  connFix(inv);
+  const c = connColour(colour);
+  const fromKey = k => { const n = Math.min(inv[k], left); inv[k] -= n; inv.connectors -= n; left -= n; };
+  const fromUnsorted = () => { const n = Math.min(connParts(inv).unsorted, left); inv.connectors -= n; left -= n; };
+  if (c) { fromKey(connKey(c)); fromUnsorted(); }
+  else { fromUnsorted(); fromKey('connBlue'); fromKey('connGreen'); }
+  return left;
+}
+/* "this holder really has N of this colour" (office adjust): a colour going up is
+   first taken out of the not-sorted pile, because that is what sorting them is. */
+function connSet(inv, colour, target) {
+  connFix(inv);
+  const t = Math.max(0, parseInt(target) || 0);
+  const c = connColour(colour);
+  if (!c) { inv.connectors += t - connParts(inv).unsorted; return connFix(inv); }
+  const k = connKey(c), delta = t - inv[k];
+  if (delta > 0) { const move = Math.min(delta, connParts(inv).unsorted); inv[k] += move; inv[k] += delta - move; inv.connectors += delta - move; }
+  else if (delta < 0) { inv[k] += delta; inv.connectors += delta; }
+  return connFix(inv);
+}
+/* what a job says it used: { blue, green, plain } — plain = jobs entered before colours */
+function connUsedOn(d) {
+  d = d || {};
+  const hasColour = d.connectors_blue !== undefined || d.connectors_green !== undefined;
+  if (hasColour) return { blue: Math.max(0, parseInt(d.connectors_blue) || 0), green: Math.max(0, parseInt(d.connectors_green) || 0), plain: 0 };
+  return { blue: 0, green: 0, plain: Math.max(0, parseInt(d.connectors) || 0) };
+}
+
 /* inventory model: { connectors: N, cables: [{id, code, name, meters, startMeters, state}] } */
 let migratedReels = false;
 db.users.forEach(u => {
@@ -183,6 +249,7 @@ db.users.forEach(u => {
      "meters > 0" list while still sitting in the file. */
   /* Connectors could be driven negative by the same unfloored subtraction. */
   if (u.inv.connectors < 0) { u.inv.connectors = 0; migratedReels = true; }
+  connFix(u.inv);
   u.inv.cables.forEach(r => {
     if (!r.code) { r.code = nextReelCode(r.name); migratedReels = true; }
     if (r.meters < 0) {
@@ -990,7 +1057,7 @@ function unfinishedMessage(list) {
   const names = list.slice(0, 3).map(t => `${t.number}${t.pppoeUsername ? ' (' + t.pppoeUsername + ')' : t.customer ? ' (' + t.customer + ')' : ''}`).join(', ');
   return `Finish your unfinished installation${list.length === 1 ? '' : 's'} from a previous day first: ${names}${list.length > 3 ? ' and ' + (list.length - 3) + ' more' : ''}. Complete ${list.length === 1 ? 'it' : 'them'} (or ask the office to put ${list.length === 1 ? 'it' : 'them'} on hold), then start the new installation.`;
 }
-const stockDay = require('./stockday')({ db, saveDB, logStock, logReel, round2, REEL_EMPTY_M, READING_TOL_M });
+const stockDay = require('./stockday')({ db, saveDB, logStock, logReel, round2, REEL_EMPTY_M, READING_TOL_M, connParts, connFix, CONN_NAME });
 
 function logStock(tech, kind, name, qty, meters, source, by, codes) {
   const q = parseFloat(qty) || 0;
@@ -999,7 +1066,7 @@ function logStock(tech, kind, name, qty, meters, source, by, codes) {
     id: 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
     ts: Date.now(),
     techId: tech.id, techName: tech.name,
-    kind, name: String(name || '').trim() || (kind === 'connector' ? 'FIC Connector' : ''),
+    kind, name: String(name || '').trim() || (kind === 'connector' ? CONN_NAME[''] : ''),
     qty: q, meters: parseFloat(meters) || 0,
     codes: Array.isArray(codes) ? codes.slice() : (codes ? [codes] : []),
     source: source || 'direct', by: by || ''
@@ -1020,7 +1087,7 @@ function addItemTo(u, name, qty) {
 /* Issues one physical reel to a technician and gives it its code. `existing` carries
    a remnant being re-issued, so a part-used reel keeps the code already on its tag
    rather than being reborn as a fresh one. Returns the reel for logging. */
-function addStockTo(u, cableName, cableMeters, connectors, existing, by) {
+function addStockTo(u, cableName, cableMeters, connectors, existing, by, connectorColour) {
   u.inv = u.inv || { connectors: 0, cables: [] };
   u.inv.cables = u.inv.cables || [];
   let reel = null;
@@ -1038,7 +1105,7 @@ function addStockTo(u, cableName, cableMeters, connectors, existing, by) {
       techId: u.id, techName: u.name, meters, by: by || ''
     });
   }
-  u.inv.connectors = (u.inv.connectors || 0) + (parseInt(connectors) || 0);
+  connAdd(u.inv, connectorColour, connectors);
   return reel;
 }
 
@@ -1575,7 +1642,8 @@ const server = http.createServer(async (req, res) => {
         if (existing) { existing.qty += qty; if (existing.qty <= 0) db.warehouse.cables = db.warehouse.cables.filter(c => c !== existing); }
         else if (qty > 0) db.warehouse.cables.push({ id: 'w' + Date.now() + Math.random().toString(36).slice(2, 6), name, meters, qty });
       }
-      if (b.connectors !== undefined) db.warehouse.connectors = Math.max(0, (db.warehouse.connectors || 0) + (parseInt(b.connectors) || 0));
+      if (b.connSet !== undefined) connSet(db.warehouse, b.connSet, b.connTarget);
+      else if (b.connectors !== undefined) connAdd(db.warehouse, b.connColour, b.connectors);
       /* generic items (modems, clamps, hooks, patch cords, ...) */
       const itemName = String(b.itemName || '').trim();
       const itemQty = parseInt(b.itemQty) || 0;
@@ -1601,6 +1669,8 @@ const server = http.createServer(async (req, res) => {
       const name = String(b.name || b.cableName || '').trim();
       const qty = parseInt(b.qty || b.cableReels || b.connectors) || 0;
       if (!['cable', 'connector', 'item'].includes(kind)) return json(res, 400, { error: 'Select an item to request' });
+      const colour = kind === 'connector' ? connColour(b.colour || b.connColour || (/green/i.test(name) ? 'green' : /blue/i.test(name) ? 'blue' : '')) : '';
+      if (kind === 'connector' && !colour) return json(res, 400, { error: 'Pick blue or green FIC connectors.' });
       if (qty <= 0) return json(res, 400, { error: 'Enter a quantity greater than zero' });
       let cableMeters = 0;
       if (kind === 'cable') {
@@ -1615,7 +1685,7 @@ const server = http.createServer(async (req, res) => {
       const r = {
         id: 'q' + Date.now() + Math.random().toString(36).slice(2, 6),
         techId: me.id, techName: me.name,
-        kind, name: kind === 'connector' ? 'FIC Connector' : name, qty, cableMeters,
+        kind, name: kind === 'connector' ? CONN_NAME[colour] : name, qty, cableMeters, colour: colour || undefined,
         note: String(b.note || '').trim(),
         status: 'pending', created: Date.now()
       };
@@ -1662,10 +1732,13 @@ const server = http.createServer(async (req, res) => {
             r.reelCodes = issued;
             logStock(tech, 'cable', wh.name, qty, qty * wh.meters, 'request', me.name, issued);
           } else if (kind === 'connector' && qty > 0) {
-            if ((db.warehouse.connectors || 0) < qty) return json(res, 400, { error: 'Not enough FIC connectors in warehouse: requested ' + qty + ', available ' + (db.warehouse.connectors || 0) + '.' });
-            db.warehouse.connectors -= qty;
-            addStockTo(tech, '', 0, qty);
-            logStock(tech, 'connector', 'FIC Connector', qty, 0, 'request', me.name);
+            const colour = connColour(r.colour || (/green/i.test(name || '') ? 'green' : /blue/i.test(name || '') ? 'blue' : ''));
+            const wp = connParts(db.warehouse);
+            const avail = colour ? wp[colour] + wp.unsorted : wp.total;
+            if (avail < qty) return json(res, 400, { error: `Not enough ${CONN_NAME[colour]} in the warehouse: requested ${qty}, available ${colour ? wp[colour] : wp.total}${colour && wp.unsorted ? ' (+' + wp.unsorted + ' not sorted by colour)' : ''}.` });
+            connTake(db.warehouse, colour, qty);
+            addStockTo(tech, '', 0, qty, null, me.name, colour);
+            logStock(tech, 'connector', CONN_NAME[colour], qty, 0, 'request', me.name);
           } else if (kind === 'item' && name && qty > 0) {
             const wh = db.warehouse.items.find(i => i.name.toLowerCase() === name.toLowerCase());
             if (!wh) return json(res, 400, { error: 'No "' + name + '" in warehouse inventory. Add it first.' });
@@ -1677,8 +1750,8 @@ const server = http.createServer(async (req, res) => {
           }
           /* legacy combined requests (cable + connectors in one) */
           if (!r.kind && r.cableName && r.connectors > 0) {
-            if ((db.warehouse.connectors || 0) < r.connectors) return json(res, 400, { error: 'Not enough FIC connectors in warehouse.' });
-            db.warehouse.connectors -= r.connectors;
+            if (connParts(db.warehouse).total < r.connectors) return json(res, 400, { error: 'Not enough FIC connectors in warehouse.' });
+            connTake(db.warehouse, '', r.connectors);
             addStockTo(tech, '', 0, r.connectors);
             logStock(tech, 'connector', 'FIC Connector', r.connectors, 0, 'request', me.name);
           }
@@ -1730,12 +1803,26 @@ const server = http.createServer(async (req, res) => {
       const b = await readBody(req);
       const u = db.users.find(x => x.id === m[1]);
       if (!u) return json(res, 404, { error: 'User not found' });
-      const directReel = addStockTo(u, b.cableName, b.cableMeters, b.connectors, null, me.name);
+      if (b.connSet !== undefined) {
+        const before = connParts(u.inv), col = connColour(b.connSet);
+        connSet(u.inv, col, b.connTarget);
+        const after = connParts(u.inv);
+        /* only a real change in the number held goes in the ledger (sorting colours is not stock moving) */
+        if (after.total > before.total) logStock(u, 'connector', CONN_NAME[col], after.total - before.total, 0, 'direct', me.name);
+      }
+      const directReel = addStockTo(u, b.cableName, b.cableMeters, b.connSet !== undefined ? 0 : b.connectors, null, me.name, b.connColour);
       /* stock handed over directly (not through a request) still belongs in the ledger */
       if (String(b.cableName || '').trim() && (parseFloat(b.cableMeters) || 0) > 0)
         logStock(u, 'cable', b.cableName, 1, b.cableMeters, 'direct', me.name, directReel ? [directReel.code] : []);
       if ((parseInt(b.connectors) || 0) > 0)
-        logStock(u, 'connector', 'FIC Connector', parseInt(b.connectors), 0, 'direct', me.name);
+        logStock(u, 'connector', CONN_NAME[connColour(b.connColour)], parseInt(b.connectors), 0, 'direct', me.name);
+      /* both colours handed over at once (＋ Stock) */
+      ['blue', 'green'].forEach(c => {
+        const q = parseInt(b['connectors_' + c]) || 0;
+        if (!q) return;
+        connAdd(u.inv, c, q);
+        if (q > 0) logStock(u, 'connector', CONN_NAME[c], q, 0, 'direct', me.name);
+      });
       if (b.itemName !== undefined && b.itemQty !== undefined) {
         addItemTo(u, b.itemName, b.itemQty);
         if ((parseInt(b.itemQty) || 0) > 0) logStock(u, 'item', b.itemName, parseInt(b.itemQty), 0, 'direct', me.name);
@@ -2075,6 +2162,12 @@ const server = http.createServer(async (req, res) => {
            'cable_discrepancy', 'cable_review', 'connector_shortfall'].forEach(k => {
             if (prev[k] !== undefined && incoming[k] === undefined) incoming[k] = prev[k];
           });
+          /* the colour split is the record; the plain total follows it */
+          if (incoming.connectors_blue !== undefined || incoming.connectors_green !== undefined) {
+            incoming.connectors_blue = Math.max(0, parseInt(incoming.connectors_blue) || 0);
+            incoming.connectors_green = Math.max(0, parseInt(incoming.connectors_green) || 0);
+            incoming.connectors = incoming.connectors_blue + incoming.connectors_green;
+          }
           t.data = incoming;
         }
         if (b.step !== undefined) t.step = b.step;
@@ -2201,14 +2294,11 @@ const server = http.createServer(async (req, res) => {
               /* Connectors were unfloored too: issuing 10 and reporting 12 used
                  left a negative count that read as stock owed back rather than
                  as a discrepancy. */
-              const connUsed = parseInt(t.data && t.data.connectors) || 0;
-              if (connUsed > 0) {
-                const connHeld = parseInt(tech.inv.connectors) || 0;
-                tech.inv.connectors = Math.max(0, connHeld - connUsed);
-                if (connUsed > connHeld) {
-                  t.data.connector_shortfall = connUsed - connHeld;
-                  t.needsStockReview = true;
-                }
+              const cu = connUsedOn(t.data);
+              const short = connTake(tech.inv, 'blue', cu.blue) + connTake(tech.inv, 'green', cu.green) + connTake(tech.inv, '', cu.plain);
+              if (short > 0) {
+                t.data.connector_shortfall = short;
+                t.needsStockReview = true;
               }
               /* issued items (modems, clamps, patch cords, ...) consumed on this job */
               const usedItems = Array.isArray(t.data && t.data.items_used) ? t.data.items_used : [];

@@ -32,7 +32,7 @@ function normalizePhone(p) {
 }
 
 module.exports = function stockDay(ctx) {
-  const { db, saveDB, logStock, logReel, round2, REEL_EMPTY_M, READING_TOL_M } = ctx;
+  const { db, saveDB, logStock, logReel, round2, REEL_EMPTY_M, READING_TOL_M, connParts, connFix, CONN_NAME } = ctx;
 
   db.counts = db.counts || [];
   db.smsLog = db.smsLog || [];
@@ -87,10 +87,16 @@ module.exports = function stockDay(ctx) {
     }).filter(i => i.qty > 0 || i.min > 0);
     const needs = [];
     const c = cfg();
-    if ((inv.connectors || 0) < c.minConnectors) needs.push(`FIC connectors (${inv.connectors || 0} left)`);
+    const cp = connParts(inv);
+    /* each colour is its own stock; while some are not sorted by colour yet, judge the total */
+    if (cp.unsorted) { if (cp.total < c.minConnectors) needs.push(`FIC connectors (${cp.total} left)`); }
+    else {
+      if (cp.blue < c.minConnectors) needs.push(`BLUE FIC connectors (${cp.blue} left)`);
+      if (cp.green < c.minConnectors) needs.push(`GREEN FIC connectors (${cp.green} left)`);
+    }
     if (meters < c.minCableMeters) needs.push(`fiber cable (${meters} m left)`);
     items.forEach(i => { if (i.min > 0 && i.qty < i.min) needs.push(`${i.name} (${i.qty} left)`); });
-    return { connectors: inv.connectors || 0, meters, reels: reels.map(r => ({ code: r.code, name: r.name, meters: r.meters })), items, needs };
+    return { connectors: cp.total, connBlue: cp.blue, connGreen: cp.green, connUnsorted: cp.unsorted, meters, reels: reels.map(r => ({ code: r.code, name: r.name, meters: r.meters })), items, needs };
   }
 
   /* ---- counting ---- */
@@ -124,7 +130,10 @@ module.exports = function stockDay(ctx) {
     if (!days.length) throw Object.assign(new Error(`The end-of-day count opens at ${fmt12(cfg().countFrom)}.`), { code: 400 });
     const inv = u.inv || {};
     const num = v => (v === '' || v === null || v === undefined || isNaN(parseFloat(v))) ? null : Math.max(0, round2(v));
-    const conn = num(body.connectors);
+    const byColour = body.connBlue !== undefined || body.connGreen !== undefined;
+    const cBlue = num(body.connBlue), cGreen = num(body.connGreen);
+    if (byColour && (cBlue === null || cGreen === null)) throw Object.assign(new Error('Enter how many BLUE and how many GREEN FIC connectors you have (0 if none).'), { code: 400 });
+    const conn = byColour ? cBlue + cGreen : num(body.connectors);
     if (conn === null) throw Object.assign(new Error('Enter how many FIC connectors you have (0 if none).'), { code: 400 });
     const reelsIn = body.reels || {};
     const itemsIn = body.items || {};
@@ -138,9 +147,21 @@ module.exports = function stockDay(ctx) {
       const counted = num(itemsIn[name]);
       return { name, system: sys, counted: counted === null ? 0 : counted, diff: (counted === null ? 0 : counted) - sys };
     });
-    const connectors = { system: inv.connectors || 0, counted: conn, diff: conn - (inv.connectors || 0) };
+    const cp = connParts(inv);
+    const connectors = { system: cp.total, counted: conn, diff: conn - cp.total };
     const diffs = [];
-    if (connectors.diff) diffs.push(`FIC connectors: counted ${conn}, system ${connectors.system}`);
+    if (byColour) {
+      connectors.blue = { system: cp.blue, counted: cBlue, diff: cBlue - cp.blue };
+      connectors.green = { system: cp.green, counted: cGreen, diff: cGreen - cp.green };
+      connectors.unsorted = cp.unsorted;
+    }
+    if (byColour && cp.unsorted) {
+      /* stock from before colours were tracked: only the total can be checked */
+      if (connectors.diff) diffs.push(`FIC connectors: counted ${cBlue} blue + ${cGreen} green = ${conn}, system ${cp.total} (${cp.unsorted} not sorted by colour)`);
+    } else if (byColour) {
+      if (connectors.blue.diff) diffs.push(`BLUE FIC connectors: counted ${cBlue}, system ${cp.blue}`);
+      if (connectors.green.diff) diffs.push(`GREEN FIC connectors: counted ${cGreen}, system ${cp.green}`);
+    } else if (connectors.diff) diffs.push(`FIC connectors: counted ${conn}, system ${connectors.system}`);
     reels.forEach(r => { if (Math.abs(r.diff) > READING_TOL_M) diffs.push(`Reel ${r.code}: counted ${r.counted} m, system ${r.system} m`); });
     items.forEach(i => { if (i.diff) diffs.push(`${i.name}: counted ${i.counted}, system ${i.system}`); });
     const rec = {
@@ -148,6 +169,13 @@ module.exports = function stockDay(ctx) {
       techId: u.id, techName: u.name, day: days[days.length - 1], days, at: Date.now(), by,
       connectors, reels, items, diffs, status: diffs.length ? 'diff' : 'ok', note: String(body.note || '').trim(),
     };
+    /* totals agree and some stock was never sorted by colour: the count sorts it */
+    if (byColour && cp.unsorted && !connectors.diff) {
+      u.inv = u.inv || {};
+      u.inv.connBlue = cBlue; u.inv.connGreen = cGreen; u.inv.connectors = conn;
+      connFix(u.inv);
+      rec.connSorted = true;
+    }
     db.counts.push(rec);
     if (db.counts.length > 5000) db.counts = db.counts.slice(-5000);
     saveDB();
@@ -163,9 +191,21 @@ module.exports = function stockDay(ctx) {
     if (action === 'accept') {
       if (!u) throw Object.assign(new Error('That technician no longer exists'), { code: 400 });
       u.inv = u.inv || { connectors: 0, cables: [], items: [] };
-      if (c.connectors.diff) {
-        logStock(u, 'connector', 'FIC Connector', c.connectors.diff, 0, 'count', me.name);
+      if (c.connectors.blue) {
+        ['blue', 'green'].forEach(col => {
+          const x = c.connectors[col];
+          const now = connParts(u.inv)[col];
+          if (x.counted - now) logStock(u, 'connector', CONN_NAME[col], x.counted - now, 0, 'count', me.name);
+        });
+        const unsortedNow = connParts(u.inv).unsorted;
+        if (unsortedNow) logStock(u, 'connector', CONN_NAME[''], -unsortedNow, 0, 'count', me.name);
+        u.inv.connBlue = c.connectors.blue.counted; u.inv.connGreen = c.connectors.green.counted;
+        u.inv.connectors = c.connectors.blue.counted + c.connectors.green.counted;
+        connFix(u.inv);
+      } else if (c.connectors.diff) {
+        logStock(u, 'connector', CONN_NAME[''], c.connectors.diff, 0, 'count', me.name);
         u.inv.connectors = c.connectors.counted;
+        connFix(u.inv);
       }
       c.reels.forEach(rc => {
         const reel = (u.inv.cables || []).find(r => r.id === rc.id);
@@ -199,7 +239,7 @@ module.exports = function stockDay(ctx) {
   }
   function techLine(u, today) {
     const s = stockOf(u);
-    const parts = [`FIC ${s.connectors}`, `Fiber ${s.meters}m`];
+    const parts = [`FIC Blue ${s.connBlue}, Green ${s.connGreen}${s.connUnsorted ? ' (+' + s.connUnsorted + ' unsorted)' : ''}`, `Fiber ${s.meters}m`];
     s.items.forEach(i => parts.push(`${i.name} ${i.qty}`));
     const cnt = countFor(u, today);
     const countTxt = cnt ? (cnt.status === 'ok' ? 'count OK' : `count DIFF (${cnt.diffs.length})`) : 'NOT COUNTED';
@@ -220,7 +260,8 @@ module.exports = function stockDay(ctx) {
     const w = db.warehouse || {};
     const officeItems = (w.items || []).filter(i => i.qty > 0).map(i => `${i.name} ${i.qty}`);
     const fullReels = (w.cables || []).reduce((a, c) => a + (Number(c.qty) || 0), 0);
-    lines.push(`Office: FIC ${w.connectors || 0}, reels ${fullReels}${(w.remnants || []).length ? ' +' + w.remnants.length + ' remnant' : ''}${officeItems.length ? ', ' + officeItems.join(', ') : ''}`);
+    const wc = connParts(w);
+    lines.push(`Office: FIC Blue ${wc.blue}, Green ${wc.green}${wc.unsorted ? ' (+' + wc.unsorted + ' unsorted)' : ''}, reels ${fullReels}${(w.remnants || []).length ? ' +' + w.remnants.length + ' remnant' : ''}${officeItems.length ? ', ' + officeItems.join(', ') : ''}`);
     return lines.join('\n');
   }
   function preview(day) {

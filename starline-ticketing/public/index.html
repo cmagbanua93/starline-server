@@ -689,8 +689,10 @@
       <label>Quantity (pcs)</label>
       <input id="whQty" type="number" inputmode="numeric" step="1" placeholder="e.g. 6">
       <button class="btn btn-primary btn-sm" onclick="whAddCable()">＋ Add Cable Stock</button>
-      <label>Add FIC Connectors (pcs)</label>
-      <input id="whConn" type="number" inputmode="numeric" step="1" placeholder="e.g. 100">
+      <div class="row2">
+        <div><label>Add FIC Connectors (pcs)</label><input id="whConn" type="number" inputmode="numeric" step="1" placeholder="e.g. 100"></div>
+        <div><label>Colour</label><select id="whConnColour"><option value="blue">🔵 Blue</option><option value="green">🟢 Green</option></select></div>
+      </div>
       <button class="btn btn-ghost btn-sm" onclick="whAddConnectors()">＋ Add Connectors</button>
       <div class="row2" style="margin-top:8px">
         <div><label>Other Item Name</label><input id="whItemName" placeholder="e.g. Modem EG8145V5, S-clamp"></div>
@@ -1083,7 +1085,7 @@ const WORKFLOWS = {
       fields:[
         {k:'cable_end', type:'number', label:'Cable Meters Left on Reel — AFTER Lining (m)', req:true, placeholder:'e.g. 700', step:'0.1', cableCalc:true},
         {k:'cable_end_photo', type:'photo', label:'Photo of Actual Cable Showing Meter Mark (After)', req:true, autogps:true},
-        {k:'connectors', type:'select', label:'Connectors Used (pcs)', req:true, options:['1','2','3','4','5','6']},
+        {k:'connectors', type:'fic', label:'FIC Connectors Used', req:true, min:1},
         {k:'other_materials', type:'textarea', label:'Other Materials (clamps, hooks, patch cord…)'}
       ]},
     { key:'customer', title:'9. Customer Details',
@@ -1170,7 +1172,7 @@ const WORKFLOWS = {
         {k:'work_done', type:'textarea', label:'Work Done', req:true},
         {k:'cable_reel', type:'reel_select', label:'Cable Used (select if cable was replaced)'},
         {k:'cable_length', type:'number', label:'Cable Used (meters)', step:'1', placeholder:'0 if none'},
-        {k:'connectors', type:'number', label:'Connectors Used (pcs)', step:'1', placeholder:'0 if none'},
+        {k:'connectors', type:'fic', label:'FIC Connectors Used'},
         {k:'nap_id', type:'text', label:'NAP Box ID (if involved)'},
         {k:'nap_port', type:'text', label:'Port (if changed)'}
       ]},
@@ -1229,7 +1231,7 @@ const REPAIR_FLOWS = {
       desc:'Record everything consumed on this job. Issued items are deducted from your stock when the job is completed.',
       fields:[
         {k:'items_used', type:'items_used', label:'Issued Items Used (modem, patch cord, adapter…)'},
-        {k:'connectors', type:'number', label:'FIC Connectors Used (pcs)', step:'1', placeholder:'0 if none'},
+        {k:'connectors', type:'fic', label:'FIC Connectors Used'},
         {k:'other_materials', type:'textarea', label:'Other Materials'}
       ]},
     { key:'verify', title:'5. Verification',
@@ -1263,7 +1265,7 @@ const REPAIR_FLOWS = {
     { key:'work', title:'3. Re-terminate the Connector',
       desc:'Fit the new fast connector and photograph the finished termination.',
       fields:[
-        {k:'connectors', type:'number', label:'FIC Connectors Used (pcs)', req:true, step:'1', placeholder:'e.g. 1'},
+        {k:'connectors', type:'fic', label:'FIC Connectors Used', req:true, min:1},
         {k:'new_connector_photo', type:'photo', label:'Photo of the New Termination', req:true},
         {k:'cable_reel', type:'reel_select', label:'Cable Used (only if cable was also replaced)'},
         {k:'cable_length', type:'number', label:'Cable Used (meters)', step:'1', placeholder:'0 if none'}
@@ -1314,7 +1316,7 @@ const REPAIR_FLOWS = {
     { key:'materials', title:'4. Materials Used',
       desc:'Record everything consumed. Issued items are deducted from your stock when the job is completed.',
       fields:[
-        {k:'connectors', type:'number', label:'FIC Connectors Used (pcs)', step:'1', placeholder:'0 if none'},
+        {k:'connectors', type:'fic', label:'FIC Connectors Used'},
         {k:'items_used', type:'items_used', label:'Issued Items Used (patch cord, pigtail…)'},
         {k:'other_materials', type:'textarea', label:'Other Materials'}
       ]},
@@ -1358,7 +1360,7 @@ const REPAIR_FLOWS = {
     { key:'splice', title:'4. Re-run &amp; Terminate',
       desc:'Pull the replacement span, terminate both ends, then read the reel again and photograph the meter mark.',
       fields:[
-        {k:'connectors', type:'number', label:'FIC Connectors Used (pcs)', req:true, step:'1', placeholder:'e.g. 2'},
+        {k:'connectors', type:'fic', label:'FIC Connectors Used', req:true, min:1},
         {k:'splice_photo', type:'photo', label:'Photo of the New Termination / Splice', req:true},
         {k:'cable_end', type:'number', label:'Cable Meters Left on Reel — AFTER (m)', req:true, step:'0.1', cableCalc:true},
         {k:'cable_end_photo', type:'photo', label:'Photo of Cable Showing Meter Mark (After)', req:true, autogps:true}
@@ -1413,7 +1415,7 @@ const REPAIR_FLOWS = {
       fields:[
         {k:'cable_reel', type:'reel_select', label:'Cable Used (if any was pulled)'},
         {k:'cable_length', type:'number', label:'Cable Used (meters)', step:'1', placeholder:'0 if none'},
-        {k:'connectors', type:'number', label:'FIC Connectors Used (pcs)', step:'1', placeholder:'0 if none'},
+        {k:'connectors', type:'fic', label:'FIC Connectors Used'},
         {k:'items_used', type:'items_used', label:'Issued Items Used (splitter, pigtail, enclosure…)'},
         {k:'other_materials', type:'textarea', label:'Other Materials'}
       ]},
@@ -1745,6 +1747,11 @@ function hasValue(t, f){
   if(f.type==='photo') return !!(v && v.img);
   if(f.type==='gps') return !!(v && v.lat!=null && v.lng!=null);
   if(f.type==='items_used') return Array.isArray(v) && v.length>0;
+  if(f.type==='fic'){
+    const d = t.data;
+    if(d.connectors_blue===undefined && d.connectors_green===undefined) return !f.min && v!==undefined && v!=='';
+    return ((parseInt(d.connectors_blue)||0) + (parseInt(d.connectors_green)||0)) >= (f.min||0);
+  }
   return true;
 }
 function progress(t){
@@ -1998,7 +2005,7 @@ function renderTechList(){
      exactly what the register exists to prevent. */
   const allReels = (inv.cables||[]).slice().sort((a,b)=>(a.issuedAt||0)-(b.issuedAt||0));
   const usable = allReels.filter(r=>r.meters>REEL_EMPTY_M && r.state!=='returning');
-  const lowFic = (inv.connectors||0)<5;
+  const lowFic = ficLow(inv);
   const reelRow = (r)=>{
     const spent = r.meters<=REEL_EMPTY_M;
     const returning = r.state==='returning';
@@ -2022,7 +2029,7 @@ function renderTechList(){
       <span class="sec-title">📦 My Stock on Hand</span>
       <span class="badge b-install">Request ›</span>
     </div>
-    <div class="tmeta" style="font-size:13px${lowFic?';color:var(--danger);font-weight:700':''}">🔌 FIC Connectors: ${inv.connectors||0} pcs${lowFic?' — running low!':''}</div>
+    <div class="tmeta" style="font-size:13px${lowFic?';color:var(--danger);font-weight:700':''}">🔌 FIC Connectors: ${ficText(inv)}${lowFic?' — running low!':''}</div>
     ${allReels.length
       ? allReels.map(reelRow).join('')
       : '<div class="tmeta" style="font-size:13px;color:var(--danger);font-weight:700">🧵 No fiber cable — request from the admin</div>'}
@@ -2105,7 +2112,7 @@ function renderTechStats(){
   const longRun = prog.filter(t=>(jobElapsed(t)||0) > 24*3600000);
   const urgent = open.concat(prog).filter(t=>(t.priority||3)===1);
   const inv = (USER&&USER.inv)||{connectors:0,cables:[],items:[]};
-  const lowFic = (inv.connectors||0) < 5;
+  const lowFic = ficLow(inv);
   /* A reel marked for return is already promised back to the office, so it does
      not count as cable the technician can still pull from today. */
   const drawable = (inv.cables||[]).filter(r=>r.state!=='returning' && r.state!=='written_off');
@@ -2116,7 +2123,7 @@ function renderTechStats(){
   if(urgent.length) rows.push(`⚡ ${urgent.length} urgent job${urgent.length===1?'':'s'} assigned to you`);
   if(stale.length) rows.push(`🕒 ${stale.length} job${stale.length===1?' has':'s have'} been waiting over 2 days`);
   if(longRun.length) rows.push(`⏱ ${longRun.length} job${longRun.length===1?'':'s'} still open after a day — close ${longRun.length===1?'it':'them'} if finished`);
-  if(lowFic) rows.push(`🔌 Only ${inv.connectors||0} FIC connectors left — request more`);
+  if(lowFic) rows.push(`🔌 FIC connectors running low (${ficText(inv,false)}) — request more`);
   if(noCable && onlyScraps) rows.push('🧵 Only short remnants left — request a fresh reel before taking a long run');
   else if(noCable) rows.push('🧵 No usable fiber cable on hand — request a reel');
   if(returning.length) rows.push(`↩ ${returning.length} reel${returning.length===1?'':'s'} waiting to be handed in at the office`);
@@ -2367,6 +2374,15 @@ function collectStep(){
       }
       return;
     }
+    if(f.type==='fic'){
+      const b = document.getElementById('f_connectors_blue'), g = document.getElementById('f_connectors_green');
+      if(b && g && (b.value!=='' || g.value!=='')){
+        t.data.connectors_blue = Math.max(0, parseInt(b.value)||0);
+        t.data.connectors_green = Math.max(0, parseInt(g.value)||0);
+        t.data.connectors = t.data.connectors_blue + t.data.connectors_green;
+      }
+      return;
+    }
     if(f.type==='items_used'){
       const rows = document.querySelectorAll('#items_'+f.k+' .item-qty');
       const arr = [];
@@ -2429,6 +2445,34 @@ function finishTicket(){
 }
 
 /* ---------- field renderers ---------- */
+/* ---- FIC connectors: blue and green ----
+   inv.connectors is the total; connBlue / connGreen split it. Anything the colours
+   do not cover was counted before colours were tracked ("not sorted"). */
+function ficParts(inv){
+  inv = inv||{};
+  const blue = Math.max(0, parseInt(inv.connBlue)||0), green = Math.max(0, parseInt(inv.connGreen)||0);
+  const total = Math.max(0, parseInt(inv.connectors)||0, blue+green);
+  return { total, blue, green, unsorted: total-blue-green };
+}
+function ficText(inv, html){
+  const c = ficParts(inv);
+  const b = html===false ? (x=>x) : (x=>'<b>'+x+'</b>');
+  return `🔵 Blue ${b(c.blue)} · 🟢 Green ${b(c.green)}${c.unsorted?` · ${c.unsorted} not sorted by colour`:''}`;
+}
+function ficLow(inv, min){
+  const c = ficParts(inv); min = min||5;
+  return c.unsorted ? c.total < min : (c.blue < min || c.green < min);
+}
+function ficUsedText(d){
+  if(!d) return '';
+  if(d.connectors_blue!==undefined || d.connectors_green!==undefined){
+    const p=[]; const b=parseInt(d.connectors_blue)||0, g=parseInt(d.connectors_green)||0;
+    if(b) p.push(b+' blue'); if(g) p.push(g+' green');
+    return p.length ? p.join(' + ')+' pcs' : '0 pcs';
+  }
+  return d.connectors ? (parseInt(d.connectors)||0)+' pcs (colour not recorded)' : '';
+}
+
 function renderField(t,f){
   /* NAP box and port on a subscriber install come from the map pick. The typed
      fields only show when the box is not on the map (or the map cannot load),
@@ -2445,6 +2489,17 @@ function renderField(t,f){
   }
   let v = t.data[f.k];
   const reqMark = f.req?' <span class="req">*</span>':'';
+  if(f.type==='fic'){
+    const d = t.data, held = ficParts(USER && USER.role==='tech' ? USER.inv : null);
+    const old = d.connectors_blue===undefined && d.connectors_green===undefined && d.connectors;
+    const val = c => d['connectors_'+c]!==undefined ? d['connectors_'+c] : '';
+    return `<label>${f.label}${reqMark}</label>
+      <div class="row2">
+        <div><label style="margin-top:0;text-transform:none">🔵 Blue (pcs)</label><input type="number" inputmode="numeric" min="0" step="1" id="f_connectors_blue" value="${esc(val('blue'))}" placeholder="0"></div>
+        <div><label style="margin-top:0;text-transform:none">🟢 Green (pcs)</label><input type="number" inputmode="numeric" min="0" step="1" id="f_connectors_green" value="${esc(val('green'))}" placeholder="0"></div>
+      </div>
+      <p class="hint">${old?'Entered before colours were tracked: '+esc(d.connectors)+' pcs. Enter the colours to replace it. ':''}${USER && USER.role==='tech' ? 'You have '+ficText(USER.inv,false)+'. ' : ''}Taken from your stock when the job is completed.</p>`;
+  }
   if(f.type==='pppoe_link'){
     const linked = t.pppoeUsername
       ? `<div class="linked-chip"><span>🔗 ${esc(t.pppoeUsername)}${t.accountNo?' · account '+esc(t.accountNo):' · no account number yet'}</span>
@@ -3919,7 +3974,7 @@ function reqBadge(s){
 function reqItems(r){
   /* new single-item shape */
   if(r.kind){
-    const icon = r.kind==='cable'?'🧵':r.kind==='connector'?'🔌':'📦';
+    const icon = r.kind==='cable'?'🧵':r.kind==='connector'?(/green/i.test(r.name||'')?'🟢':/blue/i.test(r.name||'')?'🔵':'🔌'):'📦';
     if(r.kind==='cable') return `${icon} ${esc(r.name)} — ${r.qty} reel${r.qty>1?'s':''}${r.cableMeters?` (${r.cableMeters} m)`:''}`;
     return `${icon} ${esc(r.name)} — ${r.qty} pcs`;
   }
@@ -3937,7 +3992,9 @@ function rqOptions(){
   /* everything the admin has in the warehouse becomes selectable */
   const opts=['<option value="">— select item —</option>'];
   (WAREHOUSE.cables||[]).forEach(c=>opts.push(`<option value="cable|${esc(c.name)}">🧵 Fiber Cable — ${esc(c.name)} (${c.meters} m/reel · ${c.qty} pcs available)</option>`));
-  if((WAREHOUSE.connectors||0)>0 || true) opts.push(`<option value="connector|FIC Connector">🔌 FIC Connector (${WAREHOUSE.connectors||0} pcs available)</option>`);
+  const wc = ficParts(WAREHOUSE);
+  opts.push(`<option value="connector|FIC Connector (Blue)">🔵 FIC Connector — BLUE (${wc.blue} pcs available)</option>`);
+  opts.push(`<option value="connector|FIC Connector (Green)">🟢 FIC Connector — GREEN (${wc.green} pcs available)</option>`);
   (WAREHOUSE.items||[]).forEach(i=>opts.push(`<option value="item|${esc(i.name)}">📦 ${esc(i.name)} (${i.qty} pcs available)</option>`));
   return opts.join('');
 }
@@ -3970,7 +4027,10 @@ function renderWarehouse(){
         <td>${c.qty*c.meters} m</td>
         <td><button class="btn btn-warn btn-sm" style="margin-top:0;padding:4px 9px" onclick="whRemove('${c.id}')">✕</button></td>
       </tr>`).join('')}
-      <tr><td>🔌 FIC Connectors</td><td>—</td><td${(WAREHOUSE.connectors||0)<10?' style="color:var(--danger);font-weight:700"':''}>${WAREHOUSE.connectors||0} pcs</td><td>—</td><td></td></tr>
+      ${(()=>{ const w = ficParts(WAREHOUSE); const red = n => n<10?' style="color:var(--danger);font-weight:700"':'';
+        return `<tr><td>🔵 FIC Connectors — Blue</td><td>—</td><td${red(w.blue)}>${w.blue} pcs</td><td>—</td><td><button class="btn btn-ghost btn-sm" style="margin-top:0;padding:4px 9px" onclick="whSetConn('blue',${w.blue})">✎</button></td></tr>
+        <tr><td>🟢 FIC Connectors — Green</td><td>—</td><td${red(w.green)}>${w.green} pcs</td><td>—</td><td><button class="btn btn-ghost btn-sm" style="margin-top:0;padding:4px 9px" onclick="whSetConn('green',${w.green})">✎</button></td></tr>
+        ${w.unsorted?`<tr><td>🔌 FIC Connectors — not sorted by colour</td><td>—</td><td>${w.unsorted} pcs</td><td>—</td><td><button class="btn btn-ghost btn-sm" style="margin-top:0;padding:4px 9px" onclick="whSetConn('',${w.unsorted})">✎</button></td></tr>`:''}`; })()}
       ${(WAREHOUSE.items||[]).map(i=>`<tr>
         <td>📦 ${esc(i.name)}</td><td>—</td>
         <td${i.qty<3?' style="color:var(--danger);font-weight:700"':''}>${i.qty} pcs</td><td>—</td>
@@ -4008,10 +4068,20 @@ async function whAddConnectors(){
   const n = parseInt(document.getElementById('whConn').value)||0;
   if(!n){ alert('Enter the number of connectors.'); return; }
   try{
-    WAREHOUSE = (await api('/api/warehouse','POST',{connectors:n})).warehouse;
+    WAREHOUSE = (await api('/api/warehouse','POST',{connectors:n, connColour:document.getElementById('whConnColour').value})).warehouse;
     document.getElementById('whConn').value='';
     renderWarehouse();
   }catch(e){ alert(e.message); }
+}
+/* set a connector count in the office to what is really on the shelf */
+async function whSetConn(colour, current){
+  const label = colour ? (colour==='blue'?'BLUE':'GREEN')+' FIC connectors' : 'FIC connectors not sorted by colour';
+  const v = prompt('Set the number of '+label+' in the office (currently '+current+'):', current);
+  if(v===null) return;
+  const target = Math.max(0, parseInt(v)||0);
+  if(target===current) return;
+  try{ WAREHOUSE = (await api('/api/warehouse','POST',{connSet:colour, connTarget:target})).warehouse; renderWarehouse(); }
+  catch(e){ alert(e.message); }
 }
 async function whRemove(id){
   if(!confirm('Remove this cable stock from the warehouse?')) return;
@@ -4025,7 +4095,9 @@ function renderTechReq(){
   const reels = inv.cables||[];
   document.getElementById('myStock').innerHTML = `
     <table class="summary-table">
-      <tr><td>🔌 FIC Connectors</td><td>${inv.connectors||0} pcs</td></tr>
+      <tr><td>🔵 FIC Connectors — Blue</td><td>${ficParts(inv).blue} pcs</td></tr>
+      <tr><td>🟢 FIC Connectors — Green</td><td>${ficParts(inv).green} pcs</td></tr>
+      ${ficParts(inv).unsorted?`<tr><td>🔌 FIC Connectors — not sorted by colour</td><td>${ficParts(inv).unsorted} pcs</td></tr>`:''}
       ${reels.length ? reels.map(r=>`<tr><td>🧵 ${esc(r.name)}</td><td>${r.meters} m left</td></tr>`).join('') : '<tr><td>🧵 Fiber cable</td><td>none</td></tr>'}
       ${(inv.items||[]).map(i=>`<tr><td>📦 ${esc(i.name)}</td><td>${i.qty} pcs</td></tr>`).join('')}
     </table>`;
@@ -4172,7 +4244,7 @@ function renderDash(){
   const leftInstalls = unfinishedInstalls();
   const unassigned = tickets.filter(t=>!t.assignedTo && t.status!=='completed');
   const urgent = tickets.filter(t=>(t.priority||3)===1 && t.status!=='completed');
-  const lowStock = users.filter(u=>u.role==='tech' && (((u.inv||{}).connectors||0)<5 || !((u.inv||{}).cables||[]).some(r=>r.meters>50)));
+  const lowStock = users.filter(u=>u.role==='tech' && (ficLow(u.inv) || !((u.inv||{}).cables||[]).some(r=>r.meters>50)));
   const pendingReq = REQUESTS.filter(r=>r.status==='pending').length;
   const alerts = [];
   const disc = stockDiscrepancies();
@@ -4419,9 +4491,9 @@ function renderInvPanel(){
               return `<div${low}><b>${esc(r.code||'')}</b> ${esc(r.name)}: ${r.meters} m${tag}</div>`;
             }).join('')
           : '<span style="color:var(--danger);font-weight:700">none</span>';
-        const lowK = (inv.connectors||0)<5?' style="color:var(--danger);font-weight:700"':'';
+        const lowK = ficLow(inv)?' style="color:var(--danger);font-weight:700"':'';
         const itemsHtml = (inv.items||[]).map(i=>`<div>📦 ${esc(i.name)}: ${i.qty}</div>`).join('');
-        return `<tr><td>${esc(u.name)}</td><td>${cableHtml}</td><td${lowK}>${inv.connectors||0} pcs FIC${itemsHtml?'<div style="margin-top:4px">'+itemsHtml+'</div>':''}</td></tr>`;
+        return `<tr><td>${esc(u.name)}</td><td>${cableHtml}</td><td${lowK}>${ficText(inv)}${itemsHtml?'<div style="margin-top:4px">'+itemsHtml+'</div>':''}</td></tr>`;
       }).join('')}
     </table>
     <div class="tmeta" style="margin-top:6px">Stock arrives here by releasing a request, or directly from the Team tab. It is deducted automatically when a job is completed. Red = running low.</div>`
@@ -4505,7 +4577,7 @@ function renderUsage(){
         <td>${esc(t.assignedName||'—')}</td>
         <td>${t.data.cable_reel_code?`<b>${esc(t.data.cable_reel_code)}</b><div class="tmeta">${esc(t.data.cable_reel_name||'')}</div>`:esc(t.data.cable_reel_name || (t.data.cable_reel?'(reel)':'—'))}</td>
         <td>${t.data.cable_used!==undefined?t.data.cable_used+' m':'—'}${t.data.cable_shortfall?`<div class="tmeta" style="color:var(--danger);font-weight:700">${t.data.cable_shortfall} m unaccounted</div>`:''}</td>
-        <td>${parseInt(t.data.connectors)||0} pcs</td>
+        <td>${esc(ficUsedText(t.data)||'0 pcs')}</td>
       </tr>`).join('')}
     </table>` : '<div class="tmeta">No completed jobs with materials yet.</div>'}`;
 }
@@ -4524,8 +4596,14 @@ function usageEvents(list){
     const d = t.data||{};
     const meters = parseFloat(d.cable_used);
     if(meters>0) out.push({ts:when, ticket:t, kind:'cable', name:d.cable_reel_name||'Fiber cable', qty:meters, unit:'m'});
-    const conn = parseInt(d.connectors)||0;
-    if(conn>0) out.push({ts:when, ticket:t, kind:'connector', name:'FIC Connector', qty:conn, unit:'pcs'});
+    if(d.connectors_blue!==undefined || d.connectors_green!==undefined){
+      const b = parseInt(d.connectors_blue)||0, g = parseInt(d.connectors_green)||0;
+      if(b>0) out.push({ts:when, ticket:t, kind:'connector', name:'FIC Connector (Blue)', qty:b, unit:'pcs'});
+      if(g>0) out.push({ts:when, ticket:t, kind:'connector', name:'FIC Connector (Green)', qty:g, unit:'pcs'});
+    } else {
+      const conn = parseInt(d.connectors)||0;
+      if(conn>0) out.push({ts:when, ticket:t, kind:'connector', name:'FIC Connector', qty:conn, unit:'pcs'});
+    }
     (Array.isArray(d.items_used)?d.items_used:[]).forEach(i=>{
       const q = parseInt(i.qty)||0;
       if(q>0) out.push({ts:when, ticket:t, kind:'item', name:i.name, qty:q, unit:'pcs'});
@@ -5310,8 +5388,10 @@ function renderCountCard(){
   const sh = cs.sheet || {reels:[],items:[]};
   el.innerHTML = `<div class="sec-head" style="margin-bottom:4px"><span class="sec-title">🧮 Stock count — ${esc(forDay)}</span></div>
     <div class="tmeta" style="font-size:12.5px">Count what you physically have. Don't copy the app — the office compares the two.</div>
-    <label>🔌 FIC connectors (pcs)</label>
-    <input id="cntConn" type="number" inputmode="numeric" min="0" step="1" placeholder="0 if none">
+    <div class="row2">
+      <div><label>🔵 Blue FIC connectors (pcs)</label><input id="cntConnBlue" type="number" inputmode="numeric" min="0" step="1" placeholder="0 if none"></div>
+      <div><label>🟢 Green FIC connectors (pcs)</label><input id="cntConnGreen" type="number" inputmode="numeric" min="0" step="1" placeholder="0 if none"></div>
+    </div>
     ${sh.reels.map(r=>`<label>🧵 Reel ${esc(r.code||'')} ${esc(r.name||'')} — metres left${r.returning?' (returning)':''}</label>
       <input class="cnt-reel" data-id="${esc(r.id)}" type="number" inputmode="decimal" min="0" step="0.1" placeholder="read the meter mark">`).join('')}
     ${sh.items.map(i=>`<label>📦 ${esc(i.name)} (pcs)</label>
@@ -5322,8 +5402,8 @@ function renderCountCard(){
     ${cs.pendingDay?'':'<button class="btn btn-ghost btn-sm" onclick="countFormOpen=false;renderCountCard()">Later</button>'}`;
 }
 async function submitStockCount(){
-  const conn = document.getElementById('cntConn').value;
-  if(conn===''){ alert('Enter how many FIC connectors you have (0 if none).'); return; }
+  const cBlue = document.getElementById('cntConnBlue').value, cGreen = document.getElementById('cntConnGreen').value;
+  if(cBlue==='' || cGreen===''){ alert('Enter how many BLUE and how many GREEN FIC connectors you have (0 if none).'); return; }
   const reels = {}, items = {};
   let missing = false;
   document.querySelectorAll('#countCard .cnt-reel').forEach(i=>{ if(i.value==='') missing = true; reels[i.dataset.id] = i.value; });
@@ -5331,7 +5411,7 @@ async function submitStockCount(){
   document.querySelectorAll('#countCard .cnt-item').forEach(i=>{ items[i.dataset.name] = i.value===''?0:i.value; });
   const btn = document.getElementById('cntBtn'); btn.disabled = true; btn.textContent = 'Saving…';
   try{
-    const r = await api('/api/stock/count','POST',{connectors:conn, reels, items, note:document.getElementById('cntNote').value});
+    const r = await api('/api/stock/count','POST',{connBlue:cBlue, connGreen:cGreen, reels, items, note:document.getElementById('cntNote').value});
     COUNT_RESULT = r.count; countFormOpen = false;
     await loadCountStatus();
     renderCountCard();
@@ -5366,7 +5446,7 @@ function renderDaily(){
       : '<span class="badge b-open">Not counted</span>';
     return `<tr>
       <td><b>${esc(t.name)}</b>${t.to?'':'<div class="tmeta" style="color:var(--danger)">no mobile</div>'}${t.pending?`<div class="tmeta" style="color:var(--danger)">missed ${esc(prettyCountDay(t.pending))}</div>`:''}</td>
-      <td>🔌 ${s.connectors} · 🧵 ${s.meters} m${s.items.map(i=>`<br>📦 ${esc(i.name)} ${i.qty}`).join('')}</td>
+      <td>🔵 ${s.connBlue!=null?s.connBlue:'—'} · 🟢 ${s.connGreen!=null?s.connGreen:'—'}${s.connUnsorted?' (+'+s.connUnsorted+' unsorted)':''} · 🧵 ${s.meters} m${s.items.map(i=>`<br>📦 ${esc(i.name)} ${i.qty}`).join('')}</td>
       <td>${s.needs.length?s.needs.map(n=>`<div style="color:var(--danger);font-weight:700">${esc(n)}</div>`).join(''):'<span class="tmeta">OK</span>'}</td>
       <td>${cnt}</td></tr>`;
   }).join('');
@@ -5467,7 +5547,7 @@ function renderUsers(){
     <div class="user-row">
       <div>
         <div class="un">${esc(u.name)} ${u.role==='admin'?'<span class="badge b-install">Admin</span>':'<span class="badge b-done">Technician</span>'}</div>
-        <div class="um">@${esc(u.username)}${u.role==='tech'?` · 🧵 ${reelTxt} · 🔌 ${inv.connectors||0} pcs FIC`:''}</div>
+        <div class="um">@${esc(u.username)}${u.role==='tech'?` · 🧵 ${reelTxt} · 🔌 FIC ${ficText(inv,false)}`:''}</div>
         <div class="um">📱 ${u.phone?esc(u.phone)+(u.smsReport===false?' · daily SMS off':' · gets the daily stock SMS'):'<span style="color:var(--danger)">no mobile number — no stock SMS</span>'}</div>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
@@ -5495,10 +5575,12 @@ function manageStockHtml(u){
           <button class="btn btn-warn btn-sm" style="margin-top:0;padding:4px 10px" onclick="deleteReel('${u.id}','${r.id}','${esc((r.code?r.code+' ':'')+r.name)}')">✕</button>
         </div>
       </div>`).join('')||'<div class="um">No cable reels.</div>'}
-    <div class="user-row" style="padding:6px 0">
-      <div class="um">🔌 FIC Connectors — <b>${inv.connectors||0} pcs</b></div>
-      <button class="btn btn-ghost btn-sm" style="margin-top:0;padding:4px 10px" onclick="adjustConnectors('${u.id}',${inv.connectors||0})">✎ Adjust</button>
-    </div>
+    ${(()=>{ const c = ficParts(inv);
+      const row = (col, icon, label, n) => `<div class="user-row" style="padding:6px 0">
+        <div class="um">${icon} FIC Connectors — ${label} — <b>${n} pcs</b></div>
+        <button class="btn btn-ghost btn-sm" style="margin-top:0;padding:4px 10px" onclick="adjustConnectors('${u.id}',${n},'${col}')">✎ Adjust</button>
+      </div>`;
+      return row('blue','🔵','Blue',c.blue) + row('green','🟢','Green',c.green) + (c.unsorted ? row('','🔌','not sorted by colour',c.unsorted) : ''); })()}
     ${(inv.items||[]).map(i=>`
       <div class="user-row" style="padding:6px 0">
         <div class="um">📦 ${esc(i.name)} — <b>${i.qty} pcs</b></div>
@@ -5522,11 +5604,13 @@ function deleteReel(userId, reelId, name){
   if(!confirm('Remove cable "'+name+'" from this technician?')) return;
   invPost(userId, {removeReel:reelId});
 }
-function adjustConnectors(userId, current){
-  const v = prompt('Set new FIC connector count (currently '+current+'):', current);
+function adjustConnectors(userId, current, colour){
+  const label = colour ? (colour==='blue'?'BLUE':'GREEN')+' FIC connectors' : 'FIC connectors not sorted by colour (set to 0 once the colours are entered)';
+  const v = prompt('Set the number of '+label+' (currently '+current+'):', current);
   if(v===null) return;
-  const target = parseInt(v)||0;
-  invPost(userId, {connectors: target-current});
+  const target = Math.max(0, parseInt(v)||0);
+  if(target===current) return;
+  invPost(userId, {connSet: colour||'', connTarget: target});
 }
 function adjustItem(userId, name, current, remove){
   if(remove){
@@ -5547,10 +5631,12 @@ async function addStock(id, name){
     if(mtr===null) return;
     cableMeters = parseFloat(mtr)||0;
   }
-  const connectors = prompt('FIC connectors (pcs) to give '+name+' (0 if none):','0');
-  if(connectors===null) return;
+  const blue = prompt('BLUE FIC connectors (pcs) to give '+name+' (0 if none):','0');
+  if(blue===null) return;
+  const green = prompt('GREEN FIC connectors (pcs) to give '+name+' (0 if none):','0');
+  if(green===null) return;
   try{
-    await api('/api/users/'+id+'/inventory','POST',{cableName:cableName.trim(), cableMeters, connectors:parseInt(connectors)||0});
+    await api('/api/users/'+id+'/inventory','POST',{cableName:cableName.trim(), cableMeters, connectors_blue:parseInt(blue)||0, connectors_green:parseInt(green)||0});
     await loadUsers(); renderUsers();
   }catch(e){ alert(e.message); }
 }
@@ -5695,6 +5781,7 @@ function renderSummary(t, targetId){
       add(f.label, code ? name + ' · reel ' + code : name); return;
     }
     if(f.type==='items_used'){ const txt=itemsUsedText(v); if(txt) rows.push([f.label, txt]); return; }
+    if(f.type==='fic'){ add(f.label, ficUsedText(t.data)); return; }
     add(f.label, v);
   }));
   const sig = t.data.signature;
