@@ -213,6 +213,42 @@ function connTake(inv, colour, qty) {
   else { fromUnsorted(); fromKey('connBlue'); fromKey('connGreen'); }
   return left;
 }
+/* ---- NAP-install materials: the NAP box (enclosure) and its cassette(s) ----
+   The technician picks sizes on the job; the matching issued item is found by its
+   name the way the office typed it in Materials ("NAP Box 16 ports", "Cassette 1x8",
+   "FBT cassette"…) and taken from their stock when the job is completed. */
+const CASSETTE_OPTS = { '4-port cassette (1:4)': 4, '8-port cassette (1:8)': 8, '16-port cassette (1:16)': 16, 'FBT cassette (15/85 + 1:8)': 'fbt' };
+function napMaterialMatch(itemName, kind, size) {
+  const n = String(itemName || '').toLowerCase();
+  const hasNum = k => new RegExp('(^|[^0-9])(1\\s*[:x×]\\s*)?' + k + '(?![0-9])').test(n);
+  if (kind === 'enclosure') return /nap/.test(n) && !/cassette|fbt|plc|splitter/.test(n) && hasNum(size);
+  if (kind === 'fbt') return /fbt/.test(n);
+  if (kind === 'cassette') return /cassette|plc|splitter/.test(n) && !/fbt/.test(n) && hasNum(size);
+  return false;
+}
+/* what a NAP job used, as [{kind, size, label}] */
+function napMaterialsOf(d) {
+  d = d || {};
+  const out = [];
+  const enc = parseInt(String(d.nap_enclosure || ''), 10);
+  if ([8, 16].includes(enc)) out.push({ kind: 'enclosure', size: enc, label: `${enc}-port NAP box` });
+  const cas = CASSETTE_OPTS[d.nap_cassette];
+  if (cas === 'fbt') out.push({ kind: 'fbt', size: 8, label: 'FBT cassette (15/85 + 1:8)' });
+  else if (cas) out.push({ kind: 'cassette', size: cas, label: `${cas}-port cassette` });
+  if (String(d.nap_layout || '').startsWith('Sub-main') && d.nap_cassette) {
+    const c2 = parseInt(d.nap_combo_ports, 10);
+    if ([4, 8, 16].includes(c2)) out.push({ kind: 'cassette', size: c2, label: `${c2}-port cassette (second, inside the sub-main)` });
+  }
+  return out;
+}
+/* the job's cassette choice decides the box size the map gets */
+function napDerive(d) {
+  const cas = CASSETTE_OPTS[d && d.nap_cassette];
+  if (!cas) return;
+  d.nap_ports = String(cas === 'fbt' ? 8 : cas);
+  d.nap_tap = cas === 'fbt';
+}
+
 /* "this holder really has N of this colour" (office adjust): a colour going up is
    first taken out of the not-sorted pile, because that is what sorting them is. */
 function connSet(inv, colour, target) {
@@ -544,6 +580,8 @@ function napInstallPayload(t) {
       area: name,                       // one value names the box and its billing area
       lat: loc.lat, lng: loc.lng,
       port_count: parseInt(d.nap_ports, 10) || 0,
+      tap: !!d.nap_tap || CASSETTE_OPTS[d.nap_cassette] === 'fbt',
+      enclosure_ports: parseInt(String(d.nap_enclosure || ''), 10) || undefined,
       address: String(d.main_nap || '').trim(),
       notes: [
         d.nap_reading !== undefined && d.nap_reading !== '' ? 'Reading at install: ' + d.nap_reading + ' dBm' : '',
@@ -1559,7 +1597,7 @@ const server = http.createServer(async (req, res) => {
       if (!portId) return json(res, 400, { error: 'portId required' });
       try {
         const action = p.endsWith('reserve') ? 'reserve' : 'release';
-        return json(res, 200, await ftthCall('POST', `/api/ports/${encodeURIComponent(portId)}/${action}`, { ticketId: rt.id }));
+        return json(res, 200, await ftthCall('POST', `/api/ports/${encodeURIComponent(portId)}/${action}`, { ticketId: rt.id, purpose: rb.purpose === 'feeder' ? 'feeder' : undefined }));
       } catch (e) {
         return json(res, e.code || 500, { error: e.message });
       }
@@ -2159,9 +2197,10 @@ const server = http.createServer(async (req, res) => {
           /* Figures the server works out at completion are kept even if a client
              sends back an older copy of the job without them. */
           ['cable_drawn', 'cable_start_system', 'cable_reel_code', 'cable_reel_name', 'cable_shortfall',
-           'cable_discrepancy', 'cable_review', 'connector_shortfall'].forEach(k => {
+           'cable_discrepancy', 'cable_review', 'connector_shortfall', 'material_shortfall', 'nap_materials_used'].forEach(k => {
             if (prev[k] !== undefined && incoming[k] === undefined) incoming[k] = prev[k];
           });
+          if (t.type === 'nap_install') napDerive(incoming);
           /* the colour split is the record; the plain total follows it */
           if (incoming.connectors_blue !== undefined || incoming.connectors_green !== undefined) {
             incoming.connectors_blue = Math.max(0, parseInt(incoming.connectors_blue) || 0);
@@ -2311,6 +2350,18 @@ const server = http.createServer(async (req, res) => {
                 cleanItems.push({ name, qty: q });
               });
               if (cleanItems.length) t.data.items_used = cleanItems;
+              /* the NAP box and cassette(s) of a NAP installation */
+              if (t.type === 'nap_install') {
+                const used = [], missing = [];
+                napMaterialsOf(t.data).forEach(m => {
+                  const it = (tech.inv.items || []).find(i => i.qty > 0 && napMaterialMatch(i.name, m.kind, m.size));
+                  if (it) { addItemTo(tech, it.name, -1); used.push({ name: it.name, qty: 1 }); }
+                  else missing.push(m.label);
+                });
+                if (used.length) t.data.items_used = (t.data.items_used || []).concat(used);
+                t.data.nap_materials_used = used;
+                if (missing.length) { t.data.material_shortfall = missing; t.needsStockReview = true; }
+              }
               t.invApplied = true;
             }
           } else if (b.status === 'completed' && t.invApplied && t.assignedTo && t.data && t.data.cable_reel) {

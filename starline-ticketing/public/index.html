@@ -1131,9 +1131,10 @@ const WORKFLOWS = {
       desc:'Install the new NAP box on the post, take a photo of it with its tagging, and record its optical reading.',
       fields:[
         {k:'nap_id', type:'planned_nap', label:'Which planned NAP box are you installing?', req:true},
-        {k:'nap_ports', type:'select', label:'Box Size (ports) — for a Sub-main, the size of the first cassette', req:true, options:['4','8','12','16']},
+        {k:'nap_enclosure', type:'select', label:'NAP Box Used', req:true, options:['8-port NAP box','16-port NAP box'], napStock:'enclosure'},
+        {k:'nap_cassette', type:'select', label:'Cassette Used — for a Sub-main, the first cassette', req:true, options:['4-port cassette (1:4)','8-port cassette (1:8)','16-port cassette (1:16)','FBT cassette (15/85 + 1:8)'], napStock:'cassette'},
         {k:'nap_layout', type:'select', label:'Cassettes in this box', options:['One cassette','Sub-main: second cassette on port 1 of the first']},
-        {k:'nap_combo_ports', type:'select', label:'Second cassette size (Sub-main only)', options:['8','4','12','16']},
+        {k:'nap_combo_ports', type:'select', label:'Second cassette size (Sub-main only)', options:['8','4','16'], napStock:'cassette2'},
         {k:'nap_box_photo', type:'photo', label:'Photo of New NAP Box with Tagging', req:true, autogps:true},
         {k:'nap_reading', type:'number', label:'NAP Box Reading (dBm)', req:true, placeholder:'e.g. -18.5', step:'0.1'},
         {k:'nap_reading_photo', type:'photo', label:'Photo of Power Meter Reading', autogps:true}
@@ -2357,9 +2358,16 @@ function nextStep(){
   if(t.status==='open') t.status='in_progress';
   t.step++; persist(t); renderTicket();
 }
+function napDeriveClient(t){
+  const c = CASSETTE_OPTS[t.data.nap_cassette];
+  if(!c) return;
+  t.data.nap_ports = String(c==='fbt' ? 8 : c);
+  t.data.nap_tap = c==='fbt';
+}
 function collectStep(){
   const t = byId(currentId);
   if(!t || t.status==='completed') return;
+  if(t.type==='nap_install') setTimeout(()=>napDeriveClient(t), 0);
   const s = getWorkflow(t)[t.step];
   if(!s) return;
   s.fields.forEach(f=>{
@@ -2424,6 +2432,10 @@ function finishTicket(){
     const pl = plannedOf(t);
     if(pl){ const m = metres(pl, t.data.location);
       if(m>150 && !confirm('The post GPS is '+fmtDist(m)+' away from where '+t.data.nap_id+' was planned.\n\nIf this really is '+t.data.nap_id+', the map will move it to your GPS. Complete the job?')){ renderTicket(); return; } }
+  }
+  if(t.type==='nap_install') napDeriveClient(t);
+  if(t.type==='nap_install' && String(t.data.nap_layout||'').startsWith('Sub-main') && CASSETTE_OPTS[t.data.nap_cassette]==='fbt'){
+    alert('An FBT tap cassette is not a sub-main. Set "Cassettes in this box" to One cassette.'); renderTicket(); return;
   }
   if(t.type==='nap_install' && String(t.data.nap_layout||'').startsWith('Sub-main') && parseInt(t.data.nap_ports,10) < 2){
     alert('A Sub-main box needs its first cassette size (usually 4) under Box Size.'); renderTicket(); return;
@@ -2671,13 +2683,19 @@ function renderField(t,f){
       const nm = String(t.data.nap_id||'').toUpperCase(), sub = /-SUB\d+$/.test(nm);
       if(f.k==='nap_layout') v = sub ? 'Sub-main: second cassette on port 1 of the first' : (nm ? 'One cassette' : '');
       if(f.k==='nap_combo_ports' && sub) v = '8';
-      if(f.k==='nap_ports') v = (sub || /-LCP\d+$/.test(nm)) ? '4' : (/-NAP\d+$/.test(nm) ? '8' : '');
+      if(f.k==='nap_cassette'){
+        const old = parseInt(t.data.nap_ports,10);              // jobs started before the cassette field
+        v = t.data.nap_tap || t.data.feeder_thru ? CASSETTE_FBT
+          : old===4||old===8||old===16 ? CASSETTE_BY_SIZE[old]
+          : (sub || /-LCP\d+$/.test(nm)) ? CASSETTE_BY_SIZE[4] : (/-NAP\d+$/.test(nm) ? CASSETTE_BY_SIZE[8] : '');
+      }
     }
     return `<label>${f.label}${reqMark}</label>
-      <select id="f_${f.k}">
+      <select id="f_${f.k}" ${f.napStock?`onchange="napStockHint('${f.k}')"`:''}>
         <option value="">— select —</option>
         ${(f.options||[]).map(o=>`<option value="${esc(o)}" ${o===v?'selected':''}>${esc(o)}</option>`).join('')}
-      </select>`;
+      </select>
+      ${f.napStock?`<p class="hint" id="stockhint_${f.k}">${napStockHintText(f.k, v)}</p>`:''}`;
   }
   if(f.type==='textarea'){
     return `<label>${f.label}${reqMark}</label><textarea id="f_${f.k}" placeholder="${f.placeholder||''}">${esc(v||'')}</textarea>`;
@@ -2994,6 +3012,8 @@ async function pickPlanned(i){
   collectStep();
   t.data.nap_planned_id = x.id; t.data.nap_id = x.name; t.data.nap_planned_lat = x.lat; t.data.nap_planned_lng = x.lng;
   delete t.data.nap_unplanned;
+  if(x.tap && !t.data.nap_cassette) t.data.nap_cassette = CASSETTE_FBT;
+  else if(x.port_count && !t.data.nap_cassette && CASSETTE_BY_SIZE[x.port_count]) t.data.nap_cassette = CASSETTE_BY_SIZE[x.port_count];
   if(x.port_count && !t.data.nap_ports) t.data.nap_ports = String(x.port_count);
   await persist(t); renderTicket();
 }
@@ -3002,6 +3022,35 @@ async function clearPlannedNap(){
   ['nap_planned_id','nap_planned_lat','nap_planned_lng','nap_id'].forEach(k=>delete t.data[k]);
   await persist(t); renderTicket();
 }
+/* ---- NAP-install materials (same matching as the server) ---- */
+const CASSETTE_FBT = 'FBT cassette (15/85 + 1:8)';
+const CASSETTE_BY_SIZE = {4:'4-port cassette (1:4)', 8:'8-port cassette (1:8)', 16:'16-port cassette (1:16)'};
+const CASSETTE_OPTS = {'4-port cassette (1:4)':4, '8-port cassette (1:8)':8, '16-port cassette (1:16)':16, [CASSETTE_FBT]:'fbt'};
+function napMaterialMatch(itemName, kind, size){
+  const n = String(itemName||'').toLowerCase();
+  const hasNum = k => new RegExp('(^|[^0-9])(1\\s*[:x×]\\s*)?'+k+'(?![0-9])').test(n);
+  if(kind==='enclosure') return /nap/.test(n) && !/cassette|fbt|plc|splitter/.test(n) && hasNum(size);
+  if(kind==='fbt') return /fbt/.test(n);
+  if(kind==='cassette') return /cassette|plc|splitter/.test(n) && !/fbt/.test(n) && hasNum(size);
+  return false;
+}
+function napStockHintText(key, value){
+  if(!value) return 'Taken from your stock when the job is completed.';
+  let kind, size, label;
+  if(key==='nap_enclosure'){ size = parseInt(value,10); kind = 'enclosure'; label = size+'-port NAP box'; }
+  else if(key==='nap_cassette'){ const c = CASSETTE_OPTS[value]; kind = c==='fbt'?'fbt':'cassette'; size = c==='fbt'?8:c; label = c==='fbt'?'FBT cassette':c+'-port cassette'; }
+  else { size = parseInt(value,10); kind = 'cassette'; label = size+'-port cassette'; }
+  const items = ((USER&&USER.inv&&USER.inv.items)||[]).filter(i=>i.qty>0);
+  const hit = items.find(i=>napMaterialMatch(i.name, kind, size));
+  if(!USER || USER.role!=='tech') return 'Taken from the technician\'s stock when the job is completed.';
+  return hit ? `📦 From your stock: <b>${esc(hit.name)}</b> (${hit.qty} left) — 1 is taken when you complete the job.`
+    : `<span style="color:var(--danger);font-weight:700">⚠ You have no ${esc(label)} in your stock.</span> Request one in Materials — if you complete the job anyway, the office is told.`;
+}
+function napStockHint(key){
+  const el = document.getElementById('f_'+key), h = document.getElementById('stockhint_'+key);
+  if(el && h) h.innerHTML = napStockHintText(key, el.value);
+}
+
 /* ---- NAP naming convention (same rule as the FTTH map) ----
    AREA-LCP<k>               main 4-port cassette on a PON (AREA = barangay/sitio code, no spaces; k = 1st, 2nd LCP in the area)
    AREA-LCP<k>-SUB<p>        sub-main 4-port box on port p of that LCP
@@ -3011,21 +3060,26 @@ async function clearPlannedNap(){
 const NAP_NAME_RE = /^[A-Z0-9]+-LCP\d{1,2}(-SUB\d{1,2}(-NAP\d{1,2})?|-NAP\d{1,2})?$/;
 const napNameOk = n => NAP_NAME_RE.test(String(n||'').trim().toUpperCase());
 /* Names a box fed from port `portNo` of `feeder` may carry (first = the usual one). */
-function napNamesFor(feeder, portNo){
-  const f = String(feeder||'').trim().toUpperCase(), n = parseInt(portNo,10);
-  if(!napNameOk(f) || !n) return [];
-  const m = /-LCP\d+$/.test(f);
-  if(m) return [f+'-SUB'+n, f+'-NAP'+n];
+function napNamesFor(feeder, portNo, opts){
+  opts = opts||{};
+  const f = String(feeder||'').trim().toUpperCase();
+  if(!napNameOk(f)) return [];
+  /* fed from the "to next box" output of …-SUBp-NAPn: the next box in the chain */
+  if(opts.thru){ const m = /^(.*-SUB\d+-NAP)(\d+)$/.exec(f); return m ? [m[1]+(parseInt(m[2],10)+1)] : []; }
+  const n = parseInt(portNo,10);
+  if(!n) return [];
+  if(/-LCP\d+$/.test(f)) return opts.tap ? [f+'-SUB'+n+'-NAP1', f+'-SUB'+n, f+'-NAP'+n] : [f+'-SUB'+n, f+'-NAP'+n];
   return [f+'-NAP'+n];
 }
 function napNameCheckHtml(t){
-  const d = t.data||{}, names = napNamesFor(d.main_nap, d.feeder_port_no);
+  const d = t.data||{}, names = napNamesFor(d.main_nap, d.feeder_port_no, { thru: !!d.feeder_thru, tap: CASSETTE_OPTS[d.nap_cassette]==='fbt' || !!d.nap_tap });
   if(!d.feeder_port_id || !names.length || !d.nap_id) return '';
   const cur = String(d.nap_id).trim().toUpperCase();
-  if(names.includes(cur)) return `<div class="sync-ok">✓ ${esc(cur)} matches port ${esc(d.feeder_port_no)} of ${esc(d.main_nap)}</div>`;
-  if(d.nap_unplanned) return `<div class="ctx-warn">By the naming rule, a box on port ${esc(d.feeder_port_no)} of ${esc(d.main_nap)} is <b>${esc(names[0])}</b>.
+  const where = d.feeder_thru ? `the "to next box" output of ${esc(d.main_nap)}` : `port ${esc(d.feeder_port_no)} of ${esc(d.main_nap)}`;
+  if(names.includes(cur)) return `<div class="sync-ok">✓ ${esc(cur)} matches ${where}</div>`;
+  if(d.nap_unplanned) return `<div class="ctx-warn">By the naming rule, a box on ${where} is <b>${esc(names[0])}</b>.
       <div class="wizard-btns">${names.map(n=>`<button type="button" class="btn btn-primary btn-sm" onclick="useNapName('${esc(n)}')">Use ${esc(n)}</button>`).join('')}</div></div>`;
-  return `<div class="ctx-warn">The plan calls this box <b>${esc(cur)}</b>, but a box on port ${esc(d.feeder_port_no)} of ${esc(d.main_nap)} would be <b>${esc(names[0])}</b>.
+  return `<div class="ctx-warn">The plan calls this box <b>${esc(cur)}</b>, but a box on ${where} would be <b>${esc(names[0])}</b>.
       Check that the fiber is on the right port. If the port is right, finish the job and tell the office to rename the box.</div>`;
 }
 async function useNapName(n){
@@ -3465,12 +3519,17 @@ function renderFeederList(){
     const dist = n.distance_m!=null
       ? (n.distance_m < 1000 ? n.distance_m+' m away' : (n.distance_m/1000).toFixed(1)+' km away')
       : (n.area || '');
-    const full = n.counts.free === 0;
+    const thruFree = n.thru && (n.thru.state==='free' || t.data.feeder_port_id===n.thru.id);
+    const full = n.counts.free === 0 && !thruFree;
     return `<div class="nap-card ${open?'open':''}">
       <button type="button" class="nap-head" onclick="openFeeder('${n.id}')">
-        <span class="nap-name">${esc(n.name)}</span>
-        <span class="tmeta">${esc(dist)}${dist?' · ':''}<b class="${full?'nap-full':'nap-free'}">${n.counts.free} free</b> of ${n.counts.total}</span>
+        <span class="nap-name">${esc(n.name)}${n.tap?' <span class="badge b-install">tap box</span>':''}</span>
+        <span class="tmeta">${esc(dist)}${dist?' · ':''}${n.thru?`<b class="${thruFree?'nap-free':'nap-full'}">to next box ${thruFree?'free':'taken'}</b> · `:''}<b class="${n.counts.free?'nap-free':'nap-full'}">${n.counts.free} free</b> of ${n.counts.total}</span>
       </button>
+      ${open && n.thru ? (()=>{ const mine = t.data.feeder_port_id===n.thru.id;
+        return `<button type="button" class="pick-thru ${mine?'mine':''}" ${thruFree?'':'disabled'} onclick="chooseFeederPort('${n.id}','${n.thru.id}')"
+          style="display:block;width:100%;text-align:left;margin:8px 0 4px;padding:10px 12px;border-radius:10px;border:2px solid ${mine?'#16a34a':'#f59e0b'};background:${mine?'#dcfce7':'#fffbeb'};font-weight:700;color:#92400e">
+          ➡ To next box (pigtail ${esc(n.thru.pigtail||'')}) — ${mine?'held for this job ✓':thruFree?'tap to use: this new box is the next in the chain':'already feeds a box'}</button>`; })() : ''}
       ${open?`<div class="port-grid">${n.ports.map(p=>{
         const mine = t.data.feeder_port_id === p.id;
         const cls = mine ? 'mine' : p.state;
@@ -3523,12 +3582,13 @@ function openFeeder(id){
 async function chooseFeederPort(devId, portId){
   const t = byId(currentId);
   const dev = FEEDERS.find(n=>n.id===devId);
-  const port = dev && dev.ports.find(p=>p.id===portId);
+  const thru = !!(dev && dev.thru && dev.thru.id === portId);
+  const port = dev && (thru ? Object.assign({ port_no: '', fiber_color: '' }, dev.thru) : dev.ports.find(p=>p.id===portId));
   if(!t || !dev || !port) return;
   if(t.data.feeder_port_id === portId) return;
   collectStep();
   try{
-    await api('/api/ftth/reserve','POST',{ ticketId: t.id, portId });
+    await api('/api/ftth/reserve','POST',{ ticketId: t.id, portId, purpose: 'feeder' });
   }catch(e){
     alert('Could not hold that port: ' + e.message);
     await loadFeederPicker();
@@ -3538,10 +3598,13 @@ async function chooseFeederPort(devId, portId){
   t.data.feeder_device_id = devId;
   t.data.feeder_port_id   = portId;
   t.data.feeder_port_no   = port.port_no;
+  t.data.feeder_thru      = thru;
   /* The typed fields stay in step, so the printed report reads the same as it
      always did whether or not the map was used. */
   t.data.main_nap      = dev.name;
-  t.data.main_nap_port = 'Port ' + port.port_no + (port.fiber_color? ' ('+port.fiber_color+')' : '') + ' of ' + dev.counts.total;
+  t.data.main_nap_port = thru ? 'To next box (pigtail ' + (dev.thru.pigtail||'') + ') — next in the tap chain'
+    : 'Port ' + port.port_no + (port.fiber_color? ' ('+port.fiber_color+')' : '') + ' of ' + dev.counts.total;
+  if(thru && !t.data.nap_cassette) t.data.nap_cassette = CASSETTE_FBT;     // a box on a pass-through is the next tap cassette
   if(port.fiber_color && !t.data.fiber_color) t.data.fiber_color = port.fiber_color;
   await persist(t);
   if(previous && previous !== portId){
@@ -3555,7 +3618,7 @@ async function clearFeederChoice(){
   if(!t || !t.data.feeder_port_id) return;
   const portId = t.data.feeder_port_id;
   collectStep();
-  t.data.feeder_port_id = ''; t.data.feeder_device_id = ''; t.data.feeder_port_no = '';
+  t.data.feeder_port_id = ''; t.data.feeder_device_id = ''; t.data.feeder_port_no = ''; t.data.feeder_thru = false;
   await persist(t);
   try{ await api('/api/ftth/release','POST',{ ticketId: t.id, portId }); }catch(e){}
   await loadFeederPicker();
@@ -4697,7 +4760,8 @@ function renderReels(){
     const d = t.data||{};
     const what = d.cable_discrepancy ? `reel ${esc(d.cable_reel_code||'')} was ${d.cable_discrepancy} m short before the job (system ${d.cable_start_system} m, technician read ${d.cable_start} m)`
       : d.cable_shortfall ? `the job used ${d.cable_shortfall} m more than reel ${esc(d.cable_reel_code||'')} held`
-      : d.connector_shortfall ? `${d.connector_shortfall} connector(s) more than the technician held` : 'stock did not add up';
+      : d.connector_shortfall ? `${d.connector_shortfall} connector(s) more than the technician held`
+      : d.material_shortfall ? `used ${esc([].concat(d.material_shortfall).join(', '))} but had none issued` : 'stock did not add up';
     return `<div class="disc-row">
       <div><b style="color:#991b1b">🔴 ${esc(t.number)}</b> · ${esc(t.assignedName||'—')} · ${esc(new Date(t.completed||t.updated||Date.now()).toLocaleDateString())}
         <div class="tmeta" style="color:#7f1d1d">${what}.</div>
@@ -5782,6 +5846,9 @@ function renderSummary(t, targetId){
     }
     if(f.type==='items_used'){ const txt=itemsUsedText(v); if(txt) rows.push([f.label, txt]); return; }
     if(f.type==='fic'){ add(f.label, ficUsedText(t.data)); return; }
+    if(f.napStock && f.k==='nap_cassette' && Array.isArray(t.data.nap_materials_used) && t.data.nap_materials_used.length){
+      add(f.label, v); add('Taken from stock', t.data.nap_materials_used.map(x=>x.name).join(', ')); return;
+    }
     add(f.label, v);
   }));
   const sig = t.data.signature;
