@@ -104,6 +104,7 @@
   .step-dot{flex-shrink:0;width:32px;height:32px;border-radius:50%;border:2px solid var(--border);background:#fff;color:var(--muted);font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer}
   .step-dot.active{border-color:var(--primary);background:var(--primary);color:#fff}
   .step-dot.done{border-color:var(--ok);background:var(--ok);color:#fff}
+  .step-dot.locked{opacity:.4}
   .step-title{font-size:17px;font-weight:800;margin-bottom:2px}
   .step-desc{font-size:13px;color:var(--muted);margin-bottom:10px;line-height:1.45}
   .req{color:var(--danger);font-weight:700}
@@ -921,23 +922,44 @@ let currentId = null;
 let currentView = 'viewLogin';
 let adminBack = 'dash';
 
+/* filled in by the server when it sends this page — see APP_BUILD in server.js */
+const APP_BUILD = '__APP_BUILD__';
+let UPDATE_READY = false;
+function noteBuild(r){
+  const b = r.headers.get('X-App-Build');
+  if(!b || b===APP_BUILD || APP_BUILD.startsWith('__') || UPDATE_READY) return;
+  UPDATE_READY = true;
+  /* nothing waiting to upload and not in the middle of a job: just take the update */
+  if(!tickets.some(t=>t._dirty) && currentView!=='viewTicket'){ location.reload(); return; }
+  if(document.getElementById('updBar')) return;
+  const bar = document.createElement('div');
+  bar.id='updBar';
+  bar.style.cssText='position:fixed;left:0;right:0;bottom:64px;z-index:9999;background:#d9b345;color:#12304a;padding:10px 14px;font-weight:700;text-align:center;box-shadow:0 -2px 8px rgba(0,0,0,.2)';
+  bar.innerHTML='The app was updated. <button class="btn btn-primary" style="margin-left:8px;padding:4px 12px" onclick="takeUpdate()">Update now</button>';
+  document.body.appendChild(bar);
+}
+async function takeUpdate(){
+  try{ collectStep(); const t=byId(currentId); if(t) await persist(t); }catch(e){}
+  location.reload();
+}
 async function api(path, method='GET', body, opts){
   opts = opts || {};
   const r = await fetch(path, {
     method,
     cache: opts.etag ? 'no-store' : undefined,
     headers: Object.assign(
-      {'Content-Type':'application/json'},
+      {'Content-Type':'application/json', 'X-App-Build': APP_BUILD},
       TOKEN?{Authorization:'Bearer '+TOKEN}:{},
       opts.etag ? {'If-None-Match': opts.etag} : {}
     ),
     body: body!==undefined ? JSON.stringify(body) : undefined
   });
   if(r.status===401 && path!=='/api/login'){ doLogout(true); throw new Error('Session expired — please log in again'); }
+  noteBuild(r);
   if(r.status===304) return {__notModified:true};   // unchanged — server sent no body
   let j = {};
   try { j = await r.json(); } catch(e){}
-  if(!r.ok) throw new Error(j.error || 'Request failed');
+  if(!r.ok){ const err = new Error(j.error || 'Request failed'); err.code = j.code; throw err; }
   j.__etag = r.headers.get('ETag') || null;
   return j;
 }
@@ -975,7 +997,15 @@ async function flushDirty(){
       if(r && r.ticket && r.ticket.data){ t.data = r.ticket.data; t.updated = r.ticket.updated; t.started = r.ticket.started; }
       delete t._dirty;
       ticketsEtag = null;
-    }catch(e){ return; } // still offline
+    }catch(e){
+      if(e.code==='STEPS_MISSING' || e.code==='APP_OUTDATED'){
+        /* saved, but not closed: it goes back on the job list as unfinished */
+        t.status = 'in_progress'; t.completed = null; delete t._dirty; ticketsEtag = null;
+        alert(t.number+' was not completed.\n\n'+e.message);
+        continue;
+      }
+      return;   // still offline
+    }
   }
   if(!tickets.some(t=>t._dirty)) setOffline(false);
   cacheTickets();
@@ -1001,6 +1031,16 @@ async function persist(t){
     ticketsEtag = null;   // our own write changed the list
   }catch(e){
     if(e.message.includes('Session expired')) return;
+    /* the server would not close the job: old app, or required items missing.
+       What was entered is saved; the job stays open. */
+    if(e.code==='APP_OUTDATED' || e.code==='STEPS_MISSING'){
+      t.status = 'in_progress'; t.completed = null; delete t._dirty;
+      cacheTickets();
+      alert(e.message);
+      if(e.code==='APP_OUTDATED'){ location.reload(); return; }
+      if(currentId===t.id && currentView==='viewTicket') renderTicket();
+      return;
+    }
     if(/unfinished installation/i.test(e.message)){
       t.status = 'open'; delete t.started; delete t._dirty;
       cacheTickets();
@@ -2272,7 +2312,8 @@ function renderTicket(){
   if(t.step >= steps.length) t.step = steps.length-1;
   const s = steps[t.step];
   const nav = steps.map((st,i)=>{
-    const cls = i===t.step?'active':(stepComplete(t,st)?'done':'');
+    const locked = USER && USER.role!=='admin' && i>t.step+1 && i>stepReached(t);
+    const cls = i===t.step?'active':(stepComplete(t,st)?'done':(locked?'locked':''));
     return `<div class="step-dot ${cls}" onclick="gotoStep(${i})">${stepComplete(t,st)&&i!==t.step?'✓':i+1}</div>`;
   }).join('');
   const isLast = t.step===steps.length-1;
@@ -2296,7 +2337,26 @@ function renderTicket(){
   if(document.getElementById('feederPickWrap')) loadFeederPicker();
   renderSummary(t, 'summaryArea');
 }
-function gotoStep(i){ const t=byId(currentId); collectStep(); t.step=i; persist(t); renderTicket(); }
+/* Steps are done in order. A technician can always go BACK to look or fix a
+   value, but can only go forward with Next (which checks the step), or jump to a
+   step already reached once every step before it is complete. The office can
+   move freely (corrections on reopened jobs). */
+function stepReached(t){ return Math.max(parseInt(t.data && t.data.step_reached)||0, t.step||0); }
+function gotoStep(i){
+  const t=byId(currentId); collectStep();
+  if(i>t.step && !(USER && USER.role==='admin')){
+    if(i===t.step+1){ nextStep(); return; }
+    const steps = getWorkflow(t);
+    const firstOpen = steps.findIndex((st,j)=>j<i && !stepComplete(t,st));
+    if(i>stepReached(t) || firstOpen>=0){
+      const j = firstOpen>=0 ? firstOpen : t.step;
+      alert('Steps are done in order.\n\nFinish '+steps[j].title.replace(/&amp;/g,'&')+' and press Next.');
+      if(firstOpen>=0 && firstOpen!==t.step){ t.step=firstOpen; persist(t); }
+      renderTicket(); return;
+    }
+  }
+  t.step=i; persist(t); renderTicket();
+}
 /* An area that billing will not accept, caught while the technician is still on
    the job rather than hours later in a failed push. Only applies where the value
    is written to billing (allowNew:false) — a NAP being installed today may well
@@ -2356,7 +2416,9 @@ function nextStep(){
     }
   }
   if(t.status==='open') t.status='in_progress';
-  t.step++; persist(t); renderTicket();
+  t.step++;
+  t.data.step_reached = Math.max(parseInt(t.data.step_reached)||0, t.step);
+  persist(t); renderTicket();
 }
 function napDeriveClient(t){
   const c = CASSETTE_OPTS[t.data.nap_cassette];
@@ -3810,7 +3872,32 @@ function onReelChange(){
 
 /* =================== CAMERA (opens directly) =================== */
 let camStream = null, camKey = null, camAutoGps = false;
+/* A photo is proof of the job AT THAT STEP (e.g. the reel's meter mark BEFORE
+   lining). Once a later step has a photo, an earlier photo can't be retaken —
+   it would show the job as it is at the end. The office can still retake. */
+function photoLockedReason(t, key){
+  if(!t || (USER && USER.role==='admin')) return '';
+  const steps = getWorkflow(t);
+  const si = steps.findIndex(st=>st.fields.some(f=>f.k===key));
+  if(si<0) return '';
+  const cur = t.data[key];
+  const later = laterPhoto(t, key);
+  if(!later) return '';
+  /* never taken at all: only possible on a job started before steps were locked
+     in order — let it be added, marked as late for the office */
+  if(!(cur && cur.img)) return '';
+  return 'This photo belongs to '+steps[si].title.replace(/&amp;/g,'&')+', and you already took "'+later.label+'" in a later step.\n\n'
+    +'Photos must be taken at their own step, in order — this one can no longer be retaken. If it really is wrong, ask the office to correct the job.';
+}
+function laterPhoto(t, key){
+  const steps = getWorkflow(t);
+  const si = steps.findIndex(st=>st.fields.some(f=>f.k===key));
+  if(si<0) return null;
+  return steps.slice(si+1).flatMap(st=>st.fields).find(f=>f.type==='photo' && t.data[f.k] && t.data[f.k].img) || null;
+}
 async function openCamera(key, autogps){
+  const lockMsg = photoLockedReason(byId(currentId), key);
+  if(lockMsg){ alert(lockMsg); return; }
   camKey = key; camAutoGps = autogps;
   collectStep();
   if(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.isSecureContext !== false){
@@ -3871,6 +3958,11 @@ function fallbackCameraInput(key, autogps){
   inp.onchange = () => {
     const file = inp.files && inp.files[0];
     if(!file) return;
+    /* the photo has to be taken now, not picked from the gallery */
+    if(file.lastModified && Date.now()-file.lastModified > 10*60*1000 && !(USER && USER.role==='admin')){
+      alert('That picture was taken '+fmt(file.lastModified)+'.\n\nTake a new photo with the camera now — old pictures from the gallery cannot be used.');
+      return;
+    }
     const reader = new FileReader();
     reader.onload = e => {
       const im = new Image();
@@ -3890,7 +3982,8 @@ function fallbackCameraInput(key, autogps){
 }
 function savePhoto(key, img, autogps){
   const t = byId(currentId);
-  t.data[key] = { img, time: Date.now() };
+  const late = !!laterPhoto(t, key) && !(USER && USER.role==='admin');
+  t.data[key] = late ? { img, time: Date.now(), late: true } : { img, time: Date.now() };
   /* a new post photo means a new position: forget the old one until this photo's GPS arrives */
   const setsDef = getWorkflow(t).flatMap(st=>st.fields).find(f=>f.k===key && f.setsGps);
   if(setsDef && t.data[setsDef.setsGps] && t.data[setsDef.setsGps].src==='photo') delete t.data[setsDef.setsGps];
@@ -5834,7 +5927,7 @@ function renderSummary(t, targetId){
   steps.forEach(s=>s.fields.forEach(f=>{
     const v=t.data[f.k];
     if(v==null||v==='') return;
-    if(f.type==='photo'){ if(v.img) photos.push({cap:f.label+(v.time?' — '+fmt(v.time):''),img:v.img,gps:v.lat!=null?`${v.lat.toFixed(6)}, ${v.lng.toFixed(6)}`:null}); if(v.lat!=null) add(f.label+' GPS', v.lat.toFixed(6)+', '+v.lng.toFixed(6)); return; }
+    if(f.type==='photo'){ if(v.img) photos.push({cap:f.label+(v.time?' — '+fmt(v.time):'')+(v.late?' ⚠ taken after later steps':''),img:v.img,gps:v.lat!=null?`${v.lat.toFixed(6)}, ${v.lng.toFixed(6)}`:null}); if(v.lat!=null) add(f.label+' GPS', v.lat.toFixed(6)+', '+v.lng.toFixed(6)); return; }
     if(f.type==='gps'){ add(f.label, Number(v.lat).toFixed(6)+', '+Number(v.lng).toFixed(6) + (v.src==='typed' ? ' (typed in)' : v.acc!=null ? ' ('+(v.src==='photo'?'from post photo, ':'phone GPS ')+'±'+v.acc+' m)' : '')); return; }
     if(f.type==='signature'){ return; }
     if(f.type==='reel_select'){

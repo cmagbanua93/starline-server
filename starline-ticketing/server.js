@@ -241,6 +241,78 @@ function napMaterialsOf(d) {
   }
   return out;
 }
+/* ---- required items, checked by the server at completion ----
+   The app checks these too, but an app left open across an update runs the OLD
+   step list (TKT-2026-0138 was completed without "NAP Box Used" and "Cassette Used"
+   that way). Keep in step with WORKFLOWS in public/index.html. */
+const REQUIRED_AT_COMPLETION = {
+  installation: [
+    ['arrival_photo', 'photo', '1. Arrival — Arrival Photo'], ['house_photo', 'photo', '2. House Photo'],
+    ['cable_estimate', 'estimate', '3. Cable — Estimated Cable Needed'], ['cable_reel', 'text', '3. Cable — Cable Type Used'],
+    ['cable_start', 'text', '3. Cable — Meters Left BEFORE'], ['cable_start_photo', 'photo', '3. Cable — Photo (Before)'],
+    ['nap_id', 'text', '4. NAP Box / Area'], ['nap_port', 'text', '4. Port Number'], ['nap_photo', 'photo', '4. Photo of NAP Box Cassette'],
+    ['reading_value', 'text', '5. Optical Reading'], ['reading_photo', 'photo', '5. Photo of Power Meter'],
+    ['modem_photo', 'photo', '6. Photo of Modem/ONU'], ['modem_serial', 'text', '6. Modem Serial Number'],
+    ['location', 'gps', '7. GPS Coordinates'],
+    ['cable_end', 'text', '8. Cable — Meters Left AFTER'], ['cable_end_photo', 'photo', '8. Cable — Photo (After)'], ['connectors', 'fic', '8. FIC Connectors Used'],
+    ['cust_fname', 'text', '9. First Name'], ['cust_lname', 'text', '9. Last Name'], ['cust_phone', 'text', '9. Contact Number'],
+    ['cust_plan', 'text', '9. Subscribed Plan'], ['cust_address', 'text', '9. Complete Address'],
+    ['speedtest_photo', 'photo', '10. Speed Test Photo'], ['signature', 'text', '10. Customer Signature'],
+  ],
+  nap_install: [
+    ['cable_estimate', 'estimate', '1. Cable — Estimated Cable Needed'], ['cable_reel', 'text', '1. Cable — Cable Type Used'],
+    ['cable_start', 'text', '1. Cable — Meters Left BEFORE'], ['cable_start_photo', 'photo', '1. Cable — Photo (Before)'],
+    ['main_nap', 'text', '2. Feeding Box'], ['main_nap_port', 'text', '2. Port Used for the New NAP Box'],
+    ['fiber_color', 'text', '2. Fiber Color'], ['main_nap_photo', 'photo', '2. Photo of Main NAP'],
+    ['nap_id', 'text', '3. Which planned NAP box'], ['nap_enclosure', 'text', '3. NAP Box Used'], ['nap_cassette', 'text', '3. Cassette Used'],
+    ['nap_box_photo', 'photo', '3. Photo of New NAP Box'], ['nap_reading', 'text', '3. NAP Box Reading'],
+  ],
+};
+/* Photos are proof of each step, so they must be taken in step order — the
+   reel's meter mark BEFORE lining cannot be photographed after the job is done.
+   Checked only on jobs started after this rule went live (photoOrderFrom), so
+   jobs already under way are not stuck. */
+const PHOTO_STEPS = {
+  installation: [['arrival_photo'], ['house_photo'], ['cable_start_photo'], ['nap_photo'], ['reading_photo'], ['modem_photo'], [], ['cable_end_photo'], [], ['speedtest_photo']],
+  nap_install: [['cable_start_photo'], ['main_nap_photo'], ['nap_box_photo', 'nap_reading_photo'], ['post_photo'], ['cable_end_photo']],
+};
+const PHOTO_LABEL = { arrival_photo: 'Arrival Photo', house_photo: 'House Photo', cable_start_photo: 'Cable meter mark (Before)', nap_photo: 'NAP Box Cassette',
+  reading_photo: 'Power Meter Reading', modem_photo: 'Modem/ONU', cable_end_photo: 'Cable meter mark (After)', speedtest_photo: 'Speed Test',
+  main_nap_photo: 'Main NAP', nap_box_photo: 'New NAP Box', nap_reading_photo: 'NAP Reading', post_photo: 'Post with NAP Box' };
+if (!db.settings.photoOrderFrom) db.settings.photoOrderFrom = Date.now();
+function photoOrderProblems(t) {
+  const steps = PHOTO_STEPS[t.type];
+  if (!steps || !((t.started || t.created || 0) >= (db.settings.photoOrderFrom || Infinity))) return [];
+  const d = t.data || {};
+  const tm = (k) => { const v = d[k]; const n = v && typeof v === 'object' && v.img ? Number(v.time) : NaN; return isFinite(n) && n > 0 ? n : null; };
+  const out = [];
+  steps.forEach((keys, i) => keys.forEach((k) => {
+    const a = tm(k); if (a === null) return;
+    for (let j = i + 1; j < steps.length; j++) for (const l of steps[j]) {
+      const b = tm(l);
+      if (b !== null && a > b + 60000) { out.push(`"${PHOTO_LABEL[k] || k}" (step ${i + 1}) was taken after "${PHOTO_LABEL[l] || l}" (step ${j + 1})`); return; }
+    }
+  }));
+  return out;
+}
+function missingAtCompletion(t) {
+  const list = REQUIRED_AT_COMPLETION[t.type];
+  if (!list) return [];
+  const d = t.data || {};
+  const empty = (v) => v == null || String(v).trim() === '';
+  return list.filter(([k, kind]) => {
+    const v = d[k];
+    if (kind === 'photo') return !(v && typeof v === 'object' && v.img);
+    if (kind === 'gps') return !(v && v.lat != null && v.lng != null);
+    if (kind === 'estimate') return empty(v) && empty(d.cable_start);   // jobs from before the estimate existed
+    if (kind === 'fic') {
+      if (d.connectors_blue !== undefined || d.connectors_green !== undefined) return (parseInt(d.connectors_blue) || 0) + (parseInt(d.connectors_green) || 0) < 1;
+      return !(parseInt(v) >= 1);
+    }
+    return empty(v);
+  }).map(([, , label]) => label);
+}
+
 /* the job's cassette choice decides the box size the map gets */
 function napDerive(d) {
   const cas = CASSETTE_OPTS[d && d.nap_cassette];
@@ -438,8 +510,13 @@ if (!db.users.length) {
 const NO_GZIP = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/x-icon']);
 
 /* Central writer: gzips when the client asked for it and it actually helps (FIX 4). */
+/* The app's version. A phone that kept the app open across an update is still
+   running the old screens (old steps, old checks) — every API reply carries the
+   current build so the app can tell, and completions from an old build are refused. */
+let APP_BUILD = 'dev';
+try { APP_BUILD = crypto.createHash('sha1').update(fs.readFileSync(path.join(__dirname, 'public', 'index.html'))).digest('hex').slice(0, 10); } catch (e) {}
 function sendBody(req, res, code, body, type, extra) {
-  const headers = Object.assign({ 'Content-Type': type }, extra || {});
+  const headers = Object.assign({ 'Content-Type': type, 'X-App-Build': APP_BUILD }, extra || {});
   if (!Buffer.isBuffer(body)) body = Buffer.from(body);
   if (body.length > 1024 && !NO_GZIP.has(type) && /\bgzip\b/.test(String(req.headers['accept-encoding'] || ''))) {
     let gz = null;
@@ -1156,6 +1233,10 @@ function serveStatic(req, res, urlPath) {
   if (!file.startsWith(PUBLIC)) { res.writeHead(403); res.end(); return; }
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); res.end('Not found'); return; }
+    if (path.extname(file) === '.html') {
+      data = Buffer.from(data.toString().replace(/__APP_BUILD__/g, APP_BUILD));
+      return sendBody(req, res, 200, data, 'text/html', { 'Cache-Control': 'no-cache' });
+    }
     sendBody(req, res, 200, data, MIME[path.extname(file)] || 'application/octet-stream');
   });
 }
@@ -2209,6 +2290,21 @@ const server = http.createServer(async (req, res) => {
           }
           t.data = incoming;
         }
+        if (b.status === 'completed' && t.status !== 'completed' && !isAdmin) {
+          const build = String(req.headers['x-app-build'] || '');
+          if (build !== APP_BUILD) {
+            if (b.data !== undefined) saveDB();     // keep what they entered; only the completion waits
+            return json(res, 409, { code: 'APP_OUTDATED', build: APP_BUILD,
+              error: 'The app was updated. It will reload now — then open the job and press Complete Job again.' });
+          }
+          const missing = missingAtCompletion(t).concat(photoOrderProblems(t));
+          if (missing.length) {
+            if (b.step !== undefined) t.step = b.step;
+            saveDB();
+            return json(res, 409, { code: 'STEPS_MISSING', missing,
+              error: 'This job cannot be completed yet:\n• ' + missing.join('\n• ') });
+          }
+        }
         if (b.step !== undefined) t.step = b.step;
         if (b.status !== undefined && ['open', 'in_progress', 'completed'].includes(b.status)) {
           t.status = b.status;
@@ -2235,6 +2331,7 @@ const server = http.createServer(async (req, res) => {
             if (n) t.data.cust_name = n;
           }
 
+          const wasApplied = !!t.invApplied;     // stock already taken by an earlier completion
           /* Deduct materials from the technician's inventory once, on first completion */
           if (b.status === 'completed' && !t.invApplied && t.assignedTo) {
             const tech = db.users.find(u => u.id === t.assignedTo);
@@ -2364,7 +2461,26 @@ const server = http.createServer(async (req, res) => {
               }
               t.invApplied = true;
             }
-          } else if (b.status === 'completed' && t.invApplied && t.assignedTo && t.data && t.data.cable_reel) {
+          }
+          /* A NAP job closed without its box / cassette (old app) and then reopened and
+             filled in: those were never taken from stock, so take them now — once. */
+          if (b.status === 'completed' && wasApplied && t.type === 'nap_install' && t.assignedTo && t.data &&
+              !(t.data.nap_materials_used || []).length && !(t.data.material_shortfall || []).length && napMaterialsOf(t.data).length) {
+            const tech = db.users.find(u => u.id === t.assignedTo);
+            if (tech) {
+              tech.inv = tech.inv || { connectors: 0, cables: [] };
+              const used = [], missing = [];
+              napMaterialsOf(t.data).forEach(m => {
+                const it = (tech.inv.items || []).find(i => i.qty > 0 && napMaterialMatch(i.name, m.kind, m.size));
+                if (it) { addItemTo(tech, it.name, -1); used.push({ name: it.name, qty: 1 }); }
+                else missing.push(m.label);
+              });
+              if (used.length) t.data.items_used = (t.data.items_used || []).concat(used);
+              t.data.nap_materials_used = used;
+              if (missing.length) { t.data.material_shortfall = missing; t.needsStockReview = true; }
+            }
+          }
+          if (b.status === 'completed' && wasApplied && t.assignedTo && t.data && t.data.cable_reel) {
             /* Re-completed after a reopen (e.g. the office fixed a wrongly typed
                meter reading). Stock was taken the first time, so only the
                DIFFERENCE in cable used goes back to, or comes off, the reel. */
