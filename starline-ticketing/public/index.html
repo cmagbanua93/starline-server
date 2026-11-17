@@ -1041,7 +1041,7 @@ async function persist(t){
       if(currentId===t.id && currentView==='viewTicket') renderTicket();
       return;
     }
-    if(/unfinished installation/i.test(e.message)){
+    if(/unfinished (installation|job)/i.test(e.message)){
       t.status = 'open'; delete t.started; delete t._dirty;
       cacheTickets();
       if(Date.now()-COUNT_ALERT_AT > 5000){ COUNT_ALERT_AT = Date.now(); alert(e.message); go('jobs'); }
@@ -2241,32 +2241,34 @@ function renderTechStats(){
    server enforces it; this is the same rule, shown before they try). The office can
    put a job on hold when it really cannot be finished yet. */
 const manilaDayOf = ts => new Date((ts||Date.now()) + 8*3600000).toISOString().slice(0,10);
+/* every job type, started or not, given on an earlier day (same rule as the server) */
+const jobDayOf = t => manilaDayOf(t.assignedAt||t.created);   // the day it was given, not the day it was started
 function unfinishedInstalls(exceptId){
   if(!USER) return [];
   const today = manilaDayOf();
-  return tickets.filter(t => t.type==='installation' && t.status==='in_progress' && t.id!==exceptId
+  return tickets.filter(t => (t.status==='open' || t.status==='in_progress') && t.assignedTo && t.id!==exceptId
     && (USER.role!=='tech' || t.assignedTo===USER.id) && !(t.hold && t.hold.at)
-    && manilaDayOf(t.started||t.created) < today);
+    && jobDayOf(t) < today);
 }
 function renderPendingInstallCard(){
   const el = document.getElementById('pendingInstallCard'); if(!el) return;
   const left = USER && USER.role==='tech' ? unfinishedInstalls() : [];
   el.classList.toggle('hidden', !left.length);
   if(!left.length) return;
-  el.innerHTML = `<div class="sec-title" style="color:var(--danger)">⛔ Finish ${left.length===1?'this installation':'these installations'} first</div>
-    <div class="tmeta" style="font-size:12.5px;margin:2px 0 6px">Started on an earlier day and not completed. The subscriber is already online but billing only starts when you press Complete. You can't start a new installation until ${left.length===1?'it is':'they are'} completed — repairs are not affected. If it really can't be finished, ask the office to put it on hold.</div>
+  el.innerHTML = `<div class="sec-title" style="color:var(--danger)">⛔ Finish ${left.length===1?'this job':'these jobs'} first</div>
+    <div class="tmeta" style="font-size:12.5px;margin:2px 0 6px">Given to you on an earlier day and not completed yet. You can't start a new job until ${left.length===1?'it is':'they are'} completed. If one really can't be finished yet (subscriber not home, waiting for materials…), ask the office to put it on hold.</div>
     ${left.map(t=>`<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;padding:4px 0">
-      <span class="tmeta" style="font-size:13px"><b>${esc(t.number)}</b> · ${esc(t.pppoeUsername||t.customer||'')} · started ${esc(new Date(t.started||t.created).toLocaleDateString())}</span>
+      <span class="tmeta" style="font-size:13px"><b>${esc(t.number)}</b> · ${esc(typeName(t.type))} · ${esc(t.pppoeUsername||t.customer||'')} · ${t.status==='open'?'not started':'started, not finished'} · given ${esc(new Date(t.assignedAt||t.created).toLocaleDateString())}</span>
       <button class="pill" style="flex:none" onclick="openTicket('${esc(t.id)}')">Open ›</button></div>`).join('')}`;
 }
 
 /* =================== TECH: WIZARD =================== */
 async function openTicket(id){
   const ot = byId(id);
-  if(ot && ot.type==='installation' && ot.status==='open' && USER && USER.role==='tech'){
+  if(ot && ot.status==='open' && USER && USER.role==='tech' && jobDayOf(ot) >= manilaDayOf()){
     const left = unfinishedInstalls(ot.id);
     if(left.length){
-      alert('Finish your unfinished installation'+(left.length===1?'':'s')+' from a previous day first: '+left.map(t=>t.number+(t.pppoeUsername?' ('+t.pppoeUsername+')':'')).join(', ')+'.\n\nComplete '+(left.length===1?'it':'them')+' (or ask the office to put '+(left.length===1?'it':'them')+' on hold), then start this installation.');
+      alert('Finish your unfinished job'+(left.length===1?'':'s')+' from a previous day first: '+left.map(t=>t.number+(t.pppoeUsername?' ('+t.pppoeUsername+')':t.customer?' ('+t.customer+')':'')).join(', ')+'.\n\nComplete '+(left.length===1?'it':'them')+' (or ask the office to put '+(left.length===1?'it':'them')+' on hold), then start this job.');
       const pc = document.getElementById('pendingInstallCard'); if(pc) pc.scrollIntoView({behavior:'smooth'});
       return;
     }
@@ -4413,7 +4415,7 @@ function renderDash(){
     if(notCounted.length && manilaHHMM() >= DAILY.settings.reportTime)
       alerts.push([`🧮 ${notCounted.length} technician${notCounted.length===1?' has':'s have'}n't done today's stock count`, `matTab='daily';go('materials')`]);
   }
-  if(leftInstalls.length) alerts.push([`<span class="dot"></span>${leftInstalls.length} installation${leftInstalls.length===1?'':'s'} left unfinished from a previous day — not billed yet`, `dashStatus='in_progress';dashType='installation';go('tickets')`, 'red']);
+  if(leftInstalls.length) alerts.push([`<span class="dot"></span>${leftInstalls.length} job${leftInstalls.length===1?'':'s'} left unfinished from a previous day — technician${leftInstalls.length===1?' is':'s are'} blocked from new jobs`, `dashStatus='';dashType='';go('tickets')`, 'red']);
   if(urgent.length) alerts.push([`⚡ ${urgent.length} urgent job${urgent.length===1?'':'s'} still open`, `dashPriority=1;go('tickets')`]);
   if(stale.length) alerts.push([`🕒 ${stale.length} job${stale.length===1?' has':'s have'} been running over 24 hours`, `dashStatus='in_progress';go('tickets')`]);
   if(unassigned.length) alerts.push([`👤 ${unassigned.length} unassigned job${unassigned.length===1?'':'s'}`, `dashStatus='';go('tickets')`]);
@@ -5321,10 +5323,10 @@ async function openReport(id){
     </div>
     ${t.status==='completed' && (t.type==='installation' || (t.type==='repair' && t.data && t.data.swap_pppoe)) ? billingSyncPanel(t) : ''}
     ${t.status==='completed' && t.type==='nap_install' ? napMapPanel(t) : ''}
-    ${t.type==='installation' && t.status==='in_progress' ? `<div class="card" style="margin-top:10px">
+    ${t.status!=='completed' && t.assignedTo ? `<div class="card" style="margin-top:10px">
       <div class="sec-head"><div class="sec-title">⏸ Hold</div>${t.hold?'<span class="badge b-p2">On hold</span>':''}</div>
-      <div class="tmeta">${t.hold?`Put on hold by ${esc(t.hold.by||'the office')} on ${esc(new Date(t.hold.at).toLocaleString())}${t.hold.reason?' — '+esc(t.hold.reason):''}. It does not stop ${esc(t.assignedName||'the technician')} starting new installations.`
-        :'An installation left unfinished from a previous day stops the technician from starting a new one. Put it on hold only if it really cannot be finished yet (subscriber not home, waiting for materials…).'}</div>
+      <div class="tmeta">${t.hold?`Put on hold by ${esc(t.hold.by||'the office')} on ${esc(new Date(t.hold.at).toLocaleString())}${t.hold.reason?' — '+esc(t.hold.reason):''}. It does not stop ${esc(t.assignedName||'the technician')} starting new jobs.`
+        :'A job left unfinished from a previous day (started or not) stops the technician from starting a new one. Put it on hold only if it really cannot be finished yet (subscriber not home, waiting for materials…).'}</div>
       <div class="wizard-btns"><button class="btn btn-ghost btn-sm" onclick="setHold(${t.hold?'false':'true'})">${t.hold?'Release hold':'Put on hold'}</button></div>
     </div>` : ''}
     <div class="wizard-btns">

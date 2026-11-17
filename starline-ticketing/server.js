@@ -280,9 +280,46 @@ const PHOTO_LABEL = { arrival_photo: 'Arrival Photo', house_photo: 'House Photo'
   reading_photo: 'Power Meter Reading', modem_photo: 'Modem/ONU', cable_end_photo: 'Cable meter mark (After)', speedtest_photo: 'Speed Test',
   main_nap_photo: 'Main NAP', nap_box_photo: 'New NAP Box', nap_reading_photo: 'NAP Reading', post_photo: 'Post with NAP Box' };
 if (!db.settings.photoOrderFrom) db.settings.photoOrderFrom = Date.now();
+if (!db.settings.repairOrderFrom) db.settings.repairOrderFrom = Date.now();   // repairs joined the photo-order check later
+/* The step lists themselves live in the app (WORKFLOWS / REPAIR_FLOWS in
+   public/index.html). The server reads them from there at start, so its checks
+   follow every flow — repairs included — without a second copy to keep in step.
+   If they can't be read, the hand-kept lists above are used. */
+const FLOWS = (() => {
+  try {
+    const src = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
+    const grab = (n) => { const i = src.indexOf('const ' + n + ' = {'); const j = src.indexOf('\n};', i); if (i < 0 || j < 0) throw new Error(n + ' not found'); return src.slice(i, j + 3).replace('const ' + n, 'this.' + n); };
+    const ctx = {}; require('vm').createContext(ctx);
+    require('vm').runInContext(grab('WORKFLOWS') + '\n' + grab('REPAIR_FLOWS'), ctx, { timeout: 1000 });
+    if (!ctx.WORKFLOWS || !ctx.REPAIR_FLOWS) throw new Error('empty');
+    return { WORKFLOWS: ctx.WORKFLOWS, REPAIR_FLOWS: ctx.REPAIR_FLOWS };
+  } catch (e) { console.warn('Could not read the step lists from index.html (' + e.message + ') — using the built-in lists'); return null; }
+})();
+function stepsOf(t) {
+  if (!FLOWS) return null;
+  if (t.type === 'repair') return FLOWS.REPAIR_FLOWS[t.issueFlow] || FLOWS.REPAIR_FLOWS.generic || FLOWS.WORKFLOWS.repair || null;
+  return FLOWS.WORKFLOWS[t.type] || null;
+}
+const plain = (x) => String(x || '').replace(/&amp;/g, '&').replace(/<[^>]*>/g, '');
+function hasValueSrv(d, f) {
+  const v = d[f.k];
+  if (f.k === 'cable_estimate' && d.cable_start !== undefined && d.cable_start !== '') return true;   // jobs from before the estimate existed
+  if (f.type === 'fic') {
+    if (d.connectors_blue !== undefined || d.connectors_green !== undefined) return (parseInt(d.connectors_blue) || 0) + (parseInt(d.connectors_green) || 0) >= (f.min || 0);
+    return v != null && String(v) !== '' && (parseInt(v) || 0) >= (f.min || 0);
+  }
+  if (v == null || (typeof v === 'string' && v.trim() === '')) return false;
+  if (f.type === 'photo') return !!(v && typeof v === 'object' && v.img);
+  if (f.type === 'gps') return !!(v && v.lat != null && v.lng != null);
+  if (f.type === 'items_used') return Array.isArray(v) && v.length > 0;
+  return true;
+}
 function photoOrderProblems(t) {
-  const steps = PHOTO_STEPS[t.type];
-  if (!steps || !((t.started || t.created || 0) >= (db.settings.photoOrderFrom || Infinity))) return [];
+  const flow = stepsOf(t);
+  const steps = flow ? flow.map((st) => st.fields.filter((f) => f.type === 'photo').map((f) => f.k)) : PHOTO_STEPS[t.type];
+  if (flow) flow.forEach((st) => st.fields.forEach((f) => { if (f.type === 'photo' && !PHOTO_LABEL[f.k]) PHOTO_LABEL[f.k] = plain(f.label); }));
+  const from = t.type === 'repair' ? db.settings.repairOrderFrom : db.settings.photoOrderFrom;
+  if (!steps || !((t.started || t.created || 0) >= (from || Infinity))) return [];
   const d = t.data || {};
   const tm = (k) => { const v = d[k]; const n = v && typeof v === 'object' && v.img ? Number(v.time) : NaN; return isFinite(n) && n > 0 ? n : null; };
   const out = [];
@@ -296,6 +333,12 @@ function photoOrderProblems(t) {
   return out;
 }
 function missingAtCompletion(t) {
+  const flow = stepsOf(t);
+  if (flow) {
+    const d = t.data || {}, out = [];
+    flow.forEach((st) => st.fields.forEach((f) => { if (f.req && !hasValueSrv(d, f)) out.push(plain(st.title) + ' — ' + plain(f.label)); }));
+    return out;
+  }
   const list = REQUIRED_AT_COMPLETION[t.type];
   if (!list) return [];
   const d = t.data || {};
@@ -1163,14 +1206,23 @@ function ticketSummary(t) {
    — and billing only starts when the job is completed. Such a job holds back the
    technician's next installation until it is finished, unless the office has put it
    on hold (subscriber not home, waiting for materials…). */
-function unfinishedInstalls(user, exceptId) {
+/* ---- jobs left from a previous day ----
+   Any job (installation, repair, NAP) given to a technician on an earlier day and
+   not completed — whether started or not — must be done before they start or
+   raise a job from today. The old jobs themselves can be worked in any order.
+   The office can put a job on hold when it really cannot be finished yet. */
+/* the day the job was given to the technician — starting it later does not make it "today's" */
+function jobDay(t) {
+  return stockDay.manilaDay(t.assignedAt || t.created);
+}
+function unfinishedJobs(user, exceptId) {
   const today = stockDay.manilaDay();
-  return db.tickets.filter(t => t.type === 'installation' && t.assignedTo === user.id && t.status === 'in_progress'
-    && t.id !== exceptId && !(t.hold && t.hold.at) && stockDay.manilaDay(t.started || t.created) < today);
+  return db.tickets.filter(t => t.assignedTo === user.id && (t.status === 'open' || t.status === 'in_progress')
+    && t.id !== exceptId && !(t.hold && t.hold.at) && jobDay(t) < today);
 }
 function unfinishedMessage(list) {
   const names = list.slice(0, 3).map(t => `${t.number}${t.pppoeUsername ? ' (' + t.pppoeUsername + ')' : t.customer ? ' (' + t.customer + ')' : ''}`).join(', ');
-  return `Finish your unfinished installation${list.length === 1 ? '' : 's'} from a previous day first: ${names}${list.length > 3 ? ' and ' + (list.length - 3) + ' more' : ''}. Complete ${list.length === 1 ? 'it' : 'them'} (or ask the office to put ${list.length === 1 ? 'it' : 'them'} on hold), then start the new installation.`;
+  return `Finish your unfinished job${list.length === 1 ? '' : 's'} from a previous day first: ${names}${list.length > 3 ? ' and ' + (list.length - 3) + ' more' : ''}. Complete ${list.length === 1 ? 'it' : 'them'} (or ask the office to put ${list.length === 1 ? 'it' : 'them'} on hold), then start the new job.`;
 }
 const stockDay = require('./stockday')({ db, saveDB, logStock, logReel, round2, REEL_EMPTY_M, READING_TOL_M, connParts, connFix, CONN_NAME });
 
@@ -1359,6 +1411,7 @@ const server = http.createServer(async (req, res) => {
           pppoeUsername: String(b.pppoeUsername || '').trim().toLowerCase(),
           assignedTo: assignee ? assignee.id : null,
           assignedName: assignee ? assignee.name : null,
+          assignedAt: assignee ? Date.now() : null,
           status: 'open', created: Date.now(), started: null, completed: null,
           data: {}, step: 0,
           createdBy: 'Billing: ' + String(b.createdBy || 'staff').trim(),
@@ -2163,8 +2216,8 @@ const server = http.createServer(async (req, res) => {
       /* Technicians may raise their own jobs, but only ever for themselves —
          they cannot assign work to a colleague, and they cannot delete anything. */
       const assignee = isAdmin ? db.users.find(u => u.id === b.assignedTo) : me;
-      if (!isAdmin && (!['repair', 'nap_install'].includes(b.type))) {
-        const left = unfinishedInstalls(me);
+      if (!isAdmin) {
+        const left = unfinishedJobs(me);
         if (left.length) return json(res, 409, { code: 'INSTALL_PENDING', tickets: left.map(x => x.number), error: unfinishedMessage(left) });
       }
       const t = {
@@ -2183,6 +2236,7 @@ const server = http.createServer(async (req, res) => {
         pppoeUsername: String(b.pppoeUsername || '').trim().toLowerCase(),
         assignedTo: assignee ? assignee.id : null,
         assignedName: assignee ? assignee.name : null,
+        assignedAt: assignee ? Date.now() : null,
         status: 'open',
         created: Date.now(),
         started: null,
@@ -2231,8 +2285,8 @@ const server = http.createServer(async (req, res) => {
           const missed = stockDay.pendingCountDay(me);
           if (missed) return json(res, 409, { code: 'COUNT_REQUIRED', day: missed,
             error: `Do your stock count for ${missed} first (Stock count on your job list), then start this job.` });
-          if (t.type === 'installation') {
-            const left = unfinishedInstalls(me, t.id);
+          if (jobDay(t) >= stockDay.manilaDay()) {
+            const left = unfinishedJobs(me, t.id);
             if (left.length) return json(res, 409, { code: 'INSTALL_PENDING', tickets: left.map(x => x.number), error: unfinishedMessage(left) });
           }
         }
@@ -2241,6 +2295,7 @@ const server = http.createServer(async (req, res) => {
           ['subject', 'customer', 'phone', 'address', 'message', 'number'].forEach(k => { if (b[k] !== undefined) t[k] = String(b[k]).trim(); });
           if (b.assignedTo !== undefined) {
             const a = db.users.find(u => u.id === b.assignedTo);
+            if ((a ? a.id : null) !== t.assignedTo) t.assignedAt = a ? Date.now() : null;
             t.assignedTo = a ? a.id : null; t.assignedName = a ? a.name : null;
           }
           if (b.priority !== undefined && [1, 2, 3].includes(parseInt(b.priority))) t.priority = parseInt(b.priority);
