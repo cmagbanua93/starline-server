@@ -275,6 +275,7 @@ const REQUIRED_AT_COMPLETION = {
 const PHOTO_STEPS = {
   installation: [['arrival_photo'], ['house_photo'], ['cable_start_photo'], ['nap_photo'], ['reading_photo'], ['modem_photo'], [], ['cable_end_photo'], [], ['speedtest_photo']],
   nap_install: [['cable_start_photo'], ['main_nap_photo'], ['nap_box_photo', 'nap_reading_photo'], ['post_photo'], ['cable_end_photo']],
+  nap_survey: [['nap_box_photo', 'nap_reading_photo'], ['post_photo']],
 };
 const PHOTO_LABEL = { arrival_photo: 'Arrival Photo', house_photo: 'House Photo', cable_start_photo: 'Cable meter mark (Before)', nap_photo: 'NAP Box Cassette',
   reading_photo: 'Power Meter Reading', modem_photo: 'Modem/ONU', cable_end_photo: 'Cable meter mark (After)', speedtest_photo: 'Speed Test',
@@ -685,6 +686,11 @@ function installPayload(t) {
  * The technician recorded where the box is, how big it is and which port feeds
  * it. Without this the office retyped all of that onto the map, or nobody did,
  * and the box stayed invisible to the port picker and to outage tracing. */
+/* An existing box being registered (put up before the ticketing system): it goes on
+   the map and into billing's areas like a new box, but nothing is installed, drawn
+   from stock or connected. */
+const isNapJob = t => !!t && (t.type === 'nap_install' || t.type === 'nap_survey');
+
 function napInstallPayload(t) {
   const d = t.data || {};
   const loc = d.location || {};
@@ -706,7 +712,7 @@ function napInstallPayload(t) {
       notes: [
         d.nap_reading !== undefined && d.nap_reading !== '' ? 'Reading at install: ' + d.nap_reading + ' dBm' : '',
         String(d.final_notes || '').trim(),
-        'Installed on job ' + t.number,
+        t.type === 'nap_survey' ? 'Existing box, registered on survey job ' + t.number : 'Installed on job ' + t.number,
       ].filter(Boolean).join(' · '),
     },
     feeder: d.feeder_port_id ? {
@@ -836,6 +842,18 @@ async function pushNapInstall(t) {
   t.ftthSync = { state: 'pending', attempts: (prior.attempts || 0) + 1, lastTry: Date.now() };
   saveDB();
   try {
+    /* Survey of an existing box: if the map already has a box by this name, it is the
+       same box — keep the map's one rather than planting a second pin. */
+    if (t.type === 'nap_survey' && !prior.deviceId) {
+      const want = String(d.nap_id || '').trim().toUpperCase();
+      const out = await ftthCall('GET', '/api/nap-candidates?q=' + encodeURIComponent(want));
+      const hit = (out.naps || []).find(n => String(n.name || '').trim().toUpperCase() === want || String(n.area || '').trim().toUpperCase() === want);
+      if (hit) {
+        t.ftthSync = { state: 'done', at: Date.now(), deviceId: hit.id, deviceName: hit.name, created: false, alreadyThere: true,
+          message: `"${hit.name}" is already on the map — not added again (check its position against this job's GPS)` };
+        return saveDB();
+      }
+    }
     const r = await ftthCall('POST', '/api/nap-installs', napInstallPayload(t));
     const dev = r.device || {};
     /* Spell out what the box still needs by hand. A box placed from an old job
@@ -1119,7 +1137,7 @@ const FTTH_RETRY_MS = 5 * 60 * 1000;
 setInterval(() => {
   const waiting = db.tickets.filter(t => t.ftthSync && t.ftthSync.state === 'pending');
   waiting.slice(0, 5).forEach(t => {
-    if (t.type === 'nap_install') pushNapInstall(t);
+    if (isNapJob(t)) pushNapInstall(t);
     else pushInstall(t);
   });
   /* An area that did not register is retried on the same heartbeat — billing
@@ -1127,7 +1145,7 @@ setInterval(() => {
      nobody remembers to make. The map write runs first where the box is already
      placed, so the name sent to billing is the one the map holds now. */
   db.tickets
-    .filter(t => t.status === 'completed' && t.type === 'nap_install' &&
+    .filter(t => t.status === 'completed' && isNapJob(t) &&
                  t.areaSync && t.areaSync.state === 'failed')
     .slice(0, 5)
     .forEach(t => {
@@ -1217,8 +1235,10 @@ function jobDay(t) {
 }
 function unfinishedJobs(user, exceptId) {
   const today = stockDay.manilaDay();
+  /* a NAP survey is office paperwork for a box that already exists — it neither holds
+     back other work nor is held back by it */
   return db.tickets.filter(t => t.assignedTo === user.id && (t.status === 'open' || t.status === 'in_progress')
-    && t.id !== exceptId && !(t.hold && t.hold.at) && jobDay(t) < today);
+    && t.type !== 'nap_survey' && t.id !== exceptId && !(t.hold && t.hold.at) && jobDay(t) < today);
 }
 function unfinishedMessage(list) {
   const names = list.slice(0, 3).map(t => `${t.number}${t.pppoeUsername ? ' (' + t.pppoeUsername + ')' : t.customer ? ' (' + t.customer + ')' : ''}`).join(', ');
@@ -1686,7 +1706,7 @@ const server = http.createServer(async (req, res) => {
     if (approveNap && req.method === 'POST') {
       if (!isAdmin) return json(res, 403, { error: 'Admin only' });
       const t = db.tickets.find(x => x.id === approveNap[1]);
-      if (!t || t.type !== 'nap_install') return json(res, 404, { error: 'NAP installation ticket not found' });
+      if (!isNapJob(t)) return json(res, 404, { error: 'NAP installation ticket not found' });
       const ab = await readBody(req);
       const name = String(ab.name || '').trim();
       if (!name) return json(res, 400, { error: 'name required' });
@@ -1742,7 +1762,7 @@ const server = http.createServer(async (req, res) => {
        existed carries no ftthSync at all, so filtering on ftthSync alone left
        exactly the backlog that needs attention invisible. */
     if (p === '/api/ftth/pending' && req.method === 'GET') {
-      const mapped = ['installation', 'nap_install'];
+      const mapped = ['installation', 'nap_install', 'nap_survey'];
       const list = db.tickets
         .filter(t => t.status === 'completed' && mapped.includes(t.type))
         .filter(t => !t.ftthSync || ['pending', 'blocked', 'manual', 'off'].includes(t.ftthSync.state))
@@ -1754,7 +1774,7 @@ const server = http.createServer(async (req, res) => {
           ftthSync: t.ftthSync || { state: 'never', message: 'This job finished before it could be written to the map.' },
           /* What a NAP job would still need, so the office can see why a retry
              will not land before spending a click on it. */
-          missing: t.type === 'nap_install' ? napInstallMissing(t) : undefined,
+          missing: isNapJob(t) ? napInstallMissing(t) : undefined,
         }));
       return json(res, 200, { pending: list });
     }
@@ -1767,7 +1787,7 @@ const server = http.createServer(async (req, res) => {
          are different writes. Sending a NAP job through the subscriber push made
          it fail on a missing drop port and report "NAP entered by hand", which
          is both wrong and unfixable from the office. */
-      if (rt.type === 'nap_install') {
+      if (isNapJob(rt)) {
         /* Both halves of "this box now exists": on the map, and in billing's
            area list. Run together so the office presses one button. */
         await pushNapInstall(rt);
@@ -2217,13 +2237,13 @@ const server = http.createServer(async (req, res) => {
          they cannot assign work to a colleague, and they cannot delete anything. */
       const assignee = isAdmin ? db.users.find(u => u.id === b.assignedTo) : me;
       if (!isAdmin) {
-        const left = unfinishedJobs(me);
+        const left = b.type === 'nap_survey' ? [] : unfinishedJobs(me);
         if (left.length) return json(res, 409, { code: 'INSTALL_PENDING', tickets: left.map(x => x.number), error: unfinishedMessage(left) });
       }
       const t = {
         id: 'id' + Date.now() + Math.random().toString(36).slice(2, 6),
         number: String(b.number || '').trim() || `TKT-${new Date().getFullYear()}-${seq}`,
-        type: ['repair', 'nap_install'].includes(b.type) ? b.type : 'installation',
+        type: ['repair', 'nap_install', 'nap_survey'].includes(b.type) ? b.type : 'installation',
         priority: [1, 2, 3].includes(parseInt(b.priority)) ? parseInt(b.priority) : 3,
         subject: String(b.subject).trim(),
         customer: String(b.customer).trim(),
@@ -2281,7 +2301,7 @@ const server = http.createServer(async (req, res) => {
         /* A technician who worked a day and did not count their stock at the end of
            it counts before starting a new job. Only the start is held back: work on
            a job already under way carries on. */
-        if (!isAdmin && t.status === 'open' && b.status === 'in_progress') {
+        if (!isAdmin && t.status === 'open' && b.status === 'in_progress' && t.type !== 'nap_survey') {
           const missed = stockDay.pendingCountDay(me);
           if (missed) return json(res, 409, { code: 'COUNT_REQUIRED', day: missed,
             error: `Do your stock count for ${missed} first (Stock count on your job list), then start this job.` });
@@ -2290,7 +2310,7 @@ const server = http.createServer(async (req, res) => {
             if (left.length) return json(res, 409, { code: 'INSTALL_PENDING', tickets: left.map(x => x.number), error: unfinishedMessage(left) });
           }
         }
-        if (!isAdmin) me.lastWorkDay = stockDay.manilaDay();
+        if (!isAdmin && t.type !== 'nap_survey') me.lastWorkDay = stockDay.manilaDay();   // a survey uses no stock
         if (isAdmin) {
           ['subject', 'customer', 'phone', 'address', 'message', 'number'].forEach(k => { if (b[k] !== undefined) t[k] = String(b[k]).trim(); });
           if (b.assignedTo !== undefined) {
@@ -2336,7 +2356,9 @@ const server = http.createServer(async (req, res) => {
            'cable_discrepancy', 'cable_review', 'connector_shortfall', 'material_shortfall', 'nap_materials_used'].forEach(k => {
             if (prev[k] !== undefined && incoming[k] === undefined) incoming[k] = prev[k];
           });
-          if (t.type === 'nap_install') napDerive(incoming);
+          if (isNapJob(t)) napDerive(incoming);
+          /* a surveyed box is named in the field, so its billing area waits for the office */
+          if (t.type === 'nap_survey') incoming.nap_unplanned = true;
           /* the colour split is the record; the plain total follows it */
           if (incoming.connectors_blue !== undefined || incoming.connectors_green !== undefined) {
             incoming.connectors_blue = Math.max(0, parseInt(incoming.connectors_blue) || 0);
@@ -2580,7 +2602,7 @@ const server = http.createServer(async (req, res) => {
         }
         /* A finished NAP installation becomes a box on the map, with the cable
            run back to whatever feeds it. */
-        if (t.status === 'completed' && t.type === 'nap_install' &&
+        if (t.status === 'completed' && isNapJob(t) &&
             (!t.ftthSync || !['done', 'manual'].includes(t.ftthSync.state))) {
           /* …then the box's name registered as a billing Area, so the first
              subscriber on it can be filed under it without anyone adding it by
@@ -2592,7 +2614,7 @@ const server = http.createServer(async (req, res) => {
             .catch(e => console.error('[ftth] NAP push failed:', e.message))
             .then(() => registerBillingArea(t))
             .catch(e => console.error('[area] register failed:', e.message));
-        } else if (t.status === 'completed' && t.type === 'nap_install' &&
+        } else if (t.status === 'completed' && isNapJob(t) &&
                    (!t.areaSync || t.areaSync.state !== 'done')) {
           registerBillingArea(t).catch(e => console.error('[area] register failed:', e.message));
         }

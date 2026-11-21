@@ -154,6 +154,9 @@
   .ttab.on-installation{background:#1d4ed8;color:#fff;border-color:#1d4ed8}
   .ttab.on-repair{background:#d97706;color:#fff;border-color:#d97706}
   .ttab.on-nap_install{background:#7e22ce;color:#fff;border-color:#7e22ce}
+  .ttab-nap_survey{background:#ecfeff;border-color:#a5f3fc;color:#0e7490}
+  .ttab.on-nap_survey{background:#0e7490;color:#fff;border-color:#0e7490}
+  .acc-nap_survey{border-left:5px solid #0e7490}
   .b-nap{background:#f3e8ff;color:#7e22ce}
   .b-rej{background:#fee2e2;color:#991b1b}
   .b-cancel{background:#e2e8f0;color:#475569}
@@ -510,6 +513,17 @@
 </div>
 
 <!-- ============ TECH: JOBS ============ -->
+<!-- ============ NAP SURVEY (existing boxes not yet on the map / in billing) ============ -->
+<div class="wrap hidden" id="viewNapSurvey">
+  <div class="page-head"><div><div class="page-title">NAP Survey</div><div class="page-sub">Existing NAP boxes that are not on the map or in billing yet</div></div></div>
+  <div class="card">
+    <div class="tmeta" style="font-size:13px">For a box that was put up before the ticketing system. At the post: the box name from its tag, the cassette, a photo of the box, the reading with a photo of the meter, and a photo of the post (its GPS places the box on the map). No cable or materials.</div>
+    <div class="tmeta" style="font-size:12.5px;margin-top:6px">When you complete it, the box is placed on the FTTH map (or matched if the map already has it). The office approves the name, then it is added to billing as an Area.</div>
+    <div class="wizard-btns"><button class="btn btn-primary" id="napSurveyBtn" onclick="newNapSurvey()">➕ Register an existing NAP box</button></div>
+  </div>
+  <div id="napSurveyList"></div>
+</div>
+
 <div class="wrap hidden" id="viewTechList">
   <div class="page-head">
     <div>
@@ -764,6 +778,7 @@
       <option value="installation">Installation (new FTTH subscriber)</option>
       <option value="repair">Repair / Maintenance</option>
       <option value="nap_install">NAP Installation (new NAP box on a post)</option>
+      <option value="nap_survey">NAP Survey (existing box not yet on the map / billing)</option>
     </select>
 
     <div id="nIssueWrap" class="hidden">
@@ -1194,6 +1209,27 @@ const WORKFLOWS = {
         {k:'final_notes', type:'textarea', label:'Completion Notes (optional)'}
       ]}
   ],
+  /* An existing NAP box that was put up before the ticketing system and is not yet
+     on the map or in billing's areas. Only what identifies and locates the box:
+     no cable, no materials, nothing taken from stock. */
+  nap_survey: [
+    { key:'napbox', title:'1. The NAP Box',
+      desc:'Type the box name exactly as written on its tag, pick the cassette inside, then take a photo of the box with its tagging and of the power meter reading at the box. Time and GPS are stamped on the photos automatically.',
+      fields:[
+        {k:'nap_id', type:'text', label:'NAP Box Name (as on its tag)', req:true, placeholder:'e.g. TUNGKIL-LCP1-SUB1-NAP2'},
+        {k:'nap_cassette', type:'select', label:'Cassette Inside the Box', req:true, options:['4-port cassette (1:4)','8-port cassette (1:8)','16-port cassette (1:16)','FBT cassette (15/85 + 1:8)']},
+        {k:'nap_box_photo', type:'photo', label:'Photo of the NAP Box with its Tagging', req:true, autogps:true},
+        {k:'nap_reading', type:'number', label:'Reading at the NAP Box (dBm)', req:true, placeholder:'e.g. -18.5', step:'0.1'},
+        {k:'nap_reading_photo', type:'photo', label:'Photo of the Power Meter Reading', req:true, autogps:true}
+      ]},
+    { key:'post', title:'2. Post &amp; Location',
+      desc:'Stand at the post and take a photo showing the NAP box on it. The GPS of this photo becomes the box\'s position on the map.',
+      fields:[
+        {k:'post_photo', type:'photo', label:'Photo of the Post with the NAP Box', req:true, autogps:true, setsGps:'location'},
+        {k:'location', type:'gps', label:'GPS of the Post (from the photo)', req:true, fromPhoto:'post_photo'},
+        {k:'final_notes', type:'textarea', label:'Notes (landmark, condition of the box, optional)'}
+      ]}
+  ],
   repair: [
     { key:'arrival', title:'1. Arrival at Site',
       desc:'Take a photo upon arrival at the subscriber\'s home as proof of visit. Time and GPS are captured automatically.',
@@ -1620,7 +1656,7 @@ async function loadUsers(){
 }
 
 /* =================== NAVIGATION =================== */
-const ALL_VIEWS = ['viewLogin','viewTechList','viewStats','viewTicket','viewDash','viewTickets','viewNew','viewReport','viewTechs','viewTechReq','viewMaterials','viewBilling'];
+const ALL_VIEWS = ['viewNapSurvey','viewLogin','viewTechList','viewStats','viewTicket','viewDash','viewTickets','viewNew','viewReport','viewTechs','viewTechReq','viewMaterials','viewBilling'];
 function show(view){
   ALL_VIEWS.forEach(v=>{ const el=document.getElementById(v); if(el) el.classList.add('hidden'); });
   const el = document.getElementById(view);
@@ -1645,6 +1681,7 @@ const NAV = {
   tech: [
     {tab:'jobs',      ico:'🧰', label:'My Jobs'},
     {tab:'new',       ico:'➕', label:'New'},
+    {tab:'naps',      ico:'📍', label:'NAP Survey'},
     {tab:'materials', ico:'📦', label:'Materials'},
     {tab:'stats',     ico:'📊', label:'Dashboard'}
   ]
@@ -1686,8 +1723,43 @@ function go(tab){
   }
   else if(tab==='team'){ show('viewTechs'); renderTeam(); }
   else if(tab==='billing'){ show('viewBilling'); renderBillingCatchup(); }
+  else if(tab==='naps'){ show('viewNapSurvey'); renderNapSurvey(); ticketsEtag = null; refreshTickets(true).then(()=>{ if(currentView==='viewNapSurvey') renderNapSurvey(); }).catch(()=>{}); }
   renderNav();
 }
+/* ---- NAP survey tab ---- */
+function napSurveyState(t){
+  if(t.status!=='completed') return `<span class="badge b-progress">${t.status==='open'?'not started':'in progress'}</span>`;
+  const f = t.ftthSync||{}, a = t.areaSync||{};
+  const map = f.state==='done' ? (f.alreadyThere?'🗺 already on map':'🗺 on map') : f.state==='pending' ? '🗺 placing…' : f.state ? '🗺 '+f.state : '🗺 not placed';
+  const bill = a.state==='done' ? '🧾 in billing' : a.state==='review' ? '🧾 name waiting for office' : a.state==='failed' ? '🧾 retrying' : '🧾 not yet';
+  return `<span class="badge b-done">done</span> <span class="tmeta">${map} · ${bill}</span>`;
+}
+function renderNapSurvey(){
+  const el = document.getElementById('napSurveyList'); if(!el) return;
+  const mine = tickets.filter(t=>t.type==='nap_survey' && (!USER || USER.role==='admin' || t.assignedTo===USER.id))
+    .sort((a,b)=>((a.status==='completed')-(b.status==='completed')) || ((b.completed||b.created||0)-(a.completed||a.created||0)));
+  if(!mine.length){ el.innerHTML = '<div class="card"><div class="tmeta">No boxes registered yet.</div></div>'; return; }
+  const open = mine.filter(t=>t.status!=='completed').length;
+  el.innerHTML = `<div class="sec-title" style="margin:10px 2px 6px">${mine.length} box${mine.length===1?'':'es'}${open?` · ${open} not finished`:''}</div>`
+    + mine.map(t=>{ const d=t.data||{};
+      return `<div class="card compact" style="cursor:pointer" onclick="openTicket('${esc(t.id)}')">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+          <div><b>${esc(d.nap_id||'(not named yet)')}</b><div class="tmeta">${esc(t.number)} · ${esc(new Date(t.completed||t.created).toLocaleDateString())}${d.nap_reading!==undefined&&d.nap_reading!==''?' · '+esc(d.nap_reading)+' dBm':''}</div></div>
+          <span class="pill" style="flex:none">Open ›</span></div>
+        <div style="margin-top:4px">${napSurveyState(t)}</div></div>`; }).join('');
+}
+async function newNapSurvey(){
+  const btn = document.getElementById('napSurveyBtn'); if(btn){ btn.disabled = true; btn.textContent = 'Creating…'; }
+  try{
+    const r = await api('/api/tickets','POST',{ type:'nap_survey', priority:3, subject:'Existing NAP box — survey', customer:'NAP survey',
+      assignedTo: USER && USER.role==='admin' ? USER.id : undefined });
+    ticketsEtag = null;
+    await refreshTickets(true);
+    if(r && r.ticket) openTicket(r.ticket.id);
+  }catch(e){ alert(e.message); }
+  if(btn){ btn.disabled = false; btn.textContent = '➕ Register an existing NAP box'; }
+}
+
 /* older call sites still say adminGo(...) */
 function adminGo(tab){ go(tab==='requests'?'materials':tab==='techs'?'team':tab==='usage'?'materials':tab); }
 function goBack(){
@@ -1704,9 +1776,11 @@ function statusBadge(s){
 function typeBadge(t){
   if(t==='repair') return '<span class="badge b-repair">Repair</span>';
   if(t==='nap_install') return '<span class="badge b-nap">NAP Install</span>';
+  if(t==='nap_survey') return '<span class="badge b-nap" style="background:#ecfeff;color:#0e7490">NAP Survey</span>';
   return '<span class="badge b-install">Installation</span>';
 }
-function typeName(t){ return t==='repair'?'Repair':(t==='nap_install'?'NAP Installation':'Installation'); }
+function typeName(t){ return t==='repair'?'Repair':(t==='nap_install'?'NAP Installation':(t==='nap_survey'?'NAP Survey (existing box)':'Installation')); }
+const isNapJob = t => !!t && (t.type==='nap_install' || t.type==='nap_survey');
 function prioBadge(t){
   const p = t.priority||3;
   return `<span class="badge ${p===1?'b-p1':p===2?'b-p2':'b-p3'}">${p===1?'P1 Urgent':p===2?'P2 High':'P3 Normal'}</span>`;
@@ -1761,7 +1835,7 @@ function sortTickets(list){
 let techType='', dashType='';
 let dashPeriod = null, dashTrendDay = null, dashPriority = '', dashAge = '';
 function renderTypeTabs(containerId, current, setter){
-  const types=[['','All'],['installation','Installation'],['repair','Repair'],['nap_install','NAP Install']];
+  const types=[['','All'],['installation','Installation'],['repair','Repair'],['nap_install','NAP Install'],['nap_survey','NAP Survey']];
   document.getElementById(containerId).innerHTML = types.map(([v,l])=>
     `<button class="ttab ttab-${v||'all'} ${current===v?('on-'+(v||'all')):''}" onclick="${setter}('${v}')">${l}</button>`).join('');
 }
@@ -2246,7 +2320,7 @@ const jobDayOf = t => manilaDayOf(t.assignedAt||t.created);   // the day it was 
 function unfinishedInstalls(exceptId){
   if(!USER) return [];
   const today = manilaDayOf();
-  return tickets.filter(t => (t.status==='open' || t.status==='in_progress') && t.assignedTo && t.id!==exceptId
+  return tickets.filter(t => (t.status==='open' || t.status==='in_progress') && t.assignedTo && t.id!==exceptId && t.type!=='nap_survey'
     && (USER.role!=='tech' || t.assignedTo===USER.id) && !(t.hold && t.hold.at)
     && jobDayOf(t) < today);
 }
@@ -2265,7 +2339,7 @@ function renderPendingInstallCard(){
 /* =================== TECH: WIZARD =================== */
 async function openTicket(id){
   const ot = byId(id);
-  if(ot && ot.status==='open' && USER && USER.role==='tech' && jobDayOf(ot) >= manilaDayOf()){
+  if(ot && ot.status==='open' && USER && USER.role==='tech' && ot.type!=='nap_survey' && jobDayOf(ot) >= manilaDayOf()){
     const left = unfinishedInstalls(ot.id);
     if(left.length){
       alert('Finish your unfinished job'+(left.length===1?'':'s')+' from a previous day first: '+left.map(t=>t.number+(t.pppoeUsername?' ('+t.pppoeUsername+')':t.customer?' ('+t.customer+')':'')).join(', ')+'.\n\nComplete '+(left.length===1?'it':'them')+' (or ask the office to put '+(left.length===1?'it':'them')+' on hold), then start this job.');
@@ -2273,7 +2347,7 @@ async function openTicket(id){
       return;
     }
   }
-  if(ot && ot.status==='open' && USER && USER.role==='tech' && COUNT_STATUS && COUNT_STATUS.pendingDay){
+  if(ot && ot.status==='open' && USER && USER.role==='tech' && ot.type!=='nap_survey' && COUNT_STATUS && COUNT_STATUS.pendingDay){
     alert(`Do your stock count for ${prettyCountDay(COUNT_STATUS.pendingDay)} first. It is at the top of your job list — then you can start this job.`);
     countFormOpen = true; renderCountCard();
     const cc = document.getElementById('countCard'); if(cc) cc.scrollIntoView({behavior:'smooth'});
@@ -2431,7 +2505,7 @@ function napDeriveClient(t){
 function collectStep(){
   const t = byId(currentId);
   if(!t || t.status==='completed') return;
-  if(t.type==='nap_install') setTimeout(()=>napDeriveClient(t), 0);
+  if(isNapJob(t)) setTimeout(()=>napDeriveClient(t), 0);
   const s = getWorkflow(t)[t.step];
   if(!s) return;
   s.fields.forEach(f=>{
@@ -2497,14 +2571,14 @@ function finishTicket(){
     if(pl){ const m = metres(pl, t.data.location);
       if(m>150 && !confirm('The post GPS is '+fmtDist(m)+' away from where '+t.data.nap_id+' was planned.\n\nIf this really is '+t.data.nap_id+', the map will move it to your GPS. Complete the job?')){ renderTicket(); return; } }
   }
-  if(t.type==='nap_install') napDeriveClient(t);
+  if(isNapJob(t)) napDeriveClient(t);
   if(t.type==='nap_install' && String(t.data.nap_layout||'').startsWith('Sub-main') && CASSETTE_OPTS[t.data.nap_cassette]==='fbt'){
     alert('An FBT tap cassette is not a sub-main. Set "Cassettes in this box" to One cassette.'); renderTicket(); return;
   }
   if(t.type==='nap_install' && String(t.data.nap_layout||'').startsWith('Sub-main') && parseInt(t.data.nap_ports,10) < 2){
     alert('A Sub-main box needs its first cassette size (usually 4) under Box Size.'); renderTicket(); return;
   }
-  if(t.type==='nap_install' && t.data.nap_unplanned && t.data.nap_id){
+  if(((t.type==='nap_install' && t.data.nap_unplanned) || t.type==='nap_survey') && t.data.nap_id){
     t.data.nap_id = String(t.data.nap_id).trim().toUpperCase().replace(/\s+/g,'');
     if(!napNameOk(t.data.nap_id) && !confirm('"'+t.data.nap_id+'" does not follow the naming rule (e.g. TUNGKIL-LCP1-SUB1-NAP2).\n\nThe office will correct it before it reaches billing. Complete anyway?')){ renderTicket(); return; }
   }
@@ -5216,7 +5290,7 @@ function syncBadge(t){
   /* A NAP job writes a box onto the map rather than a subscriber onto a port,
      so it reads differently. Without this a finished NAP job said nothing at all
      about whether its box ever reached the map. */
-  if(t && t.type==='nap_install'){
+  if(isNapJob(t)){
     if(!s) return '';
     if(s.state==='done')   return `<div class="sync-ok">🗺 ${esc(s.message||'Placed on the map')}</div>`;
     if(s.state==='manual') return `<div class="sync-wait">🗺 ${esc(s.message||'Not placed on the map')}</div>`;
@@ -5322,7 +5396,7 @@ async function openReport(id){
       <button class="btn btn-ghost btn-sm" onclick="exportJSON()">⬇ JSON</button>
     </div>
     ${t.status==='completed' && (t.type==='installation' || (t.type==='repair' && t.data && t.data.swap_pppoe)) ? billingSyncPanel(t) : ''}
-    ${t.status==='completed' && t.type==='nap_install' ? napMapPanel(t) : ''}
+    ${t.status==='completed' && isNapJob(t) ? napMapPanel(t) : ''}
     ${t.status!=='completed' && t.assignedTo ? `<div class="card" style="margin-top:10px">
       <div class="sec-head"><div class="sec-title">⏸ Hold</div>${t.hold?'<span class="badge b-p2">On hold</span>':''}</div>
       <div class="tmeta">${t.hold?`Put on hold by ${esc(t.hold.by||'the office')} on ${esc(new Date(t.hold.at).toLocaleString())}${t.hold.reason?' — '+esc(t.hold.reason):''}. It does not stop ${esc(t.assignedName||'the technician')} starting new jobs.`
