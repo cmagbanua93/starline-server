@@ -578,6 +578,7 @@ function sendBody(req, res, code, body, type, extra) {
 }
 
 function json(res, code, obj) {
+  if (!Number.isInteger(code) || code < 100 || code > 599) code = 500;   // never a crash on a bad status
   return sendBody(res.req, res, code, Buffer.from(JSON.stringify(obj)), 'application/json');
 }
 
@@ -624,6 +625,7 @@ function publicUser(u) { return { id: u.id, username: u.username, name: u.name, 
 function lookupError(message, code) {
   const e = new Error(message);
   e.code = code;
+  e.isLookup = true;
   return e;
 }
 
@@ -648,7 +650,9 @@ async function ftthCall(method, pathname, body) {
     if (!r.ok) throw lookupError(out.error || ('FTTH map returned HTTP ' + r.status), r.status);
     return out;
   } catch (err) {
-    if (err.code) throw err;
+    /* only our own errors carry an HTTP status; an aborted fetch has code 20, which
+       came back to the phone as "Invalid status code: 20" */
+    if (err.isLookup) throw err;
     throw lookupError(
       err.name === 'AbortError' ? 'The FTTH map did not answer in time.' : 'Cannot reach the FTTH map right now.',
       502
@@ -1173,7 +1177,9 @@ async function monitorLookup(pathAndQuery, timeoutMs) {
     if (!r.ok) throw lookupError(body.error || ('Lookup failed (HTTP ' + r.status + ')'), r.status === 404 ? 404 : 502);
     return body;
   } catch (err) {
-    if (err.code) throw err;
+    /* only our own errors carry an HTTP status; an aborted fetch has code 20, which
+       came back to the phone as "Invalid status code: 20" */
+    if (err.isLookup) throw err;
     throw lookupError(
       err.name === 'AbortError'
         ? 'The monitoring service did not answer in time.'
