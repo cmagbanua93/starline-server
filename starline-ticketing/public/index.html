@@ -5300,11 +5300,12 @@ function syncBadge(t){
     return '';
   }
   if(!s || t.type!=='installation') return '';
-  if(s.state==='done')   return `<div class="sync-ok">🗺 Written to the FTTH map${s.alreadyThere?' (was already there)':''}</div>`;
+  if(s.state==='done')   return `<div class="sync-ok">🗺 Written to the FTTH map${s.alreadyThere?' (was already there)':''}${s.freed?' — '+esc(s.freed)+' on the map':''}</div>`;
   if(s.state==='manual') return `<div class="sync-wait">🗺 The NAP was typed by hand, so the map was not updated. Pin it on the map yourself, or reopen the job and pick the port.</div>`;
   if(s.state==='off')    return `<div class="sync-wait">🗺 The FTTH map is not connected, so this job was not written to it.</div>`;
   if(s.state==='pending')return `<div class="sync-wait">🗺 Waiting to be written to the map — attempt ${s.attempts||1}${s.error?': '+esc(s.error):''}. It keeps retrying on its own.</div>`;
-  if(s.state==='blocked')return `<div class="ctx-warn">🗺 The map would not accept this job: ${esc(s.error||'')}. Sort it out on the map, then retry from the office.</div>`;
+  if(s.state==='blocked')return `<div class="ctx-warn">🗺 The map would not accept this job: ${esc(s.error||'')}. Sort it out on the map, then retry from the office.
+    ${USER && USER.role==='admin' ? `<div class="wizard-btns"><button class="btn btn-ghost btn-sm" onclick="retryInstallMap('${esc(t.id)}')">↻ Write to the map again</button></div>` : ''}</div>`;
   return '';
 }
 
@@ -5517,6 +5518,15 @@ async function approveNapName(id, current){
     await api('/api/tickets/'+id+'/approve-nap-name','POST',{ name: clean });
     alert('Approved: '+clean);
     await refreshTickets(); openReport(id);
+  }catch(e){ alert(e.message); }
+}
+async function retryInstallMap(id){
+  try{
+    const d = await api('/api/ftth/retry/'+id, 'POST', {});
+    const f = d.ftthSync || {};
+    alert(f.state==='done' ? 'Written to the FTTH map.'+(f.freed?'\n\n'+f.freed+' on the map.':'') : 'The map still would not take it:\n\n'+(f.error||f.message||f.state));
+    await refreshTickets(true);
+    if(currentView==='viewReport') openReport(id); else if(currentView==='viewTicket') renderTicket();
   }catch(e){ alert(e.message); }
 }
 async function retryNapMap(id, number){

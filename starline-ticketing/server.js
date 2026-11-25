@@ -670,6 +670,10 @@ function installPayload(t) {
   return {
     ticketId: t.id,
     portId: d.nap_port_id,
+    /* The modem came from a former subscriber (the technician confirmed it), or billing
+       has already given this PPPoE account to this subscriber: the old pin on the map
+       gives it up instead of refusing the job. */
+    releasePppoe: !!(d.reused_from || (t.billingSync && t.billingSync.state === 'done')),
     subscriber: {
       name: subscriberName(d) || t.customer || '',
       address: d.cust_address || t.address || '',
@@ -912,6 +916,7 @@ async function pushInstall(t) {
       state: 'done',
       subscriberId: r.subscriber ? r.subscriber.id : null,
       alreadyThere: !!r.already,
+      freed: r.freed ? `${r.freed.name} (now ${r.freed.status}) gave up ${t.pppoeUsername}` : undefined,
       attempts: t.ftthSync.attempts,
       at: Date.now()
     };
