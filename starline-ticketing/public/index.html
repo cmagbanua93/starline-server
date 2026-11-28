@@ -479,7 +479,9 @@
   <div class="sp-title">FIELD OPS</div>
   <div class="spinner"></div>
   <div class="sp-sub">Loading, please wait…</div>
+  <div class="sp-sub" id="splashSlow" style="display:none;text-align:center;max-width:280px">Still loading — the connection or the server is slow.<br><button onclick="location.replace('/?v='+Date.now())" style="margin-top:10px;padding:8px 18px;border:0;border-radius:8px;background:#d9b345;color:#12304a;font-weight:700">Try again</button></div>
 </div>
+<script>setTimeout(function(){ var s=document.getElementById('splash'), w=document.getElementById('splashSlow'); if(s && w && !s.classList.contains('hidden')) w.style.display='block'; }, 15000);</script>
 
 <header id="hdr" class="hidden">
   <button class="hbtn" id="backBtn" onclick="goBack()" style="display:none">‹ Back</button>
@@ -779,6 +781,7 @@
       <option value="repair">Repair / Maintenance</option>
       <option value="nap_install">NAP Installation (new NAP box on a post)</option>
       <option value="nap_survey">NAP Survey (existing box not yet on the map / billing)</option>
+      <option value="modem_pullout">Modem Pull-out (non-payment, cancelled or defective)</option>
     </select>
 
     <div id="nIssueWrap" class="hidden">
@@ -945,7 +948,7 @@ function noteBuild(r){
   if(!b || b===APP_BUILD || APP_BUILD.startsWith('__') || UPDATE_READY) return;
   UPDATE_READY = true;
   /* nothing waiting to upload and not in the middle of a job: just take the update */
-  if(!tickets.some(t=>t._dirty) && currentView!=='viewTicket'){ location.reload(); return; }
+  if(!tickets.some(t=>t._dirty) && currentView!=='viewTicket' && freshReload(b)) return;
   if(document.getElementById('updBar')) return;
   const bar = document.createElement('div');
   bar.id='updBar';
@@ -955,12 +958,24 @@ function noteBuild(r){
 }
 async function takeUpdate(){
   try{ collectStep(); const t=byId(currentId); if(t) await persist(t); }catch(e){}
-  location.reload();
+  if(!freshReload(null, true)) location.reload();
+}
+/* Load the new version, bypassing any cached copy of the page. Never more than once
+   every 2 minutes: if the phone keeps getting an old copy, a reload loop would look
+   like the app "just keeps loading" — then the gold update bar is shown instead. */
+function freshReload(build, force){
+  let last = 0;
+  try{ last = parseInt(sessionStorage.getItem('sl_reload_at')||'0',10)||0; }catch(e){}
+  if(!force && Date.now()-last < 120000) return false;
+  try{ sessionStorage.setItem('sl_reload_at', String(Date.now())); }catch(e){}
+  location.replace('/?v='+encodeURIComponent(build||Date.now()));
+  return true;
 }
 async function api(path, method='GET', body, opts){
   opts = opts || {};
   const r = await fetch(path, {
     method,
+    signal: (window.AbortSignal && AbortSignal.timeout) ? AbortSignal.timeout(opts.timeout || 180000) : undefined,
     cache: opts.etag ? 'no-store' : undefined,
     headers: Object.assign(
       {'Content-Type':'application/json', 'X-App-Build': APP_BUILD},
@@ -1052,7 +1067,7 @@ async function persist(t){
       t.status = 'in_progress'; t.completed = null; delete t._dirty;
       cacheTickets();
       alert(e.message);
-      if(e.code==='APP_OUTDATED'){ location.reload(); return; }
+      if(e.code==='APP_OUTDATED'){ if(!freshReload(null, true)) location.reload(); return; }
       if(currentId===t.id && currentView==='viewTicket') renderTicket();
       return;
     }
@@ -1212,6 +1227,31 @@ const WORKFLOWS = {
   /* An existing NAP box that was put up before the ticketing system and is not yet
      on the map or in billing's areas. Only what identifies and locates the box:
      no cable, no materials, nothing taken from stock. */
+  /* Taking a modem back: non-payment, cancelled, or defective. */
+  modem_pullout: [
+    { key:'arrival', title:'1. Arrival at the House',
+      desc:'Take a photo on arrival at the subscriber\'s house. Time and GPS are captured automatically.',
+      fields:[
+        {k:'arrival_photo', type:'photo', label:'Arrival Photo (the house)', req:true, autogps:true}
+      ]},
+    { key:'modem', title:'2. The Modem',
+      desc:'Search and pick the PPPoE account programmed in the modem you are taking (e.g. sl156), say why it is being pulled out and what state it is in, then photograph it.',
+      fields:[
+        {k:'pppoe_link', type:'pppoe_link', label:'PPPoE Account in the Modem'},
+        {k:'pullout_reason', type:'select', label:'Reason for Pulling Out', req:true, options:['Non-payment','Subscriber cancelled / moved out','Defective modem','Other']},
+        {k:'modem_condition', type:'select', label:'Condition of the Modem', req:true, options:['Working — can be given to a new subscriber','Defective — for repair or disposal']},
+        {k:'modem_photo', type:'photo', label:'Photo of the Pulled-out Modem', req:true},
+        {k:'modem_serial', type:'text', label:'Modem Serial Number (SN)', req:true, placeholder:'e.g. HWTC12345678'},
+        /* usually left in place: the port stays with this house for a reconnection or the next subscriber there */
+        {k:'drop_removed', type:'select', label:'Drop Cable (usually left in place)', options:['No — drop cable left in place','Yes — drop cable removed (frees the NAP port)'], def:'No — drop cable left in place'}
+      ]},
+    { key:'complete', title:'3. Sign-off',
+      desc:'If someone is home, have them sign that the modem was taken. Add any notes (what the customer said, accessories taken: adapter, patch cord).',
+      fields:[
+        {k:'final_notes', type:'textarea', label:'Notes (optional)'},
+        {k:'signature', type:'signature', label:'Signature of the Person at Home (optional — leave blank if nobody was home)'}
+      ]}
+  ],
   nap_survey: [
     { key:'napbox', title:'1. The NAP Box',
       desc:'Type the box name exactly as written on its tag, pick the cassette inside, then take a photo of the box with its tagging and of the power meter reading at the box. Time and GPS are stamped on the photos automatically.',
@@ -1777,9 +1817,10 @@ function typeBadge(t){
   if(t==='repair') return '<span class="badge b-repair">Repair</span>';
   if(t==='nap_install') return '<span class="badge b-nap">NAP Install</span>';
   if(t==='nap_survey') return '<span class="badge b-nap" style="background:#ecfeff;color:#0e7490">NAP Survey</span>';
+  if(t==='modem_pullout') return '<span class="badge" style="background:#fef2f2;color:#b91c1c">Modem Pull-out</span>';
   return '<span class="badge b-install">Installation</span>';
 }
-function typeName(t){ return t==='repair'?'Repair':(t==='nap_install'?'NAP Installation':(t==='nap_survey'?'NAP Survey (existing box)':'Installation')); }
+function typeName(t){ return t==='repair'?'Repair':(t==='nap_install'?'NAP Installation':(t==='nap_survey'?'NAP Survey (existing box)':(t==='modem_pullout'?'Modem Pull-out':'Installation'))); }
 const isNapJob = t => !!t && (t.type==='nap_install' || t.type==='nap_survey');
 function prioBadge(t){
   const p = t.priority||3;
@@ -1835,7 +1876,7 @@ function sortTickets(list){
 let techType='', dashType='';
 let dashPeriod = null, dashTrendDay = null, dashPriority = '', dashAge = '';
 function renderTypeTabs(containerId, current, setter){
-  const types=[['','All'],['installation','Installation'],['repair','Repair'],['nap_install','NAP Install'],['nap_survey','NAP Survey']];
+  const types=[['','All'],['installation','Installation'],['repair','Repair'],['nap_install','NAP Install'],['nap_survey','NAP Survey'],['modem_pullout','Pull-out']];
   document.getElementById(containerId).innerHTML = types.map(([v,l])=>
     `<button class="ttab ttab-${v||'all'} ${current===v?('on-'+(v||'all')):''}" onclick="${setter}('${v}')">${l}</button>`).join('');
 }
@@ -2586,6 +2627,9 @@ function finishTicket(){
     alert('You chose "'+t.data.modem_action+'".\n\nIn Step 3, search and pick the PPPoE account programmed in the replacement modem (e.g. sl170), so billing moves this subscriber to it.\n\nIf you programmed the SAME account into the new modem, choose "'+SAME_ACTION+'" instead.');
     renderTicket(); return;
   }
+  if(t.type==='modem_pullout' && !t.pppoeUsername){
+    alert('In Step 2, search and pick the PPPoE account programmed in the modem you are taking (e.g. sl156).'); renderTicket(); return;
+  }
   if(t.type==='installation' && !t.pppoeUsername){
     if(!confirm('This job is not linked to a PPPoE account.\n\nWithout it the subscriber cannot be matched to billing, and the office will have to find and link it by hand.\n\nComplete anyway?')) return;
   }
@@ -2816,6 +2860,7 @@ function renderField(t,f){
       ${reelPickerNote(sel, activeIds, est)}`;
   }
   if(f.type==='select'){
+    if(!v && f.def) v = f.def;
     if(!v && t.type==='nap_install'){
       /* The name already says what kind of box it is: AREA-LCP1-SUB1 is a 4-port with an 8-port on port 1. */
       const nm = String(t.data.nap_id||'').toUpperCase(), sub = /-SUB\d+$/.test(nm);
@@ -5168,7 +5213,7 @@ function onNewTypeChange(){
      account. The real identity is captured at Step 9 and pushed from there. */
   const find = document.getElementById('nFindWrap');
   if(find){
-    const forRepair = type === 'repair';
+    const forRepair = type === 'repair' || type === 'modem_pullout';   // both are for an existing subscriber
     find.classList.toggle('hidden', !forRepair);
     if(!forRepair){
       /* Switching away from repair must not leave a stale link behind. */
@@ -5398,6 +5443,7 @@ async function openReport(id){
     </div>
     ${t.status==='completed' && (t.type==='installation' || (t.type==='repair' && t.data && t.data.swap_pppoe)) ? billingSyncPanel(t) : ''}
     ${t.status==='completed' && isNapJob(t) ? napMapPanel(t) : ''}
+    ${t.status==='completed' && t.type==='modem_pullout' ? pulloutPanel(t) : ''}
     ${t.status!=='completed' && t.assignedTo ? `<div class="card" style="margin-top:10px">
       <div class="sec-head"><div class="sec-title">⏸ Hold</div>${t.hold?'<span class="badge b-p2">On hold</span>':''}</div>
       <div class="tmeta">${t.hold?`Put on hold by ${esc(t.hold.by||'the office')} on ${esc(new Date(t.hold.at).toLocaleString())}${t.hold.reason?' — '+esc(t.hold.reason):''}. It does not stop ${esc(t.assignedName||'the technician')} starting new jobs.`
@@ -5428,6 +5474,27 @@ async function reassignTicket(){
    Available on every completed installation, not only ones that failed: a detail
    corrected after completion, or a fix shipped since, both need re-sending, and
    until now there was no way to ask for it. */
+function pulloutPanel(t){
+  const b = t.pulloutSync, d = t.data || {};
+  const label = { done:'done', failed:'needs attention', blocked:'not sent', pending:'working…', off:'not connected' }[b && b.state] || 'not sent yet';
+  const tone  = { done:'b-done', failed:'b-p1', blocked:'b-p2', pending:'b-progress', off:'b-p2' }[b && b.state] || 'b-open';
+  const steps = (b && b.steps || []).map(x => `<div class="tmeta">• ${esc(x.step)}: ${esc(x.status)}${x.detail?' — '+esc(x.detail):''}</div>`).join('');
+  return `<div class="card" style="margin-top:10px">
+    <div class="sec-head"><div class="sec-title">Modem pull-out</div><span class="badge ${tone}">${label}</span></div>
+    <div class="tmeta">PPPoE <b style="color:var(--text)">${esc(t.pppoeUsername||'—')}</b> · ${esc(d.pullout_reason||'')} · ${esc(String(d.modem_condition||'').split(' —')[0])}${d.pullout_item?' · in '+esc(t.assignedName||'the technician')+'\'s stock':''}</div>
+    ${b && b.at?`<div class="tmeta">Last attempt ${esc(new Date(b.at).toLocaleString())}</div>`:''}
+    ${b && b.error?`<div class="tmeta" style="color:var(--danger)">${esc(b.error)}</div>`:''}
+    ${steps}
+    <div class="tmeta" style="margin-top:6px">Non-payment / cancelled: billing switched off (the balance stays), the PPPoE disabled on the MikroTik and kept as a spare, the map pin marked disconnected. Defective: billing and router are not touched. Sending again is safe.</div>
+    ${USER && USER.role==='admin' ? `<div class="wizard-btns"><button class="btn btn-ghost btn-sm" onclick="retryPullout('${esc(t.id)}')">Send again</button></div>` : ''}
+  </div>`;
+}
+async function retryPullout(id){
+  try{ const d = await api('/api/tickets/'+id+'/pullout-retry','POST',{}); const s = d.pulloutSync||{};
+    alert(s.state==='done' ? 'Done.' : 'Still needs attention:\n\n'+(s.error||'')+'\n'+(s.steps||[]).filter(x=>x.status==='failed').map(x=>'• '+x.detail).join('\n'));
+    await refreshTickets(true); openReport(id);
+  }catch(e){ alert(e.message); }
+}
 function billingSyncPanel(t){
   const b = t.billingSync;
   const when = b && b.at ? new Date(b.at).toLocaleString() : '';

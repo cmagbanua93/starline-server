@@ -337,6 +337,7 @@ function missingAtCompletion(t) {
   const flow = stepsOf(t);
   if (flow) {
     const d = t.data || {}, out = [];
+    if (t.type === 'modem_pullout' && !t.pppoeUsername) out.push('2. The Modem — PPPoE account in the modem');
     flow.forEach((st) => st.fields.forEach((f) => { if (f.req && !hasValueSrv(d, f)) out.push(plain(st.title) + ' — ' + plain(f.label)); }));
     return out;
   }
@@ -1036,6 +1037,33 @@ async function ensureMapBoxArea(t) {
   }
 }
 
+/* ---- modem pulled out ----
+ * Non-payment / cancelled: billing is switched off on the old account, the PPPoE
+ * account is disabled on the MikroTik and kept as a spare (same name), and the map
+ * pin is marked disconnected. Defective: nothing changes in billing or on the router.
+ * Done by the monitor (/api/billing-pullout); retried by hand from the report. */
+async function pushPullout(t) {
+  const d = t.data || {};
+  if (!t.pppoeUsername) { t.pulloutSync = { state: 'blocked', at: Date.now(), error: 'no PPPoE account linked to this job' }; return saveDB(); }
+  if (!MONITOR_URL || !MONITOR_TOKEN) { t.pulloutSync = { state: 'off', at: Date.now(), error: 'billing/monitor is not connected' }; return saveDB(); }
+  t.pulloutSync = { state: 'pending', at: Date.now() };
+  saveDB();
+  try {
+    const r = await fetch(MONITOR_URL + '/api/billing-pullout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': MONITOR_TOKEN },
+      body: JSON.stringify({ username: t.pppoeUsername, account: t.accountNo || '', reason: d.pullout_reason || '',
+        condition: d.modem_condition || '', dropRemoved: /^yes/i.test(String(d.drop_removed || '')), ticketId: t.number }),
+      signal: AbortSignal.timeout(120000),
+    });
+    const out = await r.json().catch(() => ({}));
+    t.pulloutSync = { state: out.ok ? 'done' : 'failed', at: Date.now(), steps: out.steps || [], error: out.ok ? '' : (out.error || 'monitor returned HTTP ' + r.status) };
+  } catch (e) {
+    t.pulloutSync = { state: 'failed', at: Date.now(), error: e.name === 'TimeoutError' ? 'the monitor did not answer in time' : e.message };
+  }
+  saveDB();
+}
+
 async function pushBilling(t) {
   if (!MONITOR_URL || !MONITOR_TOKEN) return;
   if (isModemSwap(t)) return pushModemSwap(t);
@@ -1513,6 +1541,14 @@ const server = http.createServer(async (req, res) => {
        live due date or text a subscriber twice. */
     /* Its own binding: `m` is declared further down this scope, so assigning to
        it here would touch it before initialisation. */
+    const pullRetry = p.match(/^\/api\/tickets\/([\w.]+)\/pullout-retry$/);
+    if (pullRetry && req.method === 'POST') {
+      if (!isAdmin) return json(res, 403, { error: 'Admin only' });
+      const t = db.tickets.find(x => x.id === pullRetry[1]);
+      if (!t || t.type !== 'modem_pullout' || t.status !== 'completed') return json(res, 400, { error: 'Only a completed modem pull-out can be sent again.' });
+      await pushPullout(t);
+      return json(res, 200, { pulloutSync: t.pulloutSync || null });
+    }
     const retryMatch = p.match(/^\/api\/tickets\/([\w.]+)\/billing-retry$/);
     if (retryMatch && req.method === 'POST') {
       if (!isAdmin) return json(res, 403, { error: 'Admin only' });
@@ -2254,7 +2290,7 @@ const server = http.createServer(async (req, res) => {
       const t = {
         id: 'id' + Date.now() + Math.random().toString(36).slice(2, 6),
         number: String(b.number || '').trim() || `TKT-${new Date().getFullYear()}-${seq}`,
-        type: ['repair', 'nap_install', 'nap_survey'].includes(b.type) ? b.type : 'installation',
+        type: ['repair', 'nap_install', 'nap_survey', 'modem_pullout'].includes(b.type) ? b.type : 'installation',
         priority: [1, 2, 3].includes(parseInt(b.priority)) ? parseInt(b.priority) : 3,
         subject: String(b.subject).trim(),
         customer: String(b.customer).trim(),
@@ -2547,6 +2583,14 @@ const server = http.createServer(async (req, res) => {
                 t.data.nap_materials_used = used;
                 if (missing.length) { t.data.material_shortfall = missing; t.needsStockReview = true; }
               }
+              /* the pulled-out modem comes back into the technician's hands */
+              if (t.type === 'modem_pullout' && t.pppoeUsername) {
+                const good = /^working/i.test(String((t.data || {}).modem_condition || ''));
+                const nm = `Pulled-out modem ${t.pppoeUsername} (${good ? 'working' : 'defective'})`;
+                addItemTo(tech, nm, 1);
+                logStock(tech, 'item', nm, 1, 0, 'pullout ' + t.number, me.name);
+                t.data.pullout_item = nm;
+              }
               t.invApplied = true;
             }
           }
@@ -2636,6 +2680,10 @@ const server = http.createServer(async (req, res) => {
         if (t.status === 'completed' && (t.type === 'installation' || isModemSwap(t)) &&
             (!t.billingSync || !['done', 'manual'].includes(t.billingSync.state))) {
           pushBilling(t).catch(e => console.error('[billing] push failed:', e.message));
+        }
+        if (t.status === 'completed' && t.type === 'modem_pullout' &&
+            (!t.pulloutSync || !['done'].includes(t.pulloutSync.state))) {
+          pushPullout(t).catch(e => console.error('[pullout] failed:', e.message));
         }
         return json(res, 200, { ticket: t });
       }
